@@ -43,7 +43,14 @@ const TIER_ORDER = ["gratuit", "essentiel", "pro", "entreprise"];
 function tierAtLeast(plan, minTier) {
   return TIER_ORDER.indexOf(plan || "gratuit") >= TIER_ORDER.indexOf(minTier);
 }
-
+// Vérifie à la fois le niveau du forfait ET que le paiement est bien actif.
+// Un forfait payant dont le paiement a échoué (impayé) ne donne plus accès
+// à ses fonctionnalités, même si le champ "plan" n'a pas encore été rétrogradé.
+function hasAccess(account, minTier) {
+  if (minTier === "gratuit") return true;
+  if (!tierAtLeast(account?.plan, minTier)) return false;
+  return account?.paymentStatus === "payé";
+}
 
 function statusColor(status) {
   if (status === "signé" || status === "payée") return colors.moss;
@@ -575,7 +582,7 @@ export default function DeviFactApp() {
   }
 
   function openNew(type) {
-    const plan = PLANS.find((p) => p.id === (account?.plan || "gratuit"));
+    const plan = plans.find((p) => p.id === (account?.plan || "gratuit")) || PLANS[0];
     if (documents.length >= plan.limit) {
       setLimitNotice(true);
       setView("pricing");
@@ -768,7 +775,7 @@ export default function DeviFactApp() {
         saving={saving}
         clients={clients}
         prestations={prestations}
-        accountPlan={account?.plan || "gratuit"}
+        account={account}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
         onBack={backToDashboard}
         onConvert={() => convertToInvoice(activeDoc.id)}
@@ -859,14 +866,18 @@ export default function DeviFactApp() {
       <TopNav {...navProps} />
 
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {(account?.plan || "gratuit") === "gratuit" && (
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: documents.length >= 3 ? `${colors.brick}12` : colors.surface, border: `1px solid ${documents.length >= 3 ? colors.brick + "40" : colors.line}` }}>
-            <span className="text-sm" style={{ color: documents.length >= 3 ? colors.brick : colors.inkSoft }}>
-              Forfait Gratuit — <strong className="df-mono">{documents.length}/3</strong> devis/factures utilisés
-            </span>
-            <button onClick={() => setView("pricing")} className="text-xs font-medium underline" style={{ color: colors.brassDark }}>Passer à un forfait payant</button>
-          </div>
-        )}
+        {(account?.plan || "gratuit") === "gratuit" && (() => {
+          const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
+          const atLimit = documents.length >= freeLimit;
+          return (
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: atLimit ? `${colors.brick}12` : colors.surface, border: `1px solid ${atLimit ? colors.brick + "40" : colors.line}` }}>
+              <span className="text-sm" style={{ color: atLimit ? colors.brick : colors.inkSoft }}>
+                Forfait Gratuit — <strong className="df-mono">{documents.length}/{freeLimit}</strong> devis/factures utilisés
+              </span>
+              <button onClick={() => setView("pricing")} className="text-xs font-medium underline" style={{ color: colors.brassDark }}>Passer à un forfait payant</button>
+            </div>
+          );
+        })()}
         {/* Stats */}
         <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
@@ -1327,9 +1338,9 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, account, onLogout }) 
           <LogOut size={15} />
         </button>
       </div>
-      <div className="flex w-full items-center gap-1 lg:hidden">
+      <div className="flex w-full items-center gap-1 overflow-x-auto lg:hidden" style={{ WebkitOverflowScrolling: "touch" }}>
         {tabs.map(({ id, label, icon: Icon }) => (
-          <button key={id} onClick={() => setView(id)} className="flex grow items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+          <button key={id} onClick={() => setView(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
             <Icon size={13} /> {label}
           </button>
         ))}
@@ -1664,7 +1675,7 @@ function PricingView({ account, plans, onChooseFree, limitNotice, documentCount 
 
       {limitNotice && (
         <div className="mx-auto mb-6 max-w-lg rounded-xl p-3 text-center text-sm" style={{ background: `${colors.brick}15`, color: colors.brick, border: `1px solid ${colors.brick}40` }}>
-          Le forfait Gratuit est limité à 3 devis/factures ({documentCount} déjà créés). Passe à un forfait payant pour continuer.
+          Le forfait Gratuit est limité à {plans.find((p) => p.id === "gratuit")?.limit ?? 3} devis/factures ({documentCount} déjà créés). Passe à un forfait payant pour continuer.
         </div>
       )}
       {approvedMsg && (
@@ -1728,6 +1739,36 @@ function PricingView({ account, plans, onChooseFree, limitNotice, documentCount 
         })}
       </div>
     </div>
+  );
+}
+
+function PaypalIdField({ label, value, onSave }) {
+  const [editing, setEditing] = useState(!value);
+  const [draft, setDraft] = useState(value || "");
+
+  if (!editing && value) {
+    return (
+      <div className="text-xs" style={{ color: colors.inkSoft }}>
+        <div className="mb-0.5">{label}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="flex items-center gap-1 rounded-md px-2 py-1" style={{ background: `${colors.moss}15`, color: colors.moss }}>
+            <Check size={11} /> Configuré
+          </span>
+          <button onClick={() => { setDraft(value); setEditing(true); }} className="underline" style={{ color: colors.slate }}>Modifier</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <label className="text-xs" style={{ color: colors.inkSoft }}>
+      {label}
+      <div className="mt-0.5 flex items-center gap-1">
+        <input type="text" placeholder="P-XXXXXXXX" className="df-input block w-32 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <button onClick={() => { onSave(draft); setEditing(false); }} title="Enregistrer" className="rounded-md px-1.5 py-1 text-xs font-medium text-white" style={{ background: colors.slate }}>
+          <Check size={12} />
+        </button>
+      </div>
+    </label>
   );
 }
 
@@ -1803,14 +1844,8 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                   Annuel €
                   <input type="number" className="df-input df-mono mt-0.5 block w-20 rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={plan.annual ?? ""} onChange={(e) => onUpdatePlanPrice(plan.id, "annual", e.target.value)} />
                 </label>
-                <label className="text-xs" style={{ color: colors.inkSoft }}>
-                  ID forfait PayPal (mensuel)
-                  <input type="text" placeholder="P-XXXXXXXX" className="df-input mt-0.5 block w-36 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={plan.paypalPlanIdMonthly || ""} onChange={(e) => onUpdatePlanPaypalId(plan.id, "monthly", e.target.value)} />
-                </label>
-                <label className="text-xs" style={{ color: colors.inkSoft }}>
-                  ID forfait PayPal (annuel)
-                  <input type="text" placeholder="P-XXXXXXXX" className="df-input mt-0.5 block w-36 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={plan.paypalPlanIdAnnual || ""} onChange={(e) => onUpdatePlanPaypalId(plan.id, "annual", e.target.value)} />
-                </label>
+                <PaypalIdField label="ID forfait PayPal (mensuel)" value={plan.paypalPlanIdMonthly} onSave={(v) => onUpdatePlanPaypalId(plan.id, "monthly", v)} />
+                <PaypalIdField label="ID forfait PayPal (annuel)" value={plan.paypalPlanIdAnnual} onSave={(v) => onUpdatePlanPaypalId(plan.id, "annual", v)} />
               </>
             ) : (
               <span className="text-xs" style={{ color: colors.inkSoft }}>Sur devis</span>
@@ -1860,7 +1895,7 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-function Editor({ doc, saving, clients, prestations, accountPlan, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
+function Editor({ doc, saving, clients, prestations, account, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
@@ -2036,8 +2071,8 @@ function Editor({ doc, saving, clients, prestations, accountPlan, onChange, onBa
   }
 
   const { computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = computeTotals(localDoc);
-  const hasEssentiel = tierAtLeast(accountPlan, "essentiel");
-  const hasPro = tierAtLeast(accountPlan, "pro");
+  const hasEssentiel = hasAccess(account, "essentiel");
+  const hasPro = hasAccess(account, "pro");
   const validityDate = new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.validityDays) || 0) * 86400000);
   const dueDate = new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 0) * 86400000);
 
@@ -2519,7 +2554,7 @@ function Editor({ doc, saving, clients, prestations, accountPlan, onChange, onBa
           </div>
         </div>
       </div>
-      <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer }} accountPlan={accountPlan} />
+      <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer }} accountPlan={account?.plan} />
     </div>
   );
 }
