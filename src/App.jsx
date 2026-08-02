@@ -8,7 +8,7 @@ import {
   Pencil, X, UserPlus, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
-  Shield, ToggleLeft, ToggleRight,
+  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu,
 } from "lucide-react";
 
 const colors = {
@@ -347,6 +347,8 @@ export default function DeviFactApp() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [splitNotice, setSplitNotice] = useState(null);
   const [savingPlanSettings, setSavingPlanSettings] = useState(false);
+  const [preAuthView, setPreAuthView] = useState("landing"); // landing | auth
+  const [authMode, setAuthMode] = useState("signup");
 
   const [plans, setPlans] = useState(PLANS);
 
@@ -747,7 +749,16 @@ export default function DeviFactApp() {
   }
 
   if (!account || !account.loggedIn) {
-    return <AuthScreen />;
+    if (preAuthView === "landing") {
+      return (
+        <LandingPage
+          plans={plans}
+          onGetStarted={() => { setAuthMode("signup"); setPreAuthView("auth"); }}
+          onLogin={() => { setAuthMode("login"); setPreAuthView("auth"); }}
+        />
+      );
+    }
+    return <AuthScreen initialMode={authMode} onBack={() => setPreAuthView("landing")} />;
   }
 
   if (view === "editor" && activeDoc) {
@@ -978,8 +989,177 @@ export default function DeviFactApp() {
   );
 }
 
-function AuthScreen() {
-  const [mode, setMode] = useState("signup");
+function LandingPage({ plans, onGetStarted, onLogin }) {
+  const [openFaq, setOpenFaq] = useState(null);
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const visiblePlans = plans.filter((p) => !p.hidden);
+
+  const features = [
+    { icon: FileText, title: "Devis ou facture, à la carte", text: "Choisissez ce que vous produisez : un devis, une facture, ou les deux liés automatiquement en un clic." },
+    { icon: Calculator, title: "Calculs automatiques", text: "TVA multi-taux, remises par ligne ou globales, acomptes : les totaux se recalculent seuls, sans erreur." },
+    { icon: Layers, title: "Descriptions détaillées", text: "Structurez vos devis avec des descriptions et sous-descriptions imbriquées, uniquement si vous en avez besoin." },
+    { icon: PenTool, title: "Signature électronique", text: "Signature saisie, dessinée à l'écran ou importée depuis une image, directement sur le document." },
+    { icon: Download, title: "Export PDF & Excel", text: "Un PDF propre à envoyer tel quel, ou un fichier Excel avec tous les calculs à retravailler." },
+    { icon: Users, title: "Clients & entreprise enregistrés", text: "Vos informations et celles de vos clients, saisies une fois, réutilisées automatiquement partout." },
+  ];
+
+  const faqs = [
+    { q: "Dois-je entrer une carte bancaire pour l'essai gratuit ?", a: "Non. Le forfait Gratuit est accessible sans carte bancaire, avec une limite de 3 devis ou factures pour tester l'outil." },
+    { q: "Puis-je transformer un devis en facture ?", a: "Oui, en un clic. Les lignes, quantités et prix sont repris automatiquement dans la facture générée." },
+    { q: "Le produit est-il conforme à la réforme de facturation électronique ?", a: "DeviFact génère déjà les mentions légales obligatoires. La connexion à une Plateforme Agréée, obligatoire pour les TPE/PME au 1ᵉʳ septembre 2027, fait partie de la feuille de route." },
+    { q: "Puis-je changer de forfait à tout moment ?", a: "Oui, depuis votre compte, sans engagement pour le mensuel." },
+  ];
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+
+      <header className="sticky top-0 z-10" style={{ background: "rgba(233,238,234,0.92)", backdropFilter: "blur(8px)", borderBottom: `1px solid ${colors.line}` }}>
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: colors.brass, color: colors.ink }}>DF</div>
+            <span className="df-display text-lg font-semibold tracking-wide">DeviFact</span>
+          </div>
+          <nav className="hidden items-center gap-6 text-sm font-medium sm:flex" style={{ color: colors.inkSoft }}>
+            <a href="#fonctionnalites">Fonctionnalités</a>
+            <a href="#tarifs">Tarifs</a>
+            <a href="#faq">FAQ</a>
+          </nav>
+          <div className="hidden items-center gap-3 sm:flex">
+            <button onClick={onLogin} className="text-sm font-medium" style={{ color: colors.inkSoft }}>Connexion</button>
+            <button onClick={onGetStarted} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Essai gratuit</button>
+          </div>
+          <button onClick={() => setMobileMenu((v) => !v)} className="sm:hidden"><Menu size={22} /></button>
+        </div>
+        {mobileMenu && (
+          <div className="flex flex-col gap-3 border-t px-6 py-4 sm:hidden" style={{ borderColor: colors.line }}>
+            <a href="#fonctionnalites" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Fonctionnalités</a>
+            <a href="#tarifs" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Tarifs</a>
+            <button onClick={onLogin} className="text-left text-sm font-medium">Connexion</button>
+            <button onClick={onGetStarted} className="rounded-lg px-4 py-2 text-center text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Essai gratuit</button>
+          </div>
+        )}
+      </header>
+
+      {/* Hero */}
+      <section className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-6 py-16 lg:grid-cols-2 lg:py-24">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Devis &amp; factures pour artisans</span>
+          <h1 className="df-display mt-3 text-4xl font-semibold leading-tight sm:text-5xl">Des devis clairs et des factures propres, sans y perdre votre soirée.</h1>
+          <p className="mt-4 max-w-md text-base" style={{ color: colors.inkSoft }}>DeviFact réunit devis, factures, signature électronique et calculs automatiques dans un seul outil pensé pour les artisans et petites entreprises françaises.</p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button onClick={onGetStarted} className="flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Commencer gratuitement <ArrowRight size={16} /></button>
+            <a href="#tarifs" className="flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-medium" style={{ border: `1px solid ${colors.line}` }}>Voir les tarifs</a>
+          </div>
+          <p className="mt-4 text-xs" style={{ color: colors.inkSoft }}>Aucune carte bancaire requise · Pensé pour la réforme de facturation électronique 2027</p>
+        </div>
+        <div className="rounded-2xl p-6 shadow-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}`, transform: "rotate(1deg)" }}>
+          <div className="mb-3 flex items-center justify-between border-b pb-3" style={{ borderColor: colors.line }}>
+            <div>
+              <div className="df-display text-lg font-semibold uppercase">Devis</div>
+              <div className="df-mono text-xs" style={{ color: colors.inkSoft }}>DEV-2026-014</div>
+            </div>
+            <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.moss}22`, color: colors.moss }}>signé</span>
+          </div>
+          <div className="flex justify-between border-b py-1.5 text-sm" style={{ borderColor: colors.line }}><span>Dépose ancienne robinetterie</span><span className="df-mono">45,00 €</span></div>
+          <div className="flex justify-between border-b py-1.5 text-sm" style={{ borderColor: colors.line }}><span>Mitigeur thermostatique — pose</span><span className="df-mono">180,00 €</span></div>
+          <div className="flex justify-between py-1.5 text-sm"><span>Reprise étanchéité</span><span className="df-mono">90,00 €</span></div>
+          <div className="mt-4 flex justify-end">
+            <div className="relative flex h-28 w-28 items-center justify-center" style={{ transform: "rotate(-5deg)" }}>
+              <div className="absolute inset-0 rounded-full" style={{ border: `2.5px solid ${colors.brass}` }} />
+              <div className="absolute inset-1.5 rounded-full" style={{ border: `1px solid ${colors.brass}` }} />
+              <div className="text-center">
+                <div className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Total TTC</div>
+                <div className="df-mono mt-1 text-lg font-semibold">378,00 €</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Fonctionnalités */}
+      <section id="fonctionnalites" className="border-y py-16" style={{ background: colors.surface, borderColor: colors.line }}>
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="mx-auto mb-10 max-w-lg text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Fonctionnalités</span>
+            <h2 className="df-display mt-2 text-2xl font-semibold sm:text-3xl">Tout ce qu'il faut, rien de superflu</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {features.map(({ icon: Icon, title, text }) => (
+              <div key={title} className="rounded-2xl p-5" style={{ border: `1px solid ${colors.line}` }}>
+                <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: colors.paper, color: colors.slate }}><Icon size={18} /></div>
+                <div className="mb-1 text-sm font-semibold">{title}</div>
+                <p className="text-xs" style={{ color: colors.inkSoft }}>{text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Tarifs */}
+      <section id="tarifs" className="py-16">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="mx-auto mb-10 max-w-lg text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Tarifs</span>
+            <h2 className="df-display mt-2 text-2xl font-semibold sm:text-3xl">Un forfait pour chaque taille d'entreprise</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {visiblePlans.map((plan) => (
+              <div key={plan.id} className="flex flex-col rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
+                <div className="df-display text-lg font-semibold">{plan.name}</div>
+                <div className="text-xs" style={{ color: colors.inkSoft }}>{plan.tagline}</div>
+                <div className="df-mono my-4">
+                  {plan.monthly === null ? <span className="text-2xl font-semibold">Sur devis</span> : (
+                    <><span className="text-2xl font-semibold">{plan.monthly}€</span><span className="text-sm" style={{ color: colors.inkSoft }}>/mois</span></>
+                  )}
+                </div>
+                <ul className="mb-5 grow space-y-2 text-sm">
+                  {(plan.features || []).map((f) => (
+                    <li key={f} className="flex items-start gap-2"><Check size={14} className="mt-0.5 shrink-0" style={{ color: colors.moss }} /> {f}</li>
+                  ))}
+                </ul>
+                <button onClick={onGetStarted} className="rounded-lg py-2 text-sm font-medium" style={{ background: plan.id === "essentiel" ? colors.brass : colors.ink, color: plan.id === "essentiel" ? colors.ink : "white" }}>Commencer</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="border-t py-16" style={{ borderColor: colors.line }}>
+        <div className="mx-auto max-w-2xl px-6">
+          <div className="mb-8 text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Questions fréquentes</span>
+          </div>
+          {faqs.map((f, idx) => (
+            <div key={f.q} className="border-b" style={{ borderColor: colors.line }}>
+              <button onClick={() => setOpenFaq(openFaq === idx ? null : idx)} className="flex w-full items-center justify-between gap-3 py-4 text-left text-sm font-medium">
+                {f.q} <ChevronDown size={16} className="shrink-0" style={{ transform: openFaq === idx ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+              </button>
+              {openFaq === idx && <p className="pb-4 text-sm" style={{ color: colors.inkSoft }}>{f.a}</p>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* CTA final */}
+      <section className="px-6 pb-16">
+        <div className="mx-auto max-w-4xl rounded-2xl p-10 text-center" style={{ background: colors.ink, color: "white" }}>
+          <h2 className="df-display text-2xl font-semibold sm:text-3xl">Prêt à arrêter de perdre du temps sur vos devis ?</h2>
+          <p className="mt-2 text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>Créez votre compte en une minute, sans carte bancaire.</p>
+          <button onClick={onGetStarted} className="mt-6 rounded-lg px-6 py-3 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Commencer gratuitement</button>
+        </div>
+      </section>
+
+      <footer className="border-t px-6 py-8 text-center text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+        © 2026 DeviFact — <a href="mailto:contact@devifact.fr">contact@devifact.fr</a>
+      </footer>
+    </div>
+  );
+}
+
+function AuthScreen({ initialMode = "signup", onBack }) {
+  const [mode, setMode] = useState(initialMode);
   const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -1036,6 +1216,11 @@ function AuthScreen() {
     <div className="df-root flex min-h-full w-full items-center justify-center px-4 py-16" style={{ background: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="w-full max-w-sm">
+        {onBack && (
+          <button onClick={onBack} className="mb-4 flex items-center gap-1.5 text-sm font-medium" style={{ color: colors.inkSoft }}>
+            <ArrowLeft size={15} /> Retour au site
+          </button>
+        )}
         <div className="mb-6 flex items-center justify-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg df-mono text-base font-semibold" style={{ background: colors.brass, color: colors.ink }}>DF</div>
           <span className="df-display text-xl font-semibold tracking-wide">DeviFact</span>
