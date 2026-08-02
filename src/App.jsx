@@ -81,6 +81,20 @@ function statusColor(status) {
 let uidCounter = 0;
 const nextId = (p = "id") => `${p}_${++uidCounter}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 const eur = (n) => (isFinite(n) ? n : 0).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+// Formate un montant dans la devise du document (devis/facture/proforma).
+// Distinct de eur() ci-dessus, qui reste réservé aux prix d'abonnement du site (toujours en EUR).
+function formatMoney(n, currency) {
+  const amount = isFinite(n) ? n : 0;
+  try {
+    return amount.toLocaleString("fr-FR", { style: "currency", currency: currency || "EUR" });
+  } catch (e) {
+    return `${amount.toFixed(2)} ${currency || "EUR"}`;
+  }
+}
+const CURRENCIES = [
+  "EUR", "USD", "GBP", "CHF", "CAD", "MAD", "DZD", "TND", "XOF", "XAF",
+  "CNY", "JPY", "AED", "SAR", "TRY", "INR", "BRL", "MXN", "AUD", "SEK", "NOK", "PLN",
+];
 const fr = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
 const frLong = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 
@@ -151,6 +165,7 @@ function newDocument(type, documents) {
     type,
     docNumber: nextNumber(documents, type),
     issueDate: new Date().toISOString().slice(0, 10),
+    currency: "EUR",
     validityDays: 30,
     dueDays: 30,
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
@@ -197,12 +212,12 @@ const GlobalStyle = () => (
     .df-mono { font-family: 'IBM Plex Mono', monospace; }
     .df-input:focus, .df-select:focus, .df-textarea:focus { outline: none; border-color: ${colors.brass} !important; box-shadow: 0 0 0 3px rgba(184,118,62,0.15); }
     @keyframes df-marquee {
-      0% { transform: translateX(-100%); opacity: 0; }
+      0% { transform: translateX(-100vw); opacity: 0; }
       8% { opacity: 1; }
       92% { opacity: 1; }
-      100% { transform: translateX(100%); opacity: 0; }
+      100% { transform: translateX(100vw); opacity: 0; }
     }
-    .df-marquee-text { display: inline-block; white-space: nowrap; animation: df-marquee 9s linear infinite; }
+    .df-marquee-text { display: inline-block; white-space: nowrap; animation: df-marquee 11s linear infinite; }
     .print-doc { display: none; }
     @media print {
       @page { size: A4; margin: 14mm 12mm; }
@@ -340,16 +355,16 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
                   {(it.details || []).filter((d) => d.included && (d.text || d.price)).map((d) => (
                     <div key={d.id} style={{ fontSize: "8.5pt", color: inkSoft, marginLeft: `${8 + (d.level - 1) * 14}px`, display: "flex", justifyContent: "space-between", gap: "8px" }}>
                       <span>{d.marker || defaultMarker(d.level)} {d.text}</span>
-                      {Number(d.price) > 0 && <span style={mono}>{eur(Number(d.price))}</span>}
+                      {Number(d.price) > 0 && <span style={mono}>{formatMoney(Number(d.price), doc.currency)}</span>}
                     </div>
                   ))}
                 </td>
                 <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{it.qty}</td>
                 <td style={{ padding: "6px 6px", verticalAlign: "top" }}>{it.unit}</td>
-                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{eur(Number(it.unitPrice) || 0)}</td>
+                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(Number(it.unitPrice) || 0, doc.currency)}</td>
                 <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{it.tva}%</td>
-                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{eur(lineTVA)}</td>
-                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono, fontWeight: 600 }}>{eur(lineHT)}</td>
+                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(lineTVA, doc.currency)}</td>
+                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono, fontWeight: 600 }}>{formatMoney(lineHT, doc.currency)}</td>
               </tr>
             );
           })())}
@@ -366,28 +381,28 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
             </>
           )}
           {Number(doc.acompte) > 0 && (
-            <div style={{ marginTop: "6px" }}>Acompte de {doc.acompte}% à la commande : <strong style={mono}>{eur(acompteAmount)}</strong></div>
+            <div style={{ marginTop: "6px" }}>Acompte de {doc.acompte}% à la commande : <strong style={mono}>{formatMoney(acompteAmount, doc.currency)}</strong></div>
           )}
         </div>
 
         <div style={{ width: "230px", fontSize: "10pt" }}>
           <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "7px 10px", fontWeight: 700 }}>
-            <span>Total HT</span><span style={mono}>{eur(subtotalHT)}</span>
+            <span>Total HT</span><span style={mono}>{formatMoney(subtotalHT, doc.currency)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, padding: "7px 10px", fontWeight: 600 }}>
-            <span>Total TVA</span><span style={mono}>{eur(totalTVA)}</span>
+            <span>Total TVA</span><span style={mono}>{formatMoney(totalTVA, doc.currency)}</span>
           </div>
           {Object.keys(tvaGroups).length > 1 && Object.entries(tvaGroups).map(([rate, amount]) => (
             <div key={rate} style={{ display: "flex", justifyContent: "space-between", padding: "2px 10px", fontSize: "8.5pt", color: inkSoft }}>
-              <span>dont TVA {rate}%</span><span style={mono}>{eur(amount)}</span>
+              <span>dont TVA {rate}%</span><span style={mono}>{formatMoney(amount, doc.currency)}</span>
             </div>
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
-            <span>Net à payer</span><span style={mono}>{eur(totalTTC)}</span>
+            <span>Net à payer</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
           </div>
           {Number(doc.acompte) > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontWeight: 700, color: brassDark }}>
-              <span>Reste à payer</span><span style={mono}>{eur(resteAPayer)}</span>
+              <span>Reste à payer</span><span style={mono}>{formatMoney(resteAPayer, doc.currency)}</span>
             </div>
           )}
         </div>
@@ -824,7 +839,7 @@ export default function DeviFactApp() {
     const subject = doc.type === "devis" ? `Relance — Devis ${doc.docNumber}` : `Relance — Facture ${doc.docNumber}`;
     const body = doc.type === "devis"
       ? `Bonjour ${doc.client.name || ""},\n\nJe me permets de vous relancer au sujet du devis ${doc.docNumber}, dont la date de validité approche.\n\nN'hésitez pas à me contacter pour toute question.\n\nCordialement.`
-      : `Bonjour ${doc.client.name || ""},\n\nSauf erreur de notre part, la facture ${doc.docNumber} d'un montant de ${eur(totalTTC)} reste impayée à ce jour.\n\nMerci de bien vouloir procéder au règlement dans les meilleurs délais.\n\nCordialement.`;
+      : `Bonjour ${doc.client.name || ""},\n\nSauf erreur de notre part, la facture ${doc.docNumber} d'un montant de ${formatMoney(totalTTC, doc.currency)} reste impayée à ce jour.\n\nMerci de bien vouloir procéder au règlement dans les meilleurs délais.\n\nCordialement.`;
     return `mailto:${doc.client.email || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
@@ -895,7 +910,7 @@ export default function DeviFactApp() {
     );
   }
 
-  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), account, onLogout: logout, siteSettings };
+  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), account, onLogout: logout, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
 
   if (view === "clients") {
     return (
@@ -1084,7 +1099,7 @@ export default function DeviFactApp() {
                   </div>
                   <button onClick={() => openDoc(d.id)} className="df-mono w-32 shrink-0 text-left text-sm font-medium hover:underline">{d.docNumber}</button>
                   <div className="min-w-0 grow basis-40 truncate text-sm">{d.client.name || <span style={{ color: colors.inkSoft }}>Client non renseigné</span>}</div>
-                  <div className="df-mono w-28 shrink-0 text-right text-sm font-medium">{eur(totalTTC)}</div>
+                  <div className="df-mono w-28 shrink-0 text-right text-sm font-medium">{formatMoney(totalTTC, d.currency)}</div>
                   <div className="w-24 shrink-0 text-right text-xs" style={{ color: colors.inkSoft }}>{fr(d.updatedAt)}</div>
                   <select
                     value={d.status}
@@ -1134,6 +1149,12 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
     <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
       <GlobalStyle />
 
+      <div className="relative w-full overflow-hidden py-2.5" style={{ background: colors.ink }}>
+        <span className="df-marquee-text df-display text-xl font-semibold sm:text-2xl" style={{ color: colors.brass }}>
+          ✦ Votre devis prêt en quelques clics
+        </span>
+      </div>
+
       <header className="sticky top-0 z-10" style={{ background: "rgba(233,238,234,0.92)", backdropFilter: "blur(8px)", borderBottom: `1px solid ${colors.line}` }}>
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
@@ -1176,11 +1197,6 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
             <a href="#tarifs" className="flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-medium" style={{ border: `1px solid ${colors.line}` }}>Voir les tarifs</a>
           </div>
           <p className="mt-4 text-xs" style={{ color: colors.inkSoft }}>Aucune carte bancaire requise · Pensé pour la réforme de facturation électronique 2027</p>
-          <div className="relative mt-5 h-7 overflow-hidden" style={{ maxWidth: "100%" }}>
-            <span className="df-marquee-text df-display text-base font-semibold" style={{ color: colors.brassDark }}>
-              ✦ Votre devis prêt en quelques clics
-            </span>
-          </div>
         </div>
         <div className="rounded-2xl p-6 shadow-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}`, transform: "rotate(1deg)" }}>
           <div className="mb-3 flex items-center justify-between border-b pb-3" style={{ borderColor: colors.line }}>
@@ -1422,7 +1438,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   );
 }
 
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, account, onLogout, siteSettings }) {
+function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, account, onLogout, siteSettings, companyProfile, onSetCompanyType }) {
   const tabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "clients", label: "Clients", icon: Users },
@@ -1443,11 +1459,28 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
           <span className="df-display text-lg font-semibold tracking-wide text-white">{siteSettings?.name || "DeviFact"}</span>
         </div>
         <div className="hidden items-center gap-1 lg:flex">
-          {tabs.map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
-              <Icon size={15} /> {label}
-            </button>
-          ))}
+          {tabs.map(({ id, label, icon: Icon }) =>
+            id === "company" ? (
+              <div key={id} className="relative flex items-center">
+                <select
+                  value={companyProfile?.type || "entreprise"}
+                  onChange={(e) => onSetCompanyType(e.target.value)}
+                  onClick={() => setView("company")}
+                  className="df-select appearance-none rounded-lg py-1.5 pl-8 pr-3 text-sm font-medium"
+                  style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)", border: "none" }}
+                  title="Mon entreprise"
+                >
+                  <option value="entreprise" style={{ color: colors.ink }}>Mon entreprise — Entreprise</option>
+                  <option value="particulier" style={{ color: colors.ink }}>Mon entreprise — Particulier</option>
+                </select>
+                <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: view === id ? "white" : "rgba(255,255,255,0.65)" }} />
+              </div>
+            ) : (
+              <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                <Icon size={15} /> {label}
+              </button>
+            )
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -1846,7 +1879,7 @@ function PayPalButton({ planId, userId, onApproved }) {
 function PricingView({ account, plans, onChooseFree, limitNotice, documentCount }) {
   const [billing, setBilling] = useState(account?.billing || "mensuel");
   const [approvedMsg, setApprovedMsg] = useState(false);
-  const visiblePlans = plans.filter((p) => !p.hidden || account?.plan === p.id);
+  const visiblePlans = plans.filter((p) => !p.hidden);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
@@ -1952,6 +1985,12 @@ function PaypalIdField({ label, value, onSave }) {
   const [editing, setEditing] = useState(!value);
   const [draft, setDraft] = useState(value || "");
 
+  useEffect(() => {
+    // Si une valeur enregistrée apparaît (ou change) et qu'on n'est pas
+    // en train de la modifier, on repasse en mode "badge configuré".
+    if (value) setEditing(false);
+  }, [value]);
+
   if (!editing && value) {
     return (
       <div className="text-xs" style={{ color: colors.inkSoft }}>
@@ -1979,48 +2018,48 @@ function PaypalIdField({ label, value, onSave }) {
 }
 
 function SiteIdentitySettings({ siteSettings, saving, onSave }) {
-  const [name, setName] = useState(siteSettings.name);
-  const nameTimer = useRef(null);
+  const [local, setLocal] = useState(siteSettings);
 
-  useEffect(() => { setName(siteSettings.name); }, [siteSettings.name]);
+  useEffect(() => { setLocal(siteSettings); }, []);
 
-  function changeName(v) {
-    setName(v);
-    clearTimeout(nameTimer.current);
-    nameTimer.current = setTimeout(() => onSave({ name: v }), 500);
+  function patch(p) {
+    setLocal((prev) => ({ ...prev, ...p }));
   }
   function handleLogoUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => onSave({ logo: reader.result });
+    reader.onload = () => patch({ logo: reader.result });
     reader.readAsDataURL(file);
+  }
+  function handleSave() {
+    onSave(local);
   }
 
   return (
     <div className="mb-6 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
       <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
         <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Identité du site</span>
-        {saving && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+        {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={13} className="animate-spin" /> Enregistrement</span>}
       </div>
       <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-        Change le nom affiché partout (menu, page d'accueil, connexion, filigrane des PDF Gratuit) et le logo du site — distinct du logo de chaque entreprise sur ses devis.
+        Change le nom affiché partout (menu, page d'accueil, connexion, filigrane des PDF Gratuit) et le logo du site — distinct du logo de chaque entreprise sur ses devis. N'oublie pas de cliquer "Enregistrer" en bas pour valider tes changements.
       </p>
       <div className="space-y-4 p-4">
         <div>
           <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Nom du site</label>
-          <input className="df-input w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={name} onChange={(e) => changeName(e.target.value)} />
+          <input className="df-input w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.name} onChange={(e) => patch({ name: e.target.value })} />
         </div>
         <div>
           <label className="mb-2 block text-xs font-medium" style={{ color: colors.inkSoft }}>Logo du site</label>
           <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center justify-center overflow-hidden rounded-lg" style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, background: siteSettings.logo ? "transparent" : colors.brass, color: "white" }}>
-              {siteSettings.logo ? <img src={siteSettings.logo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span className="df-mono text-sm font-semibold">{initials(siteSettings.name) || "DF"}</span>}
+            <div className="flex items-center justify-center overflow-hidden rounded-lg" style={{ width: local.logoWidth, height: local.logoHeight, background: local.logo ? "transparent" : colors.brass, color: "white" }}>
+              {local.logo ? <img src={local.logo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span className="df-mono text-sm font-semibold">{initials(local.name) || "DF"}</span>}
             </div>
             <div>
               <input type="file" accept="image/*" onChange={handleLogoUpload} className="text-xs" />
-              {siteSettings.logo && (
-                <button onClick={() => onSave({ logo: null })} className="mt-1 flex items-center gap-1 text-xs" style={{ color: colors.brick }}>
+              {local.logo && (
+                <button onClick={() => patch({ logo: null })} className="mt-1 flex items-center gap-1 text-xs" style={{ color: colors.brick }}>
                   <RotateCcw size={12} /> Réinitialiser au logo par défaut (initiales)
                 </button>
               )}
@@ -2030,13 +2069,16 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
         <div className="flex flex-wrap gap-4">
           <label className="text-xs" style={{ color: colors.inkSoft }}>
             Largeur (px)
-            <input type="number" min="16" max="200" className="df-input df-mono mt-0.5 block w-24 rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={siteSettings.logoWidth} onChange={(e) => onSave({ logoWidth: Number(e.target.value) || 36 })} />
+            <input type="number" min="16" max="200" className="df-input df-mono mt-0.5 block w-24 rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.logoWidth} onChange={(e) => patch({ logoWidth: Number(e.target.value) || 36 })} />
           </label>
           <label className="text-xs" style={{ color: colors.inkSoft }}>
             Hauteur (px)
-            <input type="number" min="16" max="200" className="df-input df-mono mt-0.5 block w-24 rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={siteSettings.logoHeight} onChange={(e) => onSave({ logoHeight: Number(e.target.value) || 36 })} />
+            <input type="number" min="16" max="200" className="df-input df-mono mt-0.5 block w-24 rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.logoHeight} onChange={(e) => patch({ logoHeight: Number(e.target.value) || 36 })} />
           </label>
         </div>
+        <button onClick={handleSave} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
+          <Check size={14} /> Enregistrer
+        </button>
       </div>
     </div>
   );
@@ -2405,6 +2447,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
     rows.push([docTypeLabel(localDoc.type).toUpperCase(), localDoc.docNumber]);
     rows.push(["Date d'émission", frLong(localDoc.issueDate)]);
     rows.push([localDoc.type !== "facture" ? "Valable jusqu'au" : "Échéance", frLong(localDoc.type !== "facture" ? validityDate : dueDate)]);
+    rows.push(["Devise", localDoc.currency || "EUR"]);
     rows.push([]);
     rows.push(["Émetteur", localDoc.company.name]);
     rows.push(["SIRET", localDoc.company.siret]);
@@ -2491,6 +2534,12 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
             <div>
               <div className="df-display text-3xl font-semibold uppercase tracking-wide">{docTypeLabel(localDoc.type)}</div>
               <input className="df-input df-mono mt-2 rounded-md px-2 py-1 text-sm" style={inputStyle} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
+              <div className="mt-2 flex items-center gap-1.5">
+                <label className="text-xs" style={{ color: colors.inkSoft }}>Devise</label>
+                <select className="df-select df-mono rounded-md px-2 py-1 text-xs" style={inputStyle} value={localDoc.currency || "EUR"} onChange={(e) => patch({ currency: e.target.value })}>
+                  {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <label className="self-center text-right" style={{ color: colors.inkSoft }}>Émis le</label>
@@ -2775,7 +2824,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
                   <input type="number" step="0.1" min="0" title="Taux de TVA (%)" className="df-input df-mono w-16 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.tva} onChange={(e) => updateItem(it.id, { tva: e.target.value })} />
                   <input type="number" className="df-input df-mono w-16 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.discount} onChange={(e) => updateItem(it.id, { discount: e.target.value })} />
                   <div className="df-mono w-24 py-1.5 text-right text-sm font-medium">
-                    {eur(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(localDoc.globalDiscount) || 0) / 100))}
+                    {formatMoney(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(localDoc.globalDiscount) || 0) / 100), localDoc.currency)}
                   </div>
                   <div className="no-print flex w-24 shrink-0 justify-end gap-1 pt-1.5">
                     <button onClick={() => saveLineAsPrestation(it)} title="Enregistrer comme prestation" style={{ color: colors.brassDark }}><BookmarkPlus size={14} /></button>
@@ -2841,14 +2890,14 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
 
             <div className="flex items-center gap-8">
               <div className="df-mono space-y-1 text-right text-sm">
-                <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Sous-total HT</span><span>{eur(subtotalHT)}</span></div>
+                <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Sous-total HT</span><span>{formatMoney(subtotalHT, localDoc.currency)}</span></div>
                 {Object.entries(tvaGroups).map(([rate, amount]) => (
-                  <div key={rate} className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>TVA {rate}%</span><span>{eur(amount)}</span></div>
+                  <div key={rate} className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>TVA {rate}%</span><span>{formatMoney(amount, localDoc.currency)}</span></div>
                 ))}
                 {Number(localDoc.acompte) > 0 && (
                   <>
-                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte ({localDoc.acompte}%)</span><span>- {eur(acompteAmount)}</span></div>
-                    <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Reste à payer</span><span>{eur(resteAPayer)}</span></div>
+                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte ({localDoc.acompte}%)</span><span>- {formatMoney(acompteAmount, localDoc.currency)}</span></div>
+                    <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Reste à payer</span><span>{formatMoney(resteAPayer, localDoc.currency)}</span></div>
                   </>
                 )}
               </div>
@@ -2858,7 +2907,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
                 <div className="absolute inset-1.5 rounded-full" style={{ border: `1px solid ${colors.brass}` }} />
                 <div className="px-2 text-center">
                   <div className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Total TTC</div>
-                  <div className="df-mono mt-1 text-xl font-semibold leading-tight">{eur(totalTTC)}</div>
+                  <div className="df-mono mt-1 text-xl font-semibold leading-tight">{formatMoney(totalTTC, localDoc.currency)}</div>
                 </div>
               </div>
             </div>
