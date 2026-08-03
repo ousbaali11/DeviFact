@@ -1463,15 +1463,16 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
             id === "company" ? (
               <div key={id} className="relative flex items-center">
                 <select
-                  value={companyProfile?.type || "entreprise"}
-                  onChange={(e) => onSetCompanyType(e.target.value)}
+                  value=""
+                  onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
                   onClick={() => setView("company")}
                   className="df-select appearance-none rounded-lg py-1.5 pl-8 pr-3 text-sm font-medium"
                   style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)", border: "none" }}
                   title="Mon entreprise"
                 >
-                  <option value="entreprise" style={{ color: colors.ink }}>Mon entreprise — Entreprise</option>
-                  <option value="particulier" style={{ color: colors.ink }}>Mon entreprise — Particulier</option>
+                  <option value="" disabled hidden style={{ color: colors.ink }}>Entreprise/Particulier</option>
+                  <option value="entreprise" style={{ color: colors.ink }}>Entreprise</option>
+                  <option value="particulier" style={{ color: colors.ink }}>Particulier</option>
                 </select>
                 <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: view === id ? "white" : "rgba(255,255,255,0.65)" }} />
               </div>
