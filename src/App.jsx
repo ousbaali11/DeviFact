@@ -517,37 +517,47 @@ export default function DeviFactApp() {
     setSavingSiteSettings(false);
   }
 
+  async function loadUserData() {
+    const [docsRes, clientsRes, companyRes, prestationsRes] = await Promise.allSettled([
+      window.storage.get("documents", false),
+      window.storage.get("clients", false),
+      window.storage.get("company-profile", false),
+      window.storage.get("prestations", false),
+    ]);
+    setDocuments(docsRes.status === "fulfilled" && docsRes.value ? JSON.parse(docsRes.value.value) : []);
+    setClients(clientsRes.status === "fulfilled" && clientsRes.value ? JSON.parse(clientsRes.value.value) : []);
+    setCompanyProfile(companyRes.status === "fulfilled" && companyRes.value ? JSON.parse(companyRes.value.value) : emptyCompanyProfile());
+    setPrestations(prestationsRes.status === "fulfilled" && prestationsRes.value ? JSON.parse(prestationsRes.value.value) : []);
+  }
+  function clearUserData() {
+    // Vide toutes les données en mémoire — indispensable à la déconnexion
+    // pour qu'aucune trace du compte précédent ne reste visible au suivant.
+    setDocuments([]);
+    setClients([]);
+    setCompanyProfile(emptyCompanyProfile());
+    setPrestations([]);
+    setActiveId(null);
+  }
+
   useEffect(() => {
     (async () => {
-      const [docsRes, clientsRes, companyRes, prestationsRes] = await Promise.allSettled([
-        window.storage.get("documents", false),
-        window.storage.get("clients", false),
-        window.storage.get("company-profile", false),
-        window.storage.get("prestations", false),
-      ]);
-      setDocuments(docsRes.status === "fulfilled" && docsRes.value ? JSON.parse(docsRes.value.value) : []);
-      setClients(clientsRes.status === "fulfilled" && clientsRes.value ? JSON.parse(clientsRes.value.value) : []);
-      setCompanyProfile(companyRes.status === "fulfilled" && companyRes.value ? JSON.parse(companyRes.value.value) : emptyCompanyProfile());
-      setPrestations(prestationsRes.status === "fulfilled" && prestationsRes.value ? JSON.parse(prestationsRes.value.value) : []);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const profile = await loadProfile(session.user.id, session.user.email);
-        setAccount(profile);
-      }
       await Promise.all([loadPlans(), loadSiteSettings()]);
-      setLoading(false);
     })();
 
-    // Se met à jour automatiquement si la session change (connexion/déconnexion
-    // dans un autre onglet, expiration du token, etc.)
+    // Seule source de vérité pour les données propres à l'utilisateur :
+    // se déclenche à l'ouverture (avec la session actuelle, s'il y en a
+    // une), à chaque connexion/inscription, et à chaque déconnexion —
+    // qu'il s'agisse du même utilisateur ou d'un utilisateur différent.
     const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
+        await loadUserData();
         const profile = await loadProfile(session.user.id, session.user.email);
         setAccount(profile);
       } else {
+        clearUserData();
         setAccount(null);
       }
+      setLoading(false);
     });
     return () => authListener?.subscription?.unsubscribe();
   }, []);
@@ -1712,7 +1722,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="df-display text-2xl font-semibold">Mon entreprise</h1>
+          <h1 className="df-display text-2xl font-semibold">{(editing ? local.type : profile.type) === "particulier" ? "Mes informations" : "Mon entreprise"}</h1>
           <p className="text-sm" style={{ color: colors.inkSoft }}>Ces informations pré-remplissent automatiquement chaque nouveau devis ou facture.</p>
         </div>
         {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={12} className="animate-spin" /> Enregistrement</span>}
@@ -1810,17 +1820,6 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
               <button onClick={cancelEdit} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Annuler</button>
             )}
           </div>
-        </div>
-      )}
-
-      {!account?.isAdmin && (
-        <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.slate }}>
-            <Shield size={15} /> Accès administrateur
-          </div>
-          <p className="text-xs" style={{ color: colors.inkSoft }}>
-            Le statut administrateur est désormais protégé côté serveur — il ne peut plus être activé depuis l'application elle-même (c'était une faille de sécurité dans une version précédente du prototype). Pour devenir admin : va dans ton dashboard Supabase → Table Editor → <code>profiles</code>, trouve la ligne correspondant à ton email, et passe la colonne <code>is_admin</code> à <code>true</code>.
-          </p>
         </div>
       )}
 
