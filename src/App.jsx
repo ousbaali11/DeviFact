@@ -302,7 +302,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnable
 
       {/* Émetteur / Client */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "20px", position: "relative", zIndex: 1 }}>
-        <div style={{ flex: 1, padding: "0 2px" }}>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
           <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
           {doc.company.address && <div>{doc.company.address}</div>}
           {doc.company.phone && <div>Téléphone : {doc.company.phone}</div>}
@@ -310,8 +310,8 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnable
           {doc.company.type !== "particulier" && doc.company.siret && <div>SIRET : {doc.company.siret}</div>}
           {doc.company.type !== "particulier" && doc.company.tva && <div>N° TVA : {doc.company.tva}</div>}
         </div>
-        <div style={{ flex: 1, padding: "0 2px" }}>
-          <div style={{ fontWeight: 700, marginBottom: "3px", color: brassDark }}>Client :</div>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          <div style={{ fontWeight: 700, marginBottom: "3px", color: brassDark }}>{doc.client.type === "particulier" ? "Client (particulier) :" : "Client (entreprise) :"}</div>
           <div style={{ fontWeight: 600 }}>{doc.client.name || "—"}</div>
           {doc.client.address && <div>{doc.client.address}</div>}
           {doc.client.email && <div>{doc.client.email}</div>}
