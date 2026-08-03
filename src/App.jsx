@@ -354,7 +354,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
                   <div>{it.designation || "—"}</div>
                   {(it.details || []).filter((d) => d.included && (d.text || d.price)).map((d) => (
                     <div key={d.id} style={{ fontSize: "8.5pt", color: inkSoft, marginLeft: `${8 + (d.level - 1) * 14}px`, display: "flex", justifyContent: "space-between", gap: "8px" }}>
-                      <span>{d.marker || defaultMarker(d.level)} {d.text}</span>
+                      <span>{d.marker || defaultMarker(d.level)} {renderMarkup(d.text)}</span>
                       {Number(d.price) > 0 && <span style={mono}>{formatMoney(Number(d.price), doc.currency)}</span>}
                     </div>
                   ))}
@@ -377,7 +377,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
           {doc.notes && (
             <>
               <div style={{ fontWeight: 700, marginBottom: "4px" }}>Conditions de règlement</div>
-              <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{doc.notes}</div>
+              <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{renderMarkup(doc.notes)}</div>
             </>
           )}
           {Number(doc.acompte) > 0 && (
@@ -1285,18 +1285,21 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {visiblePlans.map((plan) => (
-              <div key={plan.id} className="flex flex-col rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
-                <div className="df-display text-lg font-semibold">{plan.name}</div>
+              <div key={plan.id} className="flex flex-col overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
+                <div style={{ height: "6px", background: planAccentColor(plan.id) }} />
+                <div className="flex grow flex-col p-5">
+                <div className="df-display text-lg font-bold" style={{ color: planAccentColor(plan.id) }}>{plan.name}</div>
                 <div className="text-xs" style={{ color: colors.inkSoft }}>{plan.tagline}</div>
                 <div className="df-mono my-4">
                   {plan.monthly === null ? <span className="text-2xl font-semibold">Sur devis</span> : (
-                    <><span className="text-2xl font-semibold">{plan.monthly}€</span><span className="text-sm" style={{ color: colors.inkSoft }}>/mois</span></>
+                    <><span className="text-3xl font-extrabold">{plan.monthly}€</span><span className="text-sm" style={{ color: colors.inkSoft }}>/mois</span></>
                   )}
                 </div>
                 <ul className="mb-5 grow space-y-2 text-sm">
-                  {(plan.features || []).map((f) => <PlanFeatureItem key={f} text={f} />)}
+                  {(plan.features || []).map((f) => <PlanFeatureItem key={f} text={f} accentColor={planAccentColor(plan.id)} />)}
                 </ul>
                 <button onClick={onGetStarted} className="rounded-lg py-2 text-sm font-medium" style={{ background: plan.id === "essentiel" ? colors.brass : colors.ink, color: plan.id === "essentiel" ? colors.ink : "white" }}>Commencer</button>
+                </div>
               </div>
             ))}
           </div>
@@ -1937,24 +1940,26 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
           const price = billing === "annuel" ? plan.annual : plan.monthly;
           const paypalPlanId = billing === "annuel" ? plan.paypalPlanIdAnnual : plan.paypalPlanIdMonthly;
           return (
-            <div key={plan.id} className="flex flex-col rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
+            <div key={plan.id} className="flex flex-col overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
+              <div style={{ height: "6px", background: planAccentColor(plan.id) }} />
+              <div className="flex grow flex-col p-5">
               {plan.id === "essentiel" && (
                 <div className="mb-2 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.brassDark }}><Sparkles size={12} /> Le plus choisi</div>
               )}
-              <div className="df-display text-lg font-semibold">{plan.name}</div>
+              <div className="df-display text-lg font-bold" style={{ color: planAccentColor(plan.id) }}>{plan.name}</div>
               <div className="text-xs" style={{ color: colors.inkSoft }}>{plan.tagline}</div>
               <div className="df-mono mt-4 mb-4">
                 {price === null ? (
                   <span className="text-2xl font-semibold">Sur devis</span>
                 ) : (
                   <>
-                    <span className="text-2xl font-semibold">{price === 0 ? "0€" : `${billing === "annuel" ? Math.round(price / 12) : price}€`}</span>
+                    <span className="text-3xl font-extrabold">{price === 0 ? "0€" : `${billing === "annuel" ? Math.round(price / 12) : price}€`}</span>
                     <span className="text-sm" style={{ color: colors.inkSoft }}>/mois</span>
                   </>
                 )}
               </div>
               <ul className="mb-5 grow space-y-2 text-sm">
-                {plan.features.map((f) => <PlanFeatureItem key={f} text={f} />)}
+                {plan.features.map((f) => <PlanFeatureItem key={f} text={f} accentColor={planAccentColor(plan.id)} />)}
               </ul>
 
               {isCurrent ? (
@@ -1970,6 +1975,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
               ) : (
                 <p className="rounded-lg py-2 text-center text-xs" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible</p>
               )}
+              </div>
             </div>
           );
         })}
@@ -2220,21 +2226,39 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
   );
 }
 
-function PlanFeatureItem({ text }) {
+function planAccentColor(id) {
+  if (id === "gratuit") return colors.slate;
+  if (id === "essentiel") return colors.brass;
+  if (id === "pro") return colors.moss;
+  return colors.ink;
+}
+
+function PlanFeatureItem({ text, accentColor }) {
   const soon = text.includes("(bientôt disponible)");
+  const inherited = text.startsWith("Tout ");
   const clean = text.replace(" (bientôt disponible)", "");
+
   if (soon) {
     return (
       <li className="flex items-start gap-2" style={{ color: colors.inkSoft, fontStyle: "italic" }}>
         <Loader2 size={14} className="mt-0.5 shrink-0" style={{ color: colors.inkSoft }} />
-        <span>{clean} <span className="text-xs" style={{ color: colors.brassDark }}>— bientôt disponible</span></span>
+        <span>{clean} <span className="text-xs font-semibold" style={{ color: colors.brick }}>— bientôt disponible</span></span>
       </li>
     );
   }
+  if (inherited) {
+    return (
+      <li className="flex items-start gap-2" style={{ color: colors.inkSoft }}>
+        <Check size={14} className="mt-0.5 shrink-0" style={{ color: colors.inkSoft }} />
+        <span>{clean}</span>
+      </li>
+    );
+  }
+  // Fonctionnalité propre à ce forfait : mise en avant forte (gras + souligné + couleur du forfait)
   return (
     <li className="flex items-start gap-2">
-      <Check size={14} className="mt-0.5 shrink-0" style={{ color: colors.moss }} />
-      <span className="font-medium">{clean}</span>
+      <Check size={15} className="mt-0.5 shrink-0" style={{ color: accentColor }} />
+      <span className="font-bold" style={{ color: colors.ink, textDecoration: "underline", textDecorationColor: accentColor, textDecorationThickness: "2px", textUnderlineOffset: "3px" }}>{clean}</span>
     </li>
   );
 }
@@ -2250,6 +2274,70 @@ function LockedFeature({ onGoToPricing, title, text }) {
         <p className="mb-5 text-sm" style={{ color: colors.inkSoft }}>{text || "Passe à un forfait supérieur pour y avoir accès."}</p>
         <button onClick={onGoToPricing} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brassDark, color: "white" }}>Voir les forfaits</button>
       </div>
+    </div>
+  );
+}
+
+// Transforme **gras**, __souligné__ et ::couleur:: en éléments stylés.
+// Utilisé partout où un texte de devis/facture/proforma est affiché (PDF).
+// Retire les marqueurs **/__/:: pour les endroits qui ne peuvent pas
+// afficher de mise en forme (export Excel).
+function stripMarkup(text) {
+  return String(text || "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1").replace(/::(.+?)::/g, "$1");
+}
+
+function renderMarkup(text) {
+  if (!text) return text;
+  const parts = [];
+  let remaining = String(text);
+  const regex = /(\*\*(.+?)\*\*|__(.+?)__|::(.+?)::)/;
+  let key = 0;
+  while (remaining) {
+    const m = remaining.match(regex);
+    if (!m) { parts.push(remaining); break; }
+    if (m.index > 0) parts.push(remaining.slice(0, m.index));
+    if (m[2] !== undefined) parts.push(<strong key={key++}>{m[2]}</strong>);
+    else if (m[3] !== undefined) parts.push(<span key={key++} style={{ textDecoration: "underline" }}>{m[3]}</span>);
+    else if (m[4] !== undefined) parts.push(<span key={key++} style={{ color: "#B8763E", fontWeight: 600 }}>{m[4]}</span>);
+    remaining = remaining.slice(m.index + m[0].length);
+  }
+  return parts;
+}
+
+// Champ texte avec petite barre Gras/Souligné/Couleur — réservée aux
+// forfaits Essentiel et Pro (le forfait Gratuit garde un champ simple).
+function FormattableField({ value, onChange, placeholder, className, style, multiline, enabled, onKeyDown, autoFocus, wrapperClassName }) {
+  const ref = useRef(null);
+
+  function wrap(marker) {
+    const el = ref.current;
+    if (!el) return;
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const selected = value.slice(start, end) || "texte";
+    const newValue = value.slice(0, start) + marker + selected + marker + value.slice(end);
+    onChange(newValue);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + marker.length, start + marker.length + selected.length);
+    });
+  }
+
+  const fieldProps = {
+    ref, value, placeholder, className, style, onKeyDown, autoFocus,
+    onChange: (e) => onChange(e.target.value),
+  };
+
+  return (
+    <div className={wrapperClassName}>
+      {enabled && (
+        <div className="no-print mb-1 flex gap-1">
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => wrap("**")} className="rounded px-1.5 text-xs font-bold" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }} title="Gras">G</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => wrap("__")} className="rounded px-1.5 text-xs underline" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }} title="Souligné">S</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => wrap("::")} className="rounded px-1.5 text-xs font-semibold" style={{ border: `1px solid ${colors.line}`, color: colors.brassDark }} title="Couleur">C</button>
+        </div>
+      )}
+      {multiline ? <textarea {...fieldProps} /> : <input {...fieldProps} />}
     </div>
   );
 }
@@ -2405,25 +2493,13 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
     setAiLoading(true);
     setAiError(null);
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          messages: [
-            {
-              role: "user",
-              content: `Tu es un assistant pour un artisan du bâtiment français qui rédige un devis. À partir de la description du chantier ci-dessous, propose une liste de lignes de devis structurées et réalistes pour ce métier (10 lignes maximum). Ne propose AUCUN prix : les artisans fixent eux-mêmes leurs prix. Réponds UNIQUEMENT avec un tableau JSON valide, sans texte avant ni après, sans balises markdown, exactement sous cette forme : [{"designation":"...", "qty":1, "unit":"forfait"}]. Unités possibles : forfait, heure, jour, m², m³, ml, pièce, kg, lot, ou une chaîne vide.\n\nDescription du chantier : ${aiDescription.trim()}`,
-            },
-          ],
-        }),
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data, error } = await supabase.functions.invoke("suggest-lines", {
+        body: { description: aiDescription.trim() },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
       });
-      if (!response.ok) throw new Error(`Erreur API (${response.status})`);
-      const data = await response.json();
-      const text = (data.content || []).map((b) => b.text || "").join("").trim();
-      const clean = text.replace(/^```json\s*|^```\s*|```\s*$/g, "").trim();
-      const parsed = JSON.parse(clean);
+      if (error) throw error;
+      const parsed = data?.lines;
       if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Réponse vide");
       const newLines = parsed.slice(0, 25).map((item) => ({
         id: nextId("l"), type: "line",
@@ -2438,7 +2514,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
       setAiDescription("");
     } catch (e) {
       console.error(e);
-      setAiError("Cette fonctionnalité nécessite un serveur qui n'est pas encore en place sur ce déploiement (elle ne fonctionne que dans l'aperçu Claude.ai) — voir le Dossier de passation technique, section IA.");
+      setAiError("Impossible de générer les lignes pour le moment. Vérifie que la fonction \"suggest-lines\" est bien déployée et configurée (clé Gemini) — voir le Guide de déploiement, section IA. Sinon, réessaie dans un instant.");
     } finally {
       setAiLoading(false);
     }
@@ -2519,7 +2595,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
     computedLines.forEach((l) => {
       rows.push([l.designation, "", l.qty, l.unit, Number(l.unitPrice) || 0, l.tva, l.discount, Number(l.totalHT.toFixed(2))]);
       (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
-        rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + d.text, "", "", "", "", "", Number(d.price) > 0 ? Number(d.price) : ""]);
+        rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + stripMarkup(d.text), "", "", "", "", "", Number(d.price) > 0 ? Number(d.price) : ""]);
       });
     });
     rows.push([]);
@@ -2909,13 +2985,15 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
                         >
                           {MARKERS.map((m) => <option key={m} value={m}>{m}</option>)}
                         </select>
-                        <input
-                          className="df-input grow rounded-md px-2 py-1 text-xs"
+                        <FormattableField
+                          wrapperClassName="grow"
+                          enabled={hasEssentiel}
+                          className="df-input w-full rounded-md px-2 py-1 text-xs"
                           style={{ ...inputStyle, opacity: d.included ? 1 : 0.45 }}
                           placeholder={d.level === 1 ? "Description" : "Sous-description"}
                           value={d.text}
                           autoFocus={d.id === lastAddedDetailId}
-                          onChange={(e) => updateDetail(it.id, d.id, { text: e.target.value })}
+                          onChange={(v) => updateDetail(it.id, d.id, { text: v })}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") { e.preventDefault(); addDetail(it.id, d.level, d.id); }
                             else if (e.key === "Tab") { e.preventDefault(); e.shiftKey ? outdentDetail(it.id, d.id) : indentDetail(it.id, d.id); }
@@ -2976,7 +3054,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
 
           <div className="mt-8 border-t pt-6" style={{ borderColor: colors.line }}>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Notes</label>
-            <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, minHeight: "3.5rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+            <FormattableField multiline enabled={hasEssentiel} className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, minHeight: "3.5rem" }} value={localDoc.notes} onChange={(v) => patch({ notes: v })} />
           </div>
 
           <div className="mt-8 border-t pt-6" style={{ borderColor: colors.line }}>
