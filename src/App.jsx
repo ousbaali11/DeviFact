@@ -36,8 +36,8 @@ const PROFORMA_STATUSES = ["brouillon", "envoyée", "acceptée", "expirée"];
 const PLANS = [
   { id: "gratuit", name: "Gratuit", monthly: 0, annual: 0, limit: 3, tagline: "Pour découvrir", features: ["3 devis ou factures", "Export PDF (avec filigrane)", "1 utilisateur"] },
   { id: "essentiel", name: "Essentiel", monthly: 19, annual: 182, limit: Infinity, tagline: "Pour l'artisan solo", features: ["Devis et factures illimités", "Export PDF/Excel sans filigrane", "Signature électronique", "1 utilisateur"] },
-  { id: "pro", name: "Pro", monthly: 39, annual: 374, limit: Infinity, tagline: "Pour l'entreprise", features: ["Tout Essentiel", "Multi-utilisateurs", "Bibliothèque de prestations", "Suggestions IA", "Relances automatiques"] },
-  { id: "entreprise", name: "Entreprise", monthly: null, annual: null, limit: Infinity, tagline: "Sur mesure", features: ["Tout Pro", "API", "Support prioritaire"] },
+  { id: "pro", name: "Pro", monthly: 39, annual: 374, limit: Infinity, tagline: "Pour l'entreprise", features: ["Tout Essentiel", "Multi-utilisateurs (bientôt disponible)", "Bibliothèque de prestations", "Suggestions IA", "Relances automatiques"] },
+  { id: "entreprise", name: "Entreprise", monthly: null, annual: null, limit: Infinity, tagline: "Sur mesure", features: ["Tout Pro", "API (bientôt disponible)", "Support prioritaire"] },
 ];
 function planLabel(id) { return PLANS.find((p) => p.id === id)?.name || "Gratuit"; }
 
@@ -959,7 +959,11 @@ export default function DeviFactApp() {
       <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} />
+        {hasAccess(account, "pro") ? (
+          <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} />
+        ) : (
+          <LockedFeature onGoToPricing={() => setView("pricing")} />
+        )}
       </div>
     );
   }
@@ -1031,7 +1035,15 @@ export default function DeviFactApp() {
           <StatCard label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
         </div>
 
-        {reminders.length > 0 && (
+        {reminders.length > 0 && !hasAccess(account, "pro") && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-3" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
+            <span className="flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}>
+              <Lock size={14} /> {reminders.length} relance(s) à faire — fonctionnalité réservée aux forfaits Pro et Entreprise
+            </span>
+            <button onClick={() => setView("pricing")} className="text-xs font-medium underline" style={{ color: colors.brassDark }}>Voir les forfaits</button>
+          </div>
+        )}
+        {reminders.length > 0 && hasAccess(account, "pro") && (
           <div className="mb-6 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
             <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: `${colors.brick}0F`, borderBottom: `1px solid ${colors.line}` }}>
               <AlertTriangle size={14} style={{ color: colors.brick }} />
@@ -1282,9 +1294,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
                   )}
                 </div>
                 <ul className="mb-5 grow space-y-2 text-sm">
-                  {(plan.features || []).map((f) => (
-                    <li key={f} className="flex items-start gap-2"><Check size={14} className="mt-0.5 shrink-0" style={{ color: colors.moss }} /> {f}</li>
-                  ))}
+                  {(plan.features || []).map((f) => <PlanFeatureItem key={f} text={f} />)}
                 </ul>
                 <button onClick={onGetStarted} className="rounded-lg py-2 text-sm font-medium" style={{ background: plan.id === "essentiel" ? colors.brass : colors.ink, color: plan.id === "essentiel" ? colors.ink : "white" }}>Commencer</button>
               </div>
@@ -1501,7 +1511,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
               </div>
             ) : (
               <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
-                <Icon size={15} /> {label}
+                <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} />}
               </button>
             )
           )}
@@ -1944,11 +1954,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
                 )}
               </div>
               <ul className="mb-5 grow space-y-2 text-sm">
-                {plan.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2">
-                    <Check size={14} className="mt-0.5 shrink-0" style={{ color: colors.moss }} /> {f}
-                  </li>
-                ))}
+                {plan.features.map((f) => <PlanFeatureItem key={f} text={f} />)}
               </ul>
 
               {isCurrent ? (
@@ -2214,6 +2220,40 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
   );
 }
 
+function PlanFeatureItem({ text }) {
+  const soon = text.includes("(bientôt disponible)");
+  const clean = text.replace(" (bientôt disponible)", "");
+  if (soon) {
+    return (
+      <li className="flex items-start gap-2" style={{ color: colors.inkSoft, fontStyle: "italic" }}>
+        <Loader2 size={14} className="mt-0.5 shrink-0" style={{ color: colors.inkSoft }} />
+        <span>{clean} <span className="text-xs" style={{ color: colors.brassDark }}>— bientôt disponible</span></span>
+      </li>
+    );
+  }
+  return (
+    <li className="flex items-start gap-2">
+      <Check size={14} className="mt-0.5 shrink-0" style={{ color: colors.moss }} />
+      <span className="font-medium">{clean}</span>
+    </li>
+  );
+}
+
+function LockedFeature({ onGoToPricing, title, text }) {
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
+      <div className="flex flex-col items-center rounded-2xl p-10 text-center" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
+        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full" style={{ background: colors.paper, color: colors.brassDark }}>
+          <Lock size={20} />
+        </div>
+        <h2 className="df-display mb-1 text-lg font-semibold">{title || "Fonctionnalité réservée aux forfaits Pro et Entreprise"}</h2>
+        <p className="mb-5 text-sm" style={{ color: colors.inkSoft }}>{text || "Passe à un forfait supérieur pour y avoir accès."}</p>
+        <button onClick={onGoToPricing} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brassDark, color: "white" }}>Voir les forfaits</button>
+      </div>
+    </div>
+  );
+}
+
 function StatCard({ label, value, sub, color }) {
   return (
     <div className="rounded-2xl p-4" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
@@ -2398,7 +2438,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
       setAiDescription("");
     } catch (e) {
       console.error(e);
-      setAiError("Impossible de générer les lignes pour le moment (vérifie ta connexion, ou réessaie).");
+      setAiError("Cette fonctionnalité nécessite un serveur qui n'est pas encore en place sur ce déploiement (elle ne fonctionne que dans l'aperçu Claude.ai) — voir le Dossier de passation technique, section IA.");
     } finally {
       setAiLoading(false);
     }
