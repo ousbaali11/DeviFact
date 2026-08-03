@@ -34,8 +34,8 @@ const FACTURE_STATUSES = ["brouillon", "envoyée", "payée", "en retard"];
 const PROFORMA_STATUSES = ["brouillon", "envoyée", "acceptée", "expirée"];
 
 const PLANS = [
-  { id: "gratuit", name: "Gratuit", monthly: 0, annual: 0, limit: 3, tagline: "Pour découvrir", features: ["3 devis ou factures", "Export PDF (avec filigrane)", "1 utilisateur"] },
-  { id: "essentiel", name: "Essentiel", monthly: 19, annual: 182, limit: Infinity, tagline: "Pour l'artisan solo", features: ["Devis et factures illimités", "Export PDF/Excel sans filigrane", "Signature électronique", "1 utilisateur"] },
+  { id: "gratuit", name: "Gratuit", monthly: 0, annual: 0, limit: 3, tagline: "Pour découvrir", features: ["3 devis ou factures", "Export PDF", "1 utilisateur"] },
+  { id: "essentiel", name: "Essentiel", monthly: 19, annual: 182, limit: Infinity, tagline: "Pour l'artisan solo", features: ["Devis et factures illimités", "Export PDF/Excel", "Signature électronique", "1 utilisateur"] },
   { id: "pro", name: "Pro", monthly: 39, annual: 374, limit: Infinity, tagline: "Pour l'entreprise", features: ["Tout Essentiel", "Multi-utilisateurs (bientôt disponible)", "Bibliothèque de prestations", "Suggestions IA", "Relances automatiques"] },
   { id: "entreprise", name: "Entreprise", monthly: null, annual: null, limit: Infinity, tagline: "Sur mesure", features: ["Tout Pro", "API (bientôt disponible)", "Support prioritaire"] },
 ];
@@ -253,14 +253,14 @@ const GlobalStyle = () => (
   `}</style>
 );
 
-function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
+function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true }) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
   const dueDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
   const lineItems = (doc.items || []).filter((i) => i.type === "line" || i.type === "section");
   const ink = "#1B2A33", inkSoft = "#4A5B63", brass = "#B8763E", brassDark = "#8F5C2E", line = "#DAE1DC", box = "#F1F0EA";
   const mono = { fontFamily: "'IBM Plex Mono', monospace" };
-  const isFreeWatermark = (accountPlan || "gratuit") === "gratuit";
+  const isFreeWatermark = watermarkEnabled; // contrôlé par l'Admin, forfait par forfait
   const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
@@ -302,7 +302,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
 
       {/* Émetteur / Client */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "20px", position: "relative", zIndex: 1 }}>
-        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+        <div style={{ flex: 1, padding: "0 2px" }}>
           <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
           {doc.company.address && <div>{doc.company.address}</div>}
           {doc.company.phone && <div>Téléphone : {doc.company.phone}</div>}
@@ -310,8 +310,8 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
           {doc.company.type !== "particulier" && doc.company.siret && <div>SIRET : {doc.company.siret}</div>}
           {doc.company.type !== "particulier" && doc.company.tva && <div>N° TVA : {doc.company.tva}</div>}
         </div>
-        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
-          <div style={{ fontWeight: 700, marginBottom: "3px", color: brassDark }}>{doc.client.type === "particulier" ? "Client (particulier) :" : "Client (entreprise) :"}</div>
+        <div style={{ flex: 1, padding: "0 2px" }}>
+          <div style={{ fontWeight: 700, marginBottom: "3px", color: brassDark }}>Client :</div>
           <div style={{ fontWeight: 600 }}>{doc.client.name || "—"}</div>
           {doc.client.address && <div>{doc.client.address}</div>}
           {doc.client.email && <div>{doc.client.email}</div>}
@@ -526,6 +526,7 @@ export default function DeviFactApp() {
         hidden: !row.is_visible,
         paypalPlanIdMonthly: row.paypal_plan_id_monthly || "",
         paypalPlanIdAnnual: row.paypal_plan_id_annual || "",
+        watermarkEnabled: row.watermark_enabled ?? true,
       };
     });
     setPlans(merged);
@@ -616,6 +617,14 @@ export default function DeviFactApp() {
     const current = plans.find((p) => p.id === planId);
     const { error } = await supabase.from("plans").update({ is_visible: !!current?.hidden }).eq("id", planId);
     if (error) console.error("Erreur de mise à jour de la visibilité (droits admin requis)", error);
+    await loadPlans();
+    setSavingPlanSettings(false);
+  }
+  async function toggleWatermark(planId) {
+    setSavingPlanSettings(true);
+    const current = plans.find((p) => p.id === planId);
+    const { error } = await supabase.from("plans").update({ watermark_enabled: !current?.watermarkEnabled }).eq("id", planId);
+    if (error) console.error("Erreur de mise à jour du filigrane (droits admin requis)", error);
     await loadPlans();
     setSavingPlanSettings(false);
   }
@@ -958,6 +967,7 @@ export default function DeviFactApp() {
         clients={clients}
         prestations={prestations}
         account={account}
+        plans={plans}
         siteSettings={siteSettings}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
         onBack={backToDashboard}
@@ -1039,6 +1049,7 @@ export default function DeviFactApp() {
           plans={plans}
           savingPlanSettings={savingPlanSettings}
           onTogglePlan={togglePlanVisibility}
+          onToggleWatermark={toggleWatermark}
           onUpdatePlanPrice={updatePlanPrice}
           onUpdatePlanPaypalId={updatePlanPaypalId}
           onTogglePayment={togglePaymentStatus}
@@ -2152,7 +2163,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onUpdatePlanPrice, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const totalTTC = documents.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
   const paid = account?.paymentStatus === "payé";
@@ -2232,14 +2243,28 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
             ) : (
               <span className="text-xs" style={{ color: colors.inkSoft }}>Sur devis</span>
             )}
-            <span className="ml-auto text-xs font-medium" style={{ color: plan.hidden ? colors.brick : colors.moss }}>{plan.hidden ? "Masqué" : "Visible"}</span>
-            <button
-              onClick={() => onTogglePlan(plan.id)}
-              title={plan.hidden ? "Rendre visible" : "Masquer ce forfait"}
-              style={{ color: plan.hidden ? colors.inkSoft : colors.moss }}
-            >
-              {plan.hidden ? <ToggleLeft size={26} /> : <ToggleRight size={26} />}
-            </button>
+            <div className="ml-auto flex items-center gap-4">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium" style={{ color: plan.watermarkEnabled === false ? colors.inkSoft : colors.brassDark }}>Filigrane</span>
+                <button
+                  onClick={() => onToggleWatermark(plan.id)}
+                  title={plan.watermarkEnabled === false ? "Activer le filigrane pour ce forfait" : "Retirer le filigrane pour ce forfait"}
+                  style={{ color: plan.watermarkEnabled === false ? colors.line : colors.brassDark }}
+                >
+                  {plan.watermarkEnabled === false ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium" style={{ color: plan.hidden ? colors.brick : colors.moss }}>{plan.hidden ? "Masqué" : "Visible"}</span>
+                <button
+                  onClick={() => onTogglePlan(plan.id)}
+                  title={plan.hidden ? "Rendre visible" : "Masquer ce forfait"}
+                  style={{ color: plan.hidden ? colors.inkSoft : colors.moss }}
+                >
+                  {plan.hidden ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
+                </button>
+              </div>
+            </div>
           </div>
         ))}
       </div>
@@ -2401,7 +2426,7 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-function Editor({ doc, saving, clients, prestations, account, siteSettings, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
+function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
@@ -2591,6 +2616,8 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
   const { computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines } = computeTotals(localDoc);
   const hasEssentiel = hasAccess(account, "essentiel");
   const hasPro = hasAccess(account, "pro");
+  const currentPlanData = plans.find((p) => p.id === (account?.plan || "gratuit"));
+  const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
   const validityDate = new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.validityDays) || 0) * 86400000);
   const dueDate = new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 0) * 86400000);
 
@@ -3220,7 +3247,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
           </div>
         </div>
       </div>
-      <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} />
+      <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
 }
