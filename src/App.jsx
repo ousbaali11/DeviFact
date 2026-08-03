@@ -99,7 +99,7 @@ const fr = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", mont
 const frLong = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 
 function emptyLine() {
-  return { id: nextId("l"), type: "line", designation: "", details: [], qty: 1, unit: "forfait", unitPrice: 0, tva: 20, discount: 0 };
+  return { id: nextId("l"), type: "line", designation: "", details: [], qty: 1, unit: "forfait", unitPrice: 0, tva: 20, discount: 0, marginScheme: false, purchasePriceTTC: "", salePriceTTC: "" };
 }
 const MARKERS = ["▪", "•", "◦", "‣", "▹", "►", "→", "–", "✓", "×", "★", "◆", "○", "■", "♦"];
 function defaultMarker(level) {
@@ -119,6 +119,23 @@ function detailsSum(details) {
 function lineBaseHT(l) {
   return (Number(l.qty) || 0) * (Number(l.unitPrice) || 0) + detailsSum(l.details);
 }
+// Calcul du régime de la TVA sur la marge (article 297 A du CGI) :
+// la TVA n'est due que sur la marge (prix de vente TTC - prix d'achat
+// TTC), pas sur le prix de vente total. Le client ne paie que le prix
+// de vente TTC affiché — aucune TVA n'est ajoutée par-dessus.
+function lineMarginCalc(l, lineDiscount, globalDiscount) {
+  const qty = Number(l.qty) || 0;
+  const sale = Number(l.salePriceTTC) || 0;
+  const purchase = Number(l.purchasePriceTTC) || 0;
+  const factor = (1 - (Number(lineDiscount) || 0) / 100) * (1 - (Number(globalDiscount) || 0) / 100);
+  const saleTTC = qty * sale * factor;
+  const marginTTC = Math.max(0, qty * (sale - purchase)) * factor;
+  const rate = Number(l.tva) || 0;
+  const marginTVA = (marginTTC * rate) / (100 + rate);
+  const totalHT = saleTTC - marginTVA; // pour que Total HT + TVA = prix TTC facturé au client
+  return { saleTTC, marginTTC, marginTVA, totalHT };
+}
+const DEFAULT_MARGIN_MENTION = "Régime particulier - Biens d'occasion (article 297 A du CGI). TVA calculée sur la marge, non récupérable par l'acheteur.";
 function emptySection() {
   return { id: nextId("s"), type: "section", title: "", subtitle: "" };
 }
@@ -175,6 +192,7 @@ function newDocument(type, documents) {
     globalDiscount: 0,
     acompte: 0,
     notes: "Merci de votre confiance.",
+    marginLegalMention: DEFAULT_MARGIN_MENTION,
     signature: { mode: "texte", name: "", image: null, drawing: null },
     proforma: type === "proforma" ? emptyProforma() : null,
     status: "brouillon",
@@ -186,6 +204,10 @@ function newDocument(type, documents) {
 function computeTotals(doc) {
   const lineItems = (doc.items || []).filter((i) => i.type === "line");
   const computedLines = lineItems.map((l) => {
+    if (l.marginScheme) {
+      const { saleTTC, marginTTC, marginTVA, totalHT } = lineMarginCalc(l, l.discount, doc.globalDiscount);
+      return { ...l, totalHT, marginTVA, marginTTC, saleTTC };
+    }
     const base = lineBaseHT(l);
     const afterLine = base * (1 - (Number(l.discount) || 0) / 100);
     const afterGlobal = afterLine * (1 - (Number(doc.globalDiscount) || 0) / 100);
@@ -195,13 +217,15 @@ function computeTotals(doc) {
   const tvaGroups = {};
   computedLines.forEach((l) => {
     const rate = Number(l.tva) || 0;
-    tvaGroups[rate] = (tvaGroups[rate] || 0) + (l.totalHT * rate) / 100;
+    const lineTVA = l.marginScheme ? (l.marginTVA || 0) : (l.totalHT * rate) / 100;
+    tvaGroups[rate] = (tvaGroups[rate] || 0) + lineTVA;
   });
   const totalTVA = Object.values(tvaGroups).reduce((a, b) => a + b, 0);
   const totalTTC = subtotalHT + totalTVA;
   const acompteAmount = totalTTC * ((Number(doc.acompte) || 0) / 100);
   const resteAPayer = totalTTC - acompteAmount;
-  return { computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer };
+  const hasMarginLines = computedLines.some((l) => l.marginScheme);
+  return { computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines };
 }
 
 const GlobalStyle = () => (
@@ -346,8 +370,10 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
               </tr>
             )
           ) : (() => {
-            const lineHT = lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(doc.globalDiscount) || 0) / 100);
-            const lineTVA = lineHT * (Number(it.tva) || 0) / 100;
+            const isMargin = it.marginScheme;
+            const marginCalc = isMargin ? lineMarginCalc(it, it.discount, doc.globalDiscount) : null;
+            const lineHT = isMargin ? 0 : lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(doc.globalDiscount) || 0) / 100);
+            const lineTVA = isMargin ? 0 : (lineHT * (Number(it.tva) || 0)) / 100;
             return (
               <tr key={it.id} style={{ pageBreakInside: "avoid", borderBottom: `1px solid ${line}`, background: idx % 2 ? "transparent" : "rgba(27,42,51,0.02)" }}>
                 <td style={{ padding: "6px 6px", verticalAlign: "top" }}>
@@ -361,15 +387,30 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings }) {
                 </td>
                 <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{it.qty}</td>
                 <td style={{ padding: "6px 6px", verticalAlign: "top" }}>{it.unit}</td>
-                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(Number(it.unitPrice) || 0, doc.currency)}</td>
-                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{it.tva}%</td>
-                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(lineTVA, doc.currency)}</td>
-                <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono, fontWeight: 600 }}>{formatMoney(lineHT, doc.currency)}</td>
+                {isMargin ? (
+                  <>
+                    <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(Number(it.salePriceTTC) || 0, doc.currency)}</td>
+                    <td colSpan={2} style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", fontSize: "8pt", fontStyle: "italic", color: inkSoft }}>Régime de la marge*</td>
+                    <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono, fontWeight: 600 }}>{formatMoney(marginCalc.saleTTC, doc.currency)}</td>
+                  </>
+                ) : (
+                  <>
+                    <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(Number(it.unitPrice) || 0, doc.currency)}</td>
+                    <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{it.tva}%</td>
+                    <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(lineTVA, doc.currency)}</td>
+                    <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono, fontWeight: 600 }}>{formatMoney(lineHT, doc.currency)}</td>
+                  </>
+                )}
               </tr>
             );
           })())}
         </tbody>
       </table>
+      {totals.hasMarginLines && (
+        <div style={{ marginTop: "6px", fontSize: "7.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>
+          * {doc.marginLegalMention || DEFAULT_MARGIN_MENTION}
+        </div>
+      )}
 
       {/* Conditions + Totaux */}
       <div style={{ display: "flex", justifyContent: "space-between", gap: "24px", marginTop: "18px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
@@ -2547,7 +2588,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
     patch({ items: copy });
   }
 
-  const { computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = computeTotals(localDoc);
+  const { computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines } = computeTotals(localDoc);
   const hasEssentiel = hasAccess(account, "essentiel");
   const hasPro = hasAccess(account, "pro");
   const validityDate = new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.validityDays) || 0) * 86400000);
@@ -2608,9 +2649,14 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
     rows.push([]);
     rows.push(["Client", localDoc.client.name]);
     rows.push([]);
-    rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT", "TVA %", "Remise %", "Total HT"]);
+    rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT / PV TTC (marge)", "TVA %", "Remise %", "Total"]);
     computedLines.forEach((l) => {
-      rows.push([l.designation, "", l.qty, l.unit, Number(l.unitPrice) || 0, l.tva, l.discount, Number(l.totalHT.toFixed(2))]);
+      const puValue = l.marginScheme ? Number(l.salePriceTTC) || 0 : Number(l.unitPrice) || 0;
+      const lineTotal = l.marginScheme ? Number(l.saleTTC || 0) : Number(l.totalHT || 0);
+      rows.push([l.designation + (l.marginScheme ? " (régime de la marge)" : ""), "", l.qty, l.unit, puValue, l.tva, l.discount, Number(lineTotal.toFixed(2))]);
+      if (l.marginScheme) {
+        rows.push(["", `Prix d'achat TTC unitaire : ${Number(l.purchasePriceTTC) || 0} — TVA sur marge : ${Number(l.marginTVA || 0).toFixed(2)}`, "", "", "", "", "", ""]);
+      }
       (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
         rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + stripMarkup(d.text), "", "", "", "", "", Number(d.price) > 0 ? Number(d.price) : ""]);
       });
@@ -2964,21 +3010,57 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
                   <input type="checkbox" className="no-print mt-2" checked={selectedLineIds.includes(it.id)} onChange={() => toggleLineSelect(it.id)} style={{ accentColor: colors.brick }} />
                   <div className="grow basis-56">
                     <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Désignation" value={it.designation} onChange={(e) => updateItem(it.id, { designation: e.target.value })} />
-                    {!(openDetailsFor.includes(it.id) || (it.details || []).length > 0) && (
-                      <button onClick={() => addDetail(it.id, 1)} className="no-print mt-1 flex items-center gap-1 text-xs" style={{ color: colors.slate }}>
-                        <Plus size={11} /> Ajouter une description détaillée
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      {!(openDetailsFor.includes(it.id) || (it.details || []).length > 0) && (
+                        <button onClick={() => addDetail(it.id, 1)} className="no-print flex items-center gap-1 text-xs" style={{ color: colors.slate }}>
+                          <Plus size={11} /> Ajouter une description détaillée
+                        </button>
+                      )}
+                      <button
+                        onClick={() => updateItem(it.id, { marginScheme: !it.marginScheme })}
+                        className="no-print flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium"
+                        style={{ background: it.marginScheme ? `${colors.moss}18` : "transparent", color: it.marginScheme ? colors.moss : colors.inkSoft, border: `1px solid ${it.marginScheme ? colors.moss : colors.line}` }}
+                        title="Régime particulier : TVA calculée sur la marge (biens d'occasion, article 297 A du CGI) au lieu du prix total"
+                      >
+                        <Calculator size={11} /> TVA sur marge
                       </button>
+                    </div>
+                    {it.marginScheme && (
+                      <div className="no-print mt-2 flex flex-wrap gap-2 rounded-md p-2" style={{ background: "rgba(91,122,85,0.06)" }}>
+                        <label className="text-xs" style={{ color: colors.inkSoft }}>
+                          Prix d'achat TTC (unitaire)
+                          <input type="number" className="df-input df-mono mt-0.5 block w-32 rounded-md px-2 py-1 text-sm" style={inputStyle} value={it.purchasePriceTTC} onChange={(e) => updateItem(it.id, { purchasePriceTTC: e.target.value })} />
+                        </label>
+                        <label className="text-xs" style={{ color: colors.inkSoft }}>
+                          Prix de vente TTC (unitaire)
+                          <input type="number" className="df-input df-mono mt-0.5 block w-32 rounded-md px-2 py-1 text-sm" style={inputStyle} value={it.salePriceTTC} onChange={(e) => updateItem(it.id, { salePriceTTC: e.target.value })} />
+                        </label>
+                        <div className="text-xs" style={{ color: colors.inkSoft }}>
+                          Marge TTC
+                          <div className="df-mono mt-0.5 font-medium" style={{ color: colors.moss }}>{formatMoney(lineMarginCalc(it, it.discount, localDoc.globalDiscount).marginTTC, localDoc.currency)}</div>
+                        </div>
+                        <div className="text-xs" style={{ color: colors.inkSoft }}>
+                          dont TVA sur marge
+                          <div className="df-mono mt-0.5 font-medium">{formatMoney(lineMarginCalc(it, it.discount, localDoc.globalDiscount).marginTVA, localDoc.currency)}</div>
+                        </div>
+                      </div>
                     )}
                   </div>
                   <input type="number" className="df-input df-mono w-14 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.qty} onChange={(e) => updateItem(it.id, { qty: e.target.value })} />
                   <select className="df-select w-20 rounded-md px-1 py-1.5 text-sm" style={inputStyle} value={it.unit} onChange={(e) => updateItem(it.id, { unit: e.target.value })}>
                     {UNIT_OPTIONS.map((u) => <option key={u || "none"} value={u}>{unitLabel(u)}</option>)}
                   </select>
-                  <input type="number" className="df-input df-mono w-24 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.unitPrice} onChange={(e) => updateItem(it.id, { unitPrice: e.target.value })} />
+                  {it.marginScheme ? (
+                    <div className="w-24 rounded-md px-1 py-1.5 text-right text-sm" style={{ color: colors.inkSoft }} title="Prix de vente TTC (voir ci-dessus)">TTC</div>
+                  ) : (
+                    <input type="number" className="df-input df-mono w-24 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.unitPrice} onChange={(e) => updateItem(it.id, { unitPrice: e.target.value })} />
+                  )}
                   <input type="number" step="0.1" min="0" title="Taux de TVA (%)" className="df-input df-mono w-16 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.tva} onChange={(e) => updateItem(it.id, { tva: e.target.value })} />
                   <input type="number" className="df-input df-mono w-16 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.discount} onChange={(e) => updateItem(it.id, { discount: e.target.value })} />
                   <div className="df-mono w-24 py-1.5 text-right text-sm font-medium">
-                    {formatMoney(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(localDoc.globalDiscount) || 0) / 100), localDoc.currency)}
+                    {it.marginScheme
+                      ? formatMoney(lineMarginCalc(it, it.discount, localDoc.globalDiscount).saleTTC, localDoc.currency)
+                      : formatMoney(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(localDoc.globalDiscount) || 0) / 100), localDoc.currency)}
                   </div>
                   <div className="no-print flex w-24 shrink-0 justify-end gap-1 pt-1.5">
                     <button onClick={() => saveLineAsPrestation(it)} title="Enregistrer comme prestation" style={{ color: colors.brassDark }}><BookmarkPlus size={14} /></button>
@@ -3074,6 +3156,18 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
             <FormattableField multiline enabled={hasEssentiel} className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, minHeight: "3.5rem" }} value={localDoc.notes} onChange={(v) => patch({ notes: v })} />
           </div>
 
+          {localDoc.items.some((it) => it.marginScheme) && (
+            <div className="mt-8 border-t pt-6" style={{ borderColor: colors.line }}>
+              <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.moss }}>
+                <Calculator size={13} /> Mention légale — TVA sur la marge
+              </label>
+              <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>
+                Adapte ce texte à ta situation (biens d'occasion, objets d'art, véhicules d'occasion...) — la loi impose une mention précise selon la catégorie.
+              </p>
+              <textarea className="df-textarea w-full rounded-md px-3 py-2 text-xs" style={{ ...inputStyle, minHeight: "3rem" }} value={localDoc.marginLegalMention || DEFAULT_MARGIN_MENTION} onChange={(e) => patch({ marginLegalMention: e.target.value })} />
+            </div>
+          )}
+
           <div className="mt-8 border-t pt-6" style={{ borderColor: colors.line }}>
             <div className="df-display mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
               Signature du client (optionnelle) {!hasEssentiel && <Lock size={12} style={{ color: colors.inkSoft }} />}
@@ -3126,7 +3220,7 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
           </div>
         </div>
       </div>
-      <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer }} accountPlan={account?.plan} siteSettings={siteSettings} />
+      <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} />
     </div>
   );
 }
