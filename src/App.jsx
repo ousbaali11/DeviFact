@@ -606,6 +606,18 @@ export default function DeviFactApp() {
     if (error) { console.error("Erreur de passage au forfait gratuit", error); return; }
     setAccount((prev) => ({ ...prev, plan: "gratuit", paymentStatus: "gratuit" }));
   }
+  // Active directement un forfait payant dont le prix est à 0€, sans passer
+  // par PayPal (inutile de créer une souscription pour un montant nul).
+  // Sûr : le prix vient de la table "plans" en base, que seul un admin
+  // peut modifier (RLS) — un utilisateur ne peut pas déclencher ceci en
+  // falsifiant un prix depuis son navigateur.
+  async function chooseZeroPricePlan(planId, billingCycle) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase.from("profiles").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", user.id);
+    if (error) { console.error("Erreur d'activation du forfait à 0€", error); return; }
+    setAccount((prev) => ({ ...prev, plan: planId, billing: billingCycle, paymentStatus: "payé" }));
+  }
   async function togglePaymentStatus() {
     if (!account) return;
     const { data: { user } } = await supabase.auth.getUser();
@@ -961,6 +973,7 @@ export default function DeviFactApp() {
           account={account}
           plans={plans}
           onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); setView("dashboard"); }}
+          onChooseZeroPrice={async (planId, billingCycle) => { await chooseZeroPricePlan(planId, billingCycle); setLimitNotice(false); setView("dashboard"); }}
           limitNotice={limitNotice}
           documentCount={documents.length}
         />
@@ -1876,7 +1889,7 @@ function PayPalButton({ planId, userId, onApproved }) {
   return <div ref={containerRef} />;
 }
 
-function PricingView({ account, plans, onChooseFree, limitNotice, documentCount }) {
+function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNotice, documentCount }) {
   const [billing, setBilling] = useState(account?.billing || "mensuel");
   const [approvedMsg, setApprovedMsg] = useState(false);
   const visiblePlans = plans.filter((p) => !p.hidden);
@@ -1944,6 +1957,8 @@ function PricingView({ account, plans, onChooseFree, limitNotice, documentCount 
                 <button onClick={onChooseFree} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Choisir ce forfait</button>
               ) : plan.id === "entreprise" ? (
                 <a href="mailto:contact@devifact.fr?subject=Forfait%20Entreprise" className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Nous contacter</a>
+              ) : price === 0 ? (
+                <button onClick={() => onChooseZeroPrice(plan.id, billing)} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Activer (0€)</button>
               ) : paypalPlanId ? (
                 <PayPalButton planId={paypalPlanId} userId={account?.id} onApproved={() => setApprovedMsg(true)} />
               ) : (
@@ -2142,6 +2157,12 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
           Modifie le prix affiché, masque un forfait de la page publique, et colle l'identifiant du forfait créé côté PayPal (obligatoire pour que le bouton d'abonnement fonctionne).
         </p>
+        <div className="flex items-start gap-2 border-b px-4 py-2.5" style={{ borderColor: colors.line, background: `${colors.brick}0D` }}>
+          <AlertTriangle size={13} style={{ color: colors.brick, marginTop: "2px", flexShrink: 0 }} />
+          <p className="text-xs" style={{ color: colors.brick }}>
+            <strong>Le prix ci-dessous n'est qu'un texte affiché sur le site — PayPal facture le prix défini dans SON tableau de bord à la création du plan, pas celui-ci.</strong> Si tu changes un prix ici, crée un nouveau plan côté PayPal avec le bon montant, puis colle son nouvel identifiant ci-dessous (l'ancien ne peut pas être modifié). Exception : un prix mis à <strong>0€</strong> active le forfait directement, sans passer par PayPal.
+          </p>
+        </div>
         {plans.map((plan, idx) => (
           <div key={plan.id} className="flex flex-wrap items-center gap-3 border-b px-4 py-3" style={{ borderColor: colors.line }}>
             <div className="min-w-0 basis-32 grow">
