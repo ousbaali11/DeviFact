@@ -1572,17 +1572,17 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
           )}
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button onClick={onNewDevis} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
           <Plus size={15} /> Devis
         </button>
         <button onClick={onNewFacture} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
           <Plus size={15} /> Facture
         </button>
-        <button onClick={onNewProforma} className="hidden items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium sm:flex" style={{ background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
+        <button onClick={onNewProforma} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
           <Plus size={15} /> Proforma
         </button>
-        <button onClick={() => setView("pricing")} className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium sm:flex" style={{ background: "rgba(255,255,255,0.1)", color: "white" }} title="Voir les forfaits">
+        <button onClick={() => setView("pricing")} className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: "rgba(255,255,255,0.1)", color: "white" }} title="Voir les forfaits">
           {planLabel(account?.plan)}
         </button>
         <button onClick={onLogout} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Se déconnecter">
