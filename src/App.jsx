@@ -2375,6 +2375,15 @@ function Editor({ doc, saving, clients, prestations, account, siteSettings, onCh
 
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
+  // Le focus automatique sur un champ nouvellement ajouté ne doit jouer
+  // qu'une fois — sinon il "vole" le focus en continu à chaque frappe
+  // ailleurs, ce qui provoquait la saisie mélangée entre descriptions.
+  useEffect(() => {
+    if (!lastAddedDetailId) return;
+    const t = setTimeout(() => setLastAddedDetailId(null), 150);
+    return () => clearTimeout(t);
+  }, [lastAddedDetailId]);
+
   function patch(p) {
     const next = { ...localDoc, ...p };
     setLocalDoc(next);
