@@ -11,7 +11,10 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
-const GEMINI_MODEL = "gemini-2.5-flash"; // rapide et gratuit ; ajustable si Google fait évoluer les noms de modèles
+// Configurable sans redéploiement : si Google retire encore ce modèle,
+// change juste le secret GEMINI_MODEL (supabase secrets set GEMINI_MODEL=...)
+// au lieu de modifier ce fichier. Voir la liste à jour sur ai.google.dev/gemini-api/docs/models
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-3.1-flash-lite";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

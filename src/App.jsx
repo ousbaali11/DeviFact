@@ -2308,6 +2308,14 @@ function renderMarkup(text) {
 // forfaits Essentiel et Pro (le forfait Gratuit garde un champ simple).
 function FormattableField({ value, onChange, placeholder, className, style, multiline, enabled, onKeyDown, autoFocus, wrapperClassName }) {
   const ref = useRef(null);
+  const hasAutoFocused = useRef(false);
+
+  useEffect(() => {
+    if (autoFocus && !hasAutoFocused.current && ref.current) {
+      hasAutoFocused.current = true; // ne se déclenche plus jamais ensuite, même si la prop reste vraie
+      ref.current.focus();
+    }
+  }, [autoFocus]);
 
   function wrap(marker) {
     const el = ref.current;
@@ -2324,7 +2332,7 @@ function FormattableField({ value, onChange, placeholder, className, style, mult
   }
 
   const fieldProps = {
-    ref, value, placeholder, className, style, onKeyDown, autoFocus,
+    ref, value, placeholder, className, style, onKeyDown,
     onChange: (e) => onChange(e.target.value),
   };
 
