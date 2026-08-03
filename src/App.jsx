@@ -311,8 +311,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnable
           {doc.company.type !== "particulier" && doc.company.tva && <div>N° TVA : {doc.company.tva}</div>}
         </div>
         <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
-          <div style={{ fontWeight: 700, marginBottom: "3px", color: brassDark }}>{doc.client.type === "particulier" ? "Client (particulier) :" : "Client (entreprise) :"}</div>
-          <div style={{ fontWeight: 600 }}>{doc.client.name || "—"}</div>
+          {doc.client.name && <div style={{ fontWeight: 600 }}>{doc.client.name}</div>}
           {doc.client.address && <div>{doc.client.address}</div>}
           {doc.client.email && <div>{doc.client.email}</div>}
           {doc.client.phone && <div>{doc.client.phone}</div>}
@@ -417,7 +416,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnable
         <div style={{ flex: 1, fontSize: "9pt" }}>
           {doc.notes && (
             <>
-              <div style={{ fontWeight: 700, marginBottom: "4px" }}>Conditions de règlement</div>
+              <div style={{ fontWeight: 700, marginBottom: "4px" }}>Note :</div>
               <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{renderMarkup(doc.notes)}</div>
             </>
           )}
@@ -449,23 +448,24 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnable
         </div>
       </div>
 
-      {/* Signature — bas à droite */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "20px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
-        <div style={{ width: "230px", border: `1px solid ${line}`, borderRadius: "4px", padding: "10px 14px", minHeight: "70px" }}>
-          <div style={{ fontSize: "8.5pt", color: inkSoft, marginBottom: "6px" }}>
-            Signature du client {doc.type === "devis" && "(précédée de la mention « Bon pour accord »)"}
+      {/* Signature — bas à droite, uniquement si une signature existe */}
+      {((doc.signature?.mode === "texte" && doc.signature?.name) ||
+        (doc.signature?.mode === "dessin" && doc.signature?.drawing) ||
+        (doc.signature?.mode === "image" && doc.signature?.image)) && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "20px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
+          <div style={{ width: "230px", border: `1px solid ${line}`, borderRadius: "4px", padding: "10px 14px", minHeight: "70px" }}>
+            {doc.signature?.mode === "texte" && doc.signature?.name && (
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontStyle: "italic" }}>{doc.signature.name}</div>
+            )}
+            {doc.signature?.mode === "dessin" && doc.signature?.drawing && (
+              <img src={doc.signature.drawing} alt="Signature" style={{ height: "60px" }} />
+            )}
+            {doc.signature?.mode === "image" && doc.signature?.image && (
+              <img src={doc.signature.image} alt="Signature" style={{ height: "60px", objectFit: "contain" }} />
+            )}
           </div>
-          {doc.signature?.mode === "texte" && doc.signature?.name && (
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontStyle: "italic" }}>{doc.signature.name}</div>
-          )}
-          {doc.signature?.mode === "dessin" && doc.signature?.drawing && (
-            <img src={doc.signature.drawing} alt="Signature" style={{ height: "60px" }} />
-          )}
-          {doc.signature?.mode === "image" && doc.signature?.image && (
-            <img src={doc.signature.image} alt="Signature" style={{ height: "60px", objectFit: "contain" }} />
-          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
