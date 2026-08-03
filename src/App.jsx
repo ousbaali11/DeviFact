@@ -265,7 +265,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnable
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10.5pt", lineHeight: 1.4,
-    background: "#FBF7EF", border: `1.5px solid ${ink}`, outline: `1px solid ${brass}`, outlineOffset: "5px",
+    background: "#FBF7EF",
     padding: "24px 28px", margin: "5px", position: "relative", overflow: "hidden",
   };
 
