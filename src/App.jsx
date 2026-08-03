@@ -2663,6 +2663,18 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     reader.readAsDataURL(file);
   }
 
+  function printAsPdf() {
+    // Le nom du fichier suggéré par le navigateur lors de l'enregistrement
+    // en PDF reprend le titre de la page — on le change juste le temps de
+    // l'impression, puis on le remet comme avant.
+    const original = document.title;
+    const safeName = `${docTypeLabel(localDoc.type)}-${(localDoc.docNumber || "document").replace(/[\\/:*?"<>|]/g, "-")}`;
+    document.title = safeName;
+    const restore = () => { document.title = original; window.removeEventListener("afterprint", restore); };
+    window.addEventListener("afterprint", restore);
+    window.print();
+  }
+
   function exportExcel() {
     const wb = XLSX.utils.book_new();
     const rows = [];
@@ -2734,7 +2746,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
               <ArrowRightLeft size={15} /> Convertir en facture
             </button>
           )}
-          <button onClick={() => window.print()} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
+          <button onClick={printAsPdf} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
             <Printer size={15} /> PDF
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
