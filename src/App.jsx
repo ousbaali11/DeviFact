@@ -2320,11 +2320,11 @@ function PlanFeatureItem({ text, accentColor }) {
       </li>
     );
   }
-  // Fonctionnalité propre à ce forfait : mise en avant forte (gras + souligné + couleur du forfait)
+  // Fonctionnalité propre à ce forfait : mise en avant en gras
   return (
     <li className="flex items-start gap-2">
       <Check size={15} className="mt-0.5 shrink-0" style={{ color: accentColor }} />
-      <span className="font-bold" style={{ color: colors.ink, textDecoration: "underline", textDecorationColor: accentColor, textDecorationThickness: "2px", textUnderlineOffset: "3px" }}>{clean}</span>
+      <span className="font-bold" style={{ color: colors.ink }}>{clean}</span>
     </li>
   );
 }
