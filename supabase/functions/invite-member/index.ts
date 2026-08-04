@@ -70,12 +70,28 @@ serve(async (req) => {
         redirectTo: req.headers.get("origin") || undefined,
       });
       if (inviteError) {
-        console.error("Erreur d'invitation :", inviteError.message);
-        return new Response(JSON.stringify({ error: "Impossible d'envoyer l'invitation : " + inviteError.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        // Cas particulier : le compte existe déjà dans auth.users mais
+        // n'avait pas (ou plus) de ligne dans "profiles" — on va le
+        // retrouver directement, et on répare le profil manquant au passage.
+        if (inviteError.message?.toLowerCase().includes("already been registered")) {
+          const { data: userList, error: listError } = await dbAdmin.auth.admin.listUsers({ perPage: 1000 });
+          const found = listError ? null : userList?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+          if (!found) {
+            console.error("Compte introuvable malgré 'already registered' :", cleanEmail);
+            return new Response(JSON.stringify({ error: "Ce compte existe déjà mais n'a pas pu être retrouvé. Contacte le support." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+          memberUserId = found.id;
+        } else {
+          console.error("Erreur d'invitation :", inviteError.message);
+          return new Response(JSON.stringify({ error: "Impossible d'envoyer l'invitation : " + inviteError.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      } else {
+        memberUserId = invited.user.id;
       }
-      memberUserId = invited.user.id;
       // Le profil correspondant est créé automatiquement par le
-      // déclencheur existant sur auth.users (voir schema.sql).
+      // déclencheur existant sur auth.users (voir schema.sql) pour un
+      // compte tout neuf — on le complète ici pour couvrir aussi le cas
+      // d'un compte déjà existant mais dont le profil manquait.
       await dbAdmin.from("profiles").upsert({ id: memberUserId, email: cleanEmail }, { onConflict: "id" });
     }
 
