@@ -244,10 +244,10 @@ const GlobalStyle = () => (
     .df-marquee-text { display: inline-block; white-space: nowrap; animation: df-marquee 11s linear infinite; }
     .print-doc { display: none; }
     @media print {
-      @page { size: A4; margin: 14mm 12mm; }
+      @page { size: A4; margin: 0; }
       html, body { background: white !important; }
       .no-print, .editor-form { display: none !important; }
-      .print-doc { display: block !important; min-height: 258mm; box-sizing: border-box; }
+      .print-doc { display: block !important; min-height: 280mm; box-sizing: border-box; }
       .print-doc * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   `}</style>
