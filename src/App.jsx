@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, forwardRef } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { db } from "./client.js";
+import { clearStorageCache } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
@@ -506,15 +507,29 @@ export default function DeviFactApp() {
   async function loadProfile(userId, email) {
     const { data: profile } = await db.from("profiles").select("*").eq("id", userId).maybeSingle();
     if (!profile) return null;
+
+    const { data: membership } = await db
+      .from("organization_members")
+      .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .limit(1)
+      .maybeSingle();
+
+    const org = membership?.organizations;
+
     return {
       id: userId,
       email,
       companyName: profile.company_name || "",
-      plan: profile.plan,
-      billing: profile.billing_cycle,
-      paymentStatus: profile.payment_status,
       isAdmin: profile.is_admin,
       loggedIn: true,
+      organizationId: membership?.organization_id || null,
+      organizationName: org?.name || "",
+      role: membership?.role || "owner",
+      plan: org?.plan || "gratuit",
+      billing: org?.billing_cycle || "mensuel",
+      paymentStatus: org?.payment_status || "gratuit",
     };
   }
   async function loadPlans() {
@@ -668,12 +683,12 @@ export default function DeviFactApp() {
   }
   async function logout() {
     await db.auth.signOut();
+    clearStorageCache();
     setAccount(null);
   }
   async function chooseFreePlan() {
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return;
-    const { error } = await db.from("profiles").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", user.id);
+    if (!account?.organizationId) return;
+    const { error } = await db.from("organizations").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", account.organizationId);
     if (error) { console.error("Erreur de passage au forfait gratuit", error); return; }
     setAccount((prev) => ({ ...prev, plan: "gratuit", paymentStatus: "gratuit" }));
   }
@@ -683,33 +698,29 @@ export default function DeviFactApp() {
   // peut modifier (RLS) — un utilisateur ne peut pas déclencher ceci en
   // falsifiant un prix depuis son navigateur.
   async function chooseZeroPricePlan(planId, billingCycle) {
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return;
-    const { error } = await db.from("profiles").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", user.id);
+    if (!account?.organizationId) return;
+    const { error } = await db.from("organizations").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", account.organizationId);
     if (error) { console.error("Erreur d'activation du forfait à 0€", error); return; }
     setAccount((prev) => ({ ...prev, plan: planId, billing: billingCycle, paymentStatus: "payé" }));
   }
   async function togglePaymentStatus() {
-    if (!account) return;
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return;
+    if (!account?.organizationId) return;
     const nextStatus = account.paymentStatus === "payé" ? "impayé" : "payé";
-    const { error } = await db.from("profiles").update({ payment_status: nextStatus }).eq("id", user.id);
+    const { error } = await db.from("organizations").update({ payment_status: nextStatus }).eq("id", account.organizationId);
     if (error) { console.error("Erreur de mise à jour du statut de paiement", error); return; }
     setAccount({ ...account, paymentStatus: nextStatus });
   }
   async function deleteCurrentAccount() {
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return;
-    // Supprime les données applicatives. La suppression du compte
-    // d'authentification lui-même se fait depuis le dashboard du
-    // fournisseur (Authentication → Users), jamais depuis le navigateur.
+    if (!account?.organizationId) return;
+    // Supprime les données applicatives de l'organisation. La suppression
+    // du compte d'authentification lui-même se fait depuis le dashboard
+    // du fournisseur (Authentication → Users), jamais depuis le navigateur.
     await Promise.allSettled([
       window.storage.set("documents", JSON.stringify([]), false),
       window.storage.set("clients", JSON.stringify([]), false),
       window.storage.set("prestations", JSON.stringify([]), false),
       window.storage.set("company-profile", JSON.stringify(emptyCompanyProfile()), false),
-      db.from("profiles").update({ plan: "gratuit", is_admin: false, payment_status: "gratuit" }).eq("id", user.id),
+      db.from("organizations").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", account.organizationId),
     ]);
     setDocuments([]); setClients([]); setPrestations([]); setCompanyProfile(emptyCompanyProfile());
     await logout();
@@ -993,7 +1004,9 @@ export default function DeviFactApp() {
   }
 
   const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
-  const isLocked = (account?.plan || "gratuit") === "gratuit" && documents.length >= freeLimit;
+  const freeLimitReached = (account?.plan || "gratuit") === "gratuit" && documents.length >= freeLimit;
+  const isViewer = account?.role === "viewer";
+  const isLocked = freeLimitReached || isViewer;
 
   if (view === "editor" && activeDoc) {
     return (
@@ -1006,6 +1019,7 @@ export default function DeviFactApp() {
         plans={plans}
         siteSettings={siteSettings}
         isLocked={isLocked}
+        isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
         onBack={backToDashboard}
         onConvert={() => convertToInvoice(activeDoc.id)}
@@ -1027,7 +1041,7 @@ export default function DeviFactApp() {
       <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} onGoToPricing={() => setView("pricing")} />
+        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} />
       </div>
     );
   }
@@ -1037,7 +1051,17 @@ export default function DeviFactApp() {
       <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} onGoToPricing={() => setView("pricing")} />
+        <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} />
+      </div>
+    );
+  }
+
+  if (view === "team") {
+    return (
+      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+        <GlobalStyle />
+        <TopNav {...navProps} />
+        <TeamView account={account} />
       </div>
     );
   }
@@ -1106,14 +1130,21 @@ export default function DeviFactApp() {
       <TopNav {...navProps} />
 
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        {isViewer && (
+          <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.slate}12`, border: `1px solid ${colors.slate}40` }}>
+            <span className="flex items-center gap-2 text-sm" style={{ color: colors.slate }}>
+              <Eye size={15} /> Accès en lecture seule — {account?.organizationName || "cette équipe"} t'a donné le rôle "Lecteur", tu peux consulter mais pas modifier.
+            </span>
+          </div>
+        )}
         {(account?.plan || "gratuit") === "gratuit" && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: isLocked ? `${colors.brick}12` : colors.surface, border: `1px solid ${isLocked ? colors.brick + "40" : colors.line}` }}>
             <span className="flex items-center gap-2 text-sm" style={{ color: isLocked ? colors.brick : colors.inkSoft }}>
-              {isLocked && <Lock size={15} />}
+              {freeLimitReached && <Lock size={15} />}
               Forfait Gratuit — <strong className="df-mono">{documents.length}/{freeLimit}</strong> devis/factures/proforma utilisés
-              {isLocked && " — compte verrouillé jusqu'au passage à un forfait payant"}
+              {freeLimitReached && " — compte verrouillé jusqu'au passage à un forfait payant"}
             </span>
-            <button onClick={() => setView("pricing")} className={isLocked ? "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" : "text-xs font-medium underline"} style={isLocked ? { background: colors.brick } : { color: colors.brassDark }}>Passer à un forfait payant</button>
+            <button onClick={() => setView("pricing")} className={freeLimitReached ? "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" : "text-xs font-medium underline"} style={freeLimitReached ? { background: colors.brick } : { color: colors.brassDark }}>Passer à un forfait payant</button>
           </div>
         )}
         {/* Stats */}
@@ -1547,8 +1578,19 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
         if (password.length < 6) { setError("Le mot de passe doit faire au moins 6 caractères."); setBusy(false); return; }
         const { data, error: signUpError } = await db.auth.signUp({ email: cleanEmail, password });
         if (signUpError) { setError(signUpError.message); setBusy(false); return; }
-        if (companyName.trim() && data.user) {
-          await db.from("profiles").update({ company_name: companyName.trim() }).eq("id", data.user.id);
+        if (data.user) {
+          if (companyName.trim()) {
+            await db.from("profiles").update({ company_name: companyName.trim() }).eq("id", data.user.id);
+          }
+          // Crée l'organisation du nouvel inscrit, dont il devient
+          // aussitôt propriétaire — c'est elle qui portera l'abonnement
+          // et les données, éventuellement partagées avec une équipe plus tard.
+          const { data: newOrg, error: orgError } = await db.from("organizations").insert({ name: companyName.trim() }).select("id").single();
+          if (orgError) {
+            console.error("Erreur de création de l'organisation", orgError);
+          } else {
+            await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: data.user.id, role: "owner", status: "active" });
+          }
         }
         if (!data.session) {
           // Si la confirmation par email est activée côté serveur, pas de
@@ -1694,6 +1736,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
     { id: "clients", label: "Clients", icon: Users },
     { id: "prestations", label: "Bibliothèque", icon: Library },
     { id: "company", label: "Mon entreprise", icon: Building2 },
+    { id: "team", label: "Équipe", icon: UserPlus },
     { id: "pricing", label: "Abonnement", icon: CreditCard },
     ...(account?.isAdmin ? [{ id: "admin", label: "Admin", icon: Shield }] : []),
   ];
@@ -1762,7 +1805,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
   );
 }
 
-function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, onGoToPricing }) {
+function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
 
@@ -1798,9 +1841,9 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, o
       {isLocked && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
           <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
-            <Lock size={15} /> Limite du forfait Gratuit atteinte — la gestion des clients est verrouillée.
+            <Lock size={15} /> {isViewer ? "Accès en lecture seule — la gestion des clients est verrouillée." : "Limite du forfait Gratuit atteinte — la gestion des clients est verrouillée."}
           </span>
-          <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>
+          {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
         </div>
       )}
 
@@ -1937,7 +1980,139 @@ function PrestationsView({ prestations, saving, onSave, onDelete }) {
   );
 }
 
-function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, onGoToPricing }) {
+const ROLE_LABELS = { owner: "Propriétaire", editor: "Éditeur", viewer: "Lecteur" };
+const ROLE_COLORS = { owner: colors.brassDark, editor: colors.moss, viewer: colors.slate };
+
+function TeamView({ account }) {
+  const [members, setMembers] = useState(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("editor");
+  const [inviting, setInviting] = useState(false);
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const isOwner = account?.role === "owner";
+
+  async function loadMembers() {
+    if (!account?.organizationId) return;
+    const { data, error: loadError } = await db
+      .from("organization_members")
+      .select("id, user_id, role, status, profiles:user_id ( email, company_name )")
+      .eq("organization_id", account.organizationId)
+      .order("created_at", { ascending: true });
+    if (loadError) { console.error("Erreur de chargement de l'équipe", loadError); return; }
+    setMembers(data || []);
+  }
+
+  useEffect(() => { loadMembers(); }, [account?.organizationId]);
+
+  async function handleInvite() {
+    setError(""); setInfo("");
+    const cleanEmail = inviteEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) { setError("Email invalide."); return; }
+    setInviting(true);
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const { data, error: fnError } = await db.functions.invoke("invite-member", {
+        body: { email: cleanEmail, role: inviteRole },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      if (fnError || data?.error) {
+        setError(data?.error || fnError?.message || "Impossible d'envoyer l'invitation.");
+      } else {
+        setInfo(`${cleanEmail} a été ajouté à l'équipe.`);
+        setInviteEmail("");
+        await loadMembers();
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Une erreur est survenue. Réessaie.");
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  async function changeRole(memberId, newRole) {
+    const { error: updateError } = await db.from("organization_members").update({ role: newRole }).eq("id", memberId);
+    if (updateError) { console.error("Erreur de changement de rôle", updateError); return; }
+    await loadMembers();
+  }
+
+  async function removeMember(memberId) {
+    const { error: deleteError } = await db.from("organization_members").delete().eq("id", memberId);
+    if (deleteError) { console.error("Erreur de suppression du membre", deleteError); return; }
+    await loadMembers();
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mb-6">
+        <h1 className="df-display text-2xl font-semibold">Équipe</h1>
+        <p className="text-sm" style={{ color: colors.inkSoft }}>
+          {isOwner
+            ? "Invite des collègues à partager tes devis, clients et prestations — avec le niveau d'accès de ton choix."
+            : "Les membres de ton organisation. Seul le propriétaire peut inviter ou modifier les rôles."}
+        </p>
+      </div>
+
+      {isOwner && (
+        <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <span className="df-display mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Inviter un membre</span>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="grow basis-48 text-xs" style={{ color: colors.inkSoft }}>
+              Email
+              <input type="text" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="collegue@entreprise.fr" onKeyDown={(e) => { if (e.key === "Enter") handleInvite(); }} />
+            </label>
+            <label className="text-xs" style={{ color: colors.inkSoft }}>
+              Rôle
+              <select className="df-select mt-1 block rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+                <option value="editor">Éditeur</option>
+                <option value="viewer">Lecteur</option>
+                <option value="owner">Propriétaire</option>
+              </select>
+            </label>
+            <button onClick={handleInvite} disabled={inviting} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: inviting ? 0.7 : 1 }}>
+              {inviting ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />} Inviter
+            </button>
+          </div>
+          {error && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{error}</p>}
+          {info && <p className="mt-2 text-xs" style={{ color: colors.moss }}>{info}</p>}
+          <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>
+            <strong>Éditeur</strong> : peut créer et modifier devis, clients, prestations. <strong>Lecteur</strong> : consultation uniquement. Si la personne n'a pas encore de compte, elle reçoit un email pour en créer un.
+          </p>
+        </div>
+      )}
+
+      {members === null ? (
+        <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: colors.inkSoft }} /></div>
+      ) : (
+        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          {members.map((m, idx) => (
+            <div key={m.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
+              <div className="min-w-0 grow basis-40">
+                <div className="truncate text-sm font-medium">{m.profiles?.email || "—"}</div>
+                {m.user_id === account?.id && <span className="text-xs" style={{ color: colors.inkSoft }}>C'est toi</span>}
+              </div>
+              {isOwner && m.user_id !== account?.id ? (
+                <select className="df-select rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.role} onChange={(e) => changeRole(m.id, e.target.value)}>
+                  <option value="owner">Propriétaire</option>
+                  <option value="editor">Éditeur</option>
+                  <option value="viewer">Lecteur</option>
+                </select>
+              ) : (
+                <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${ROLE_COLORS[m.role]}18`, color: ROLE_COLORS[m.role] }}>{ROLE_LABELS[m.role]}</span>
+              )}
+              {isOwner && m.user_id !== account?.id && (
+                <button onClick={() => removeMember(m.id)} title="Retirer de l'équipe" style={{ color: colors.brick }}><Trash2 size={15} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, isViewer, onGoToPricing }) {
   const [local, setLocal] = useState(profile);
   const [editing, setEditing] = useState(!profile.name);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1981,9 +2156,9 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
       {isLocked && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
           <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
-            <Lock size={15} /> Limite du forfait Gratuit atteinte — ces informations ne sont plus modifiables.
+            <Lock size={15} /> {isViewer ? "Accès en lecture seule — ces informations ne sont pas modifiables." : "Limite du forfait Gratuit atteinte — ces informations ne sont plus modifiables."}
           </span>
-          <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>
+          {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
         </div>
       )}
 
@@ -2105,7 +2280,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
   );
 }
 
-function PayPalButton({ planId, userId, onApproved }) {
+function PayPalButton({ planId, organizationId, onApproved }) {
   const containerRef = useRef(null);
   const [sdkReady, setSdkReady] = useState(false);
   const [sdkError, setSdkError] = useState(false);
@@ -2126,7 +2301,7 @@ function PayPalButton({ planId, userId, onApproved }) {
     containerRef.current.innerHTML = "";
     window.paypal.Buttons({
       style: { shape: "pill", color: "gold", layout: "horizontal", label: "subscribe", height: 40 },
-      createSubscription: (data, actions) => actions.subscription.create({ plan_id: planId, custom_id: userId }),
+      createSubscription: (data, actions) => actions.subscription.create({ plan_id: planId, custom_id: organizationId }),
       onApprove: () => onApproved && onApproved(),
     }).render(containerRef.current);
   }, [sdkReady, planId, userId]);
@@ -2204,7 +2379,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
               ) : price === 0 ? (
                 <button onClick={() => onChooseZeroPrice(plan.id, billing)} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Activer (0€)</button>
               ) : paypalPlanId ? (
-                <PayPalButton planId={paypalPlanId} userId={account?.id} onApproved={() => setApprovedMsg(true)} />
+                <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => setApprovedMsg(true)} />
               ) : (
                 <p className="rounded-lg py-2 text-center text-xs" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible</p>
               )}
@@ -2691,7 +2866,7 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, isLocked, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
+function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
@@ -3075,9 +3250,9 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
         {isLocked && (
           <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
             <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
-              <Lock size={15} /> Limite du forfait Gratuit atteinte — ce document n'est plus modifiable.
+              <Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}
             </span>
-            <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>
+            {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
           </div>
         )}
         <div className="editor-form rounded-2xl p-6 shadow-sm sm:p-10" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>

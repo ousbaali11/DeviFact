@@ -72,9 +72,9 @@ serve(async (req) => {
   console.log("Webhook PayPal reçu :", eventType);
 
   if (eventType === "BILLING.SUBSCRIPTION.ACTIVATED") {
-    const userId = resource.custom_id;
+    const organizationId = resource.custom_id;
     const paypalPlanId = resource.plan_id;
-    if (!userId) { console.error("custom_id manquant sur l'abonnement"); return new Response("ok"); }
+    if (!organizationId) { console.error("custom_id manquant sur l'abonnement"); return new Response("ok"); }
 
     // Retrouve à quel forfait DeviFact correspond ce plan_id PayPal
     const { data: plan } = await dbAdmin
@@ -87,23 +87,23 @@ serve(async (req) => {
 
     const billingCycle = plan.paypal_plan_id_annual === paypalPlanId ? "annuel" : "mensuel";
 
-    await dbAdmin.from("profiles").update({
+    await dbAdmin.from("organizations").update({
       plan: plan.id,
       billing_cycle: billingCycle,
       payment_status: "payé",
       paypal_subscription_id: resource.id,
-    }).eq("id", userId);
+    }).eq("id", organizationId);
   }
 
   if (eventType === "BILLING.SUBSCRIPTION.CANCELLED" || eventType === "BILLING.SUBSCRIPTION.SUSPENDED") {
-    const { error } = await dbAdmin.from("profiles")
+    const { error } = await dbAdmin.from("organizations")
       .update({ plan: "gratuit", payment_status: "impayé" })
       .eq("paypal_subscription_id", resource.id);
     if (error) console.error("Erreur lors de la désactivation de l'abonnement", error);
   }
 
   if (eventType === "PAYMENT.SALE.DENIED" || eventType === "BILLING.SUBSCRIPTION.PAYMENT.FAILED") {
-    const { error } = await dbAdmin.from("profiles")
+    const { error } = await dbAdmin.from("organizations")
       .update({ payment_status: "impayé" })
       .eq("paypal_subscription_id", resource.billing_agreement_id || resource.id);
     if (error) console.error("Erreur lors du marquage impayé", error);
