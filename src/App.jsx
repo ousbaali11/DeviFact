@@ -263,6 +263,38 @@ function getRevisionCountryInfo(country) {
   return REVISION_COUNTRY_INFO[country] || { currency: null, indexHint: "", authority: "l'organisme national de statistiques de ton pays" };
 }
 
+// Listes de formules/indices officiels vérifiés directement auprès des
+// sources nationales — uniquement pour les pays où j'ai pu confirmer
+// la liste complète (pas de code deviné). Pour les autres pays, on
+// retombe sur la saisie libre.
+const REVISION_INDEX_OPTIONS = {
+  "🇲🇦 MA": [
+    "BAT1 - Gros œuvre, revêtement, étanchéité",
+    "BAT2 - Menuiserie",
+    "BAT3 - Électricité",
+    "BAT4 - Plomberie sanitaire",
+    "BAT5 - Peinture vitrerie",
+    "BAT6 - Bâtiment tous corps d'état",
+  ],
+  "🇫🇷 FR": [
+    "BT01 - Tous corps d'état",
+    "BT02 - Terrassements",
+    "BT03 - Maçonnerie et canalisations en béton",
+    "BT06 - Ossature, ouvrages en béton armé",
+    "BT07 - Ossature et charpentes métalliques",
+    "BT08 - Plâtre et préfabriqués",
+    "BT09 - Carrelage et revêtement céramique",
+    "BT30 - Couverture en ardoises de schiste",
+    "BT32 - Couverture en tuiles en terre cuite",
+    "BT34 - Couverture en zinc et en métal",
+    "BT55 - Isolation thermique par l'extérieur",
+  ],
+};
+const REVISION_OTHER_OPTION = "Autre (je précise moi-même)";
+function getRevisionIndexOptions(country) {
+  return REVISION_INDEX_OPTIONS[country] || null;
+}
+
 function emptyRevisionSector(sector, country) {
   const info = getRevisionCountryInfo(country);
   const today = new Date().toISOString().slice(0, 10);
@@ -2488,8 +2520,30 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                     <input type="number" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.montantInitialHT} onChange={(e) => patchSector(sec.id, { montantInitialHT: e.target.value })} placeholder="0" />
                   </div>
                   <div className="mb-3">
-                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice de référence (précise celui de ton contrat)</label>
-                    <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexName} onChange={(e) => patchSector(sec.id, { indexName: e.target.value })} />
+                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Formule officielle de révision</label>
+                    {(() => {
+                      const options = getRevisionIndexOptions(localDoc.country);
+                      if (!options) {
+                        return <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexName} onChange={(e) => patchSector(sec.id, { indexName: e.target.value })} />;
+                      }
+                      const isCustom = !options.includes(sec.indexName);
+                      return (
+                        <>
+                          <select
+                            className="df-select w-full rounded-md px-3 py-2 text-sm"
+                            style={{ border: `1px solid ${colors.line}` }}
+                            value={isCustom ? REVISION_OTHER_OPTION : sec.indexName}
+                            onChange={(e) => patchSector(sec.id, { indexName: e.target.value === REVISION_OTHER_OPTION ? "" : e.target.value })}
+                          >
+                            {options.map((o) => <option key={o} value={o}>{o}</option>)}
+                            <option value={REVISION_OTHER_OPTION}>{REVISION_OTHER_OPTION}</option>
+                          </select>
+                          {isCustom && (
+                            <input className="df-input mt-2 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexName} onChange={(e) => patchSector(sec.id, { indexName: e.target.value })} placeholder="Précise le nom de l'indice" />
+                          )}
+                        </>
+                      );
+                    })()}
                     <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Valeurs à récupérer auprès de {getRevisionCountryInfo(localDoc.country).authority}, ou dans ton contrat.</p>
                   </div>
                   <div className="mb-3 grid grid-cols-2 gap-3">
