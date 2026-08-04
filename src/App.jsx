@@ -309,7 +309,13 @@ function emptyRevisionSector(sector, country) {
     dateActuelle: today,
     coeffFixe: 0.15,
     coeffVariable: 0.85,
+    useDecomptes: false,
+    decomptes: [],
   };
+}
+
+function emptyDecompte() {
+  return { id: nextId("dc"), label: "", dateDecompte: new Date().toISOString().slice(0, 10), montantHT: "", indexValeur: "", isFinal: false };
 }
 
 function newRevisionDocument(sector, country, documents) {
@@ -321,6 +327,7 @@ function newRevisionDocument(sector, country, documents) {
     issueDate: new Date().toISOString().slice(0, 10),
     currency: info.currency || "EUR",
     country,
+    dateDemarrage: "",
     sectors: [emptyRevisionSector(sector, country)],
     showTotal: false,
     company: { type: "entreprise", name: "", siret: "", address: "", country: country || "", email: "", phone: "", tva: "", logo: null },
@@ -351,12 +358,49 @@ function getRevisionSectors(doc) {
       dateActuelle: doc.dateActuelle || doc.issueDate,
       coeffFixe: doc.coeffFixe,
       coeffVariable: doc.coeffVariable,
+      useDecomptes: false,
+      decomptes: [],
     }];
   }
   return [];
 }
 
+// Le montant initial "de référence" d'un secteur : soit sa valeur
+// unique, soit la somme de ses décomptes s'il en utilise plusieurs.
+function getSectorMontantInitial(line) {
+  if (line?.useDecomptes && Array.isArray(line.decomptes)) {
+    return line.decomptes.reduce((s, d) => s + (Number(d.montantHT) || 0), 0);
+  }
+  return Number(line?.montantInitialHT) || 0;
+}
+
+// Calcule la révision d'un seul décompte, avec l'indice d'origine
+// et les coefficients du secteur auquel il appartient (chaque
+// décompte a sa propre date et sa propre valeur d'indice — c'est
+// justement ce qui permet de suivre un chantier mois par mois).
+function computeDecompteRevision(sector, decompte) {
+  const c0 = Number(decompte?.montantHT) || 0;
+  const i0 = Number(sector?.indexInitial) || 0;
+  const iN = Number(decompte?.indexValeur) || 0;
+  const a = Number(sector?.coeffFixe);
+  const b = Number(sector?.coeffVariable);
+  if (!c0 || !i0 || !iN) return { valid: false, montantRevise: 0, ecartMontant: 0, coefficient: 0 };
+  const coefficient = a + b * (iN / i0);
+  const montantRevise = c0 * coefficient;
+  return { valid: true, montantRevise, ecartMontant: montantRevise - c0, coefficient };
+}
+
 function computeRevisionLine(line) {
+  if (line?.useDecomptes && Array.isArray(line.decomptes) && line.decomptes.length) {
+    const results = line.decomptes.map((d) => computeDecompteRevision(line, d));
+    const validResults = results.filter((r) => r.valid);
+    if (!validResults.length) return { valid: false, montantRevise: 0, ecartMontant: 0, ecartPct: 0, coefficient: 0 };
+    const montantInitial = getSectorMontantInitial(line);
+    const montantRevise = validResults.reduce((s, r) => s + r.montantRevise, 0);
+    const ecartMontant = montantRevise - montantInitial;
+    const ecartPct = montantInitial ? (ecartMontant / montantInitial) * 100 : 0;
+    return { valid: true, montantRevise, ecartMontant, ecartPct, coefficient: 0 };
+  }
   const c0 = Number(line?.montantInitialHT) || 0;
   const i0 = Number(line?.indexInitial) || 0;
   const iN = Number(line?.indexActuel) || 0;
@@ -374,10 +418,11 @@ function computeRevisionLine(line) {
 // fonction que le tableau de bord et l'export comptable utilisent
 // déjà (via computeRevision), donc rien à changer de leur côté.
 function computeRevision(doc) {
-  const lines = getRevisionSectors(doc).map(computeRevisionLine);
+  const sectors = getRevisionSectors(doc);
+  const lines = sectors.map(computeRevisionLine);
   const validLines = lines.filter((l) => l.valid);
   if (!validLines.length) return { valid: false, montantRevise: 0, ecartMontant: 0, ecartPct: 0, coefficient: 0 };
-  const montantInitialTotal = getRevisionSectors(doc).reduce((s, l) => s + (Number(l.montantInitialHT) || 0), 0);
+  const montantInitialTotal = sectors.reduce((s, l) => s + getSectorMontantInitial(l), 0);
   const montantRevise = validLines.reduce((s, l) => s + l.montantRevise, 0);
   const ecartMontant = montantRevise - montantInitialTotal;
   const ecartPct = montantInitialTotal ? (ecartMontant / montantInitialTotal) * 100 : 0;
@@ -2297,9 +2342,24 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
             </tr>
           </thead>
           <tbody>
-            {sectorLines.map((l, idx) => {
+            {sectorLines.flatMap((l, idx) => {
+              if (l.useDecomptes && Array.isArray(l.decomptes) && l.decomptes.length) {
+                return l.decomptes.map((d, dIdx) => {
+                  const dr = computeDecompteRevision(l, d);
+                  return (
+                    <tr key={`${l.id || idx}-${d.id || dIdx}`} style={{ borderBottom: `1px solid ${line}` }}>
+                      <td style={{ padding: "6px 4px" }}>{l.sector}{d.label ? ` — ${d.label}` : ` — décompte ${dIdx + 1}`}</td>
+                      <td style={{ padding: "6px 4px", fontSize: "8pt", color: inkSoft }}>{l.indexName}</td>
+                      <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(d.montantHT) || 0, doc.currency)}</td>
+                      <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontSize: "8pt" }}>{l.indexInitial} → {d.indexValeur}</td>
+                      <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{l.dateInitiale ? new Date(l.dateInitiale).toLocaleDateString("fr-FR") : "—"} → {d.dateDecompte ? new Date(d.dateDecompte).toLocaleDateString("fr-FR") : "—"}</td>
+                      <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{dr.valid ? formatMoney(dr.montantRevise, doc.currency) : "—"}</td>
+                    </tr>
+                  );
+                });
+              }
               const r = computeRevisionLine(l);
-              return (
+              return [(
                 <tr key={l.id || idx} style={{ borderBottom: `1px solid ${line}` }}>
                   <td style={{ padding: "6px 4px" }}>{l.sector}</td>
                   <td style={{ padding: "6px 4px", fontSize: "8pt", color: inkSoft }}>{l.indexName}</td>
@@ -2308,7 +2368,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
                   <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{l.dateInitiale ? new Date(l.dateInitiale).toLocaleDateString("fr-FR") : "—"} → {l.dateActuelle ? new Date(l.dateActuelle).toLocaleDateString("fr-FR") : "—"}</td>
                   <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{r.valid ? formatMoney(r.montantRevise, doc.currency) : "—"}</td>
                 </tr>
-              );
+              )];
             })}
           </tbody>
         </table>
@@ -2371,6 +2431,18 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     if (sectorLines.length <= 1) return;
     patch({ sectors: sectorLines.filter((l) => l.id !== sectorId) });
   }
+  function addDecompte(sectorId) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    patchSector(sectorId, { decomptes: [...(sec?.decomptes || []), emptyDecompte()] });
+  }
+  function patchDecompte(sectorId, decompteId, p) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    patchSector(sectorId, { decomptes: (sec?.decomptes || []).map((d) => (d.id === decompteId ? { ...d, ...p } : d)) });
+  }
+  function removeDecompte(sectorId, decompteId) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    patchSector(sectorId, { decomptes: (sec?.decomptes || []).filter((d) => d.id !== decompteId) });
+  }
 
   async function downloadPdf() {
     const el = printRef.current;
@@ -2426,6 +2498,19 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     rows.push([]);
     rows.push(["Secteur", "Indice", "Montant initial HT", "Date indice initial", "I0", "Date indice actuel", "In", "Coeff. fixe (a)", "Coeff. variable (b)", "Montant révisé HT", "Écart"]);
     sectorLines.forEach((l) => {
+      if (l.useDecomptes && Array.isArray(l.decomptes) && l.decomptes.length) {
+        l.decomptes.forEach((d, dIdx) => {
+          const dr = computeDecompteRevision(l, d);
+          rows.push([
+            `${l.sector} — ${d.label || `décompte ${dIdx + 1}`}`, l.indexName, Number(d.montantHT) || 0,
+            l.dateInitiale ? frLong(l.dateInitiale) : "", Number(l.indexInitial) || 0,
+            d.dateDecompte ? frLong(d.dateDecompte) : "", Number(d.indexValeur) || 0,
+            Number(l.coeffFixe) || 0, Number(l.coeffVariable) || 0,
+            dr.valid ? Number(dr.montantRevise.toFixed(2)) : "", dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "",
+          ]);
+        });
+        return;
+      }
       const r = computeRevisionLine(l);
       rows.push([
         l.sector, l.indexName, Number(l.montantInitialHT) || 0,
@@ -2494,6 +2579,11 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
             </div>
           </div>
 
+          <div className="mb-6 max-w-xs">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date de démarrage du chantier (optionnel)</label>
+            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateDemarrage || ""} onChange={(e) => patch({ dateDemarrage: e.target.value })} />
+          </div>
+
           <div className="mb-4 flex items-center justify-between">
             <label className="block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Secteurs du chantier</label>
             <button onClick={addSector} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: colors.ink, color: "white" }}>
@@ -2515,10 +2605,17 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                     )}
                   </div>
 
-                  <div className="mb-3">
-                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant initial HT (marché d'origine)</label>
-                    <input type="number" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.montantInitialHT} onChange={(e) => patchSector(sec.id, { montantInitialHT: e.target.value })} placeholder="0" />
+                  <div className="mb-3 flex items-center gap-1 rounded-lg p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                    <button onClick={() => patchSector(sec.id, { useDecomptes: false })} className="grow rounded-md py-1.5 text-xs font-medium" style={{ background: !sec.useDecomptes ? colors.ink : "transparent", color: !sec.useDecomptes ? "white" : colors.inkSoft }}>Décompte unique</button>
+                    <button onClick={() => patchSector(sec.id, { useDecomptes: true, decomptes: sec.decomptes?.length ? sec.decomptes : [emptyDecompte()] })} className="grow rounded-md py-1.5 text-xs font-medium" style={{ background: sec.useDecomptes ? colors.ink : "transparent", color: sec.useDecomptes ? "white" : colors.inkSoft }}>Plusieurs décomptes (chantier en plusieurs paiements)</button>
                   </div>
+
+                  {!sec.useDecomptes && (
+                    <div className="mb-3">
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant initial HT (marché d'origine)</label>
+                      <input type="number" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.montantInitialHT} onChange={(e) => patchSector(sec.id, { montantInitialHT: e.target.value })} placeholder="0" />
+                    </div>
+                  )}
                   <div className="mb-3">
                     <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Formule officielle de révision</label>
                     {(() => {
@@ -2546,20 +2643,67 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                     })()}
                     <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Valeurs à récupérer auprès de {getRevisionCountryInfo(localDoc.country).authority}, ou dans ton contrat.</p>
                   </div>
-                  <div className="mb-3 grid grid-cols-2 gap-3">
+                  <div className={sec.useDecomptes ? "mb-3" : "mb-3 grid grid-cols-2 gap-3"}>
                     <div>
-                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à l'origine (I0)</label>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à l'origine (I0){sec.useDecomptes && " — commun à tous les décomptes"}</label>
                       <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexInitial} onChange={(e) => patchSector(sec.id, { indexInitial: e.target.value })} />
                       <label className="mb-1 mt-2 block text-xs" style={{ color: colors.inkSoft }}>Date de cet indice</label>
                       <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateInitiale} onChange={(e) => patchSector(sec.id, { dateInitiale: e.target.value })} />
                     </div>
-                    <div>
-                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice actuel (In)</label>
-                      <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexActuel} onChange={(e) => patchSector(sec.id, { indexActuel: e.target.value })} />
-                      <label className="mb-1 mt-2 block text-xs" style={{ color: colors.inkSoft }}>Date de cet indice</label>
-                      <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateActuelle} onChange={(e) => patchSector(sec.id, { dateActuelle: e.target.value })} />
-                    </div>
+                    {!sec.useDecomptes && (
+                      <div>
+                        <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice actuel (In)</label>
+                        <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexActuel} onChange={(e) => patchSector(sec.id, { indexActuel: e.target.value })} />
+                        <label className="mb-1 mt-2 block text-xs" style={{ color: colors.inkSoft }}>Date de cet indice</label>
+                        <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateActuelle} onChange={(e) => patchSector(sec.id, { dateActuelle: e.target.value })} />
+                      </div>
+                    )}
                   </div>
+
+                  {sec.useDecomptes && (
+                    <div className="mb-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="block text-xs" style={{ color: colors.inkSoft }}>Décomptes (un par période de paiement)</label>
+                        <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
+                      </div>
+                      <div className="space-y-2">
+                        {(sec.decomptes || []).map((d, dIdx) => {
+                          const dr = computeDecompteRevision(sec, d);
+                          return (
+                            <div key={d.id || dIdx} className="rounded-lg p-3" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                              <div className="mb-2 flex items-center gap-2">
+                                <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder={`Décompte n°${dIdx + 1} (libellé optionnel)`} value={d.label} onChange={(e) => patchDecompte(sec.id, d.id, { label: e.target.value })} />
+                                {(sec.decomptes || []).length > 1 && (
+                                  <button onClick={() => removeDecompte(sec.id, d.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div>
+                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date</label>
+                                  <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.dateDecompte} onChange={(e) => patchDecompte(sec.id, d.id, { dateDecompte: e.target.value })} />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant HT</label>
+                                  <input type="number" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.montantHT} onChange={(e) => patchDecompte(sec.id, d.id, { montantHT: e.target.value })} placeholder="0" />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à cette date</label>
+                                  <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.indexValeur} onChange={(e) => patchDecompte(sec.id, d.id, { indexValeur: e.target.value })} />
+                                </div>
+                              </div>
+                              {dr.valid && (
+                                <div className="mt-2 flex items-center justify-between text-xs font-medium" style={{ color: colors.moss }}>
+                                  <span>Montant révisé</span>
+                                  <span className="df-mono">{formatMoney(dr.montantRevise, localDoc.currency)}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="mb-3 grid grid-cols-2 gap-3">
                     <div>
                       <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie fixe (a)</label>
