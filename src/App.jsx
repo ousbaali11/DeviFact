@@ -271,8 +271,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10.5pt", lineHeight: 1.4,
     background: pageBg,
-    width: "210mm", minHeight: "297mm", boxSizing: "border-box",
-    padding: "24px 28px", margin: "5px", position: "relative", overflow: "hidden",
+    width: "210mm", minHeight: "294mm", boxSizing: "border-box",
+    padding: "24px 28px", position: "relative", overflow: "hidden",
   };
 
   return (
@@ -2718,7 +2718,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     el.style.zIndex = "-1";
 
     try {
-      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: "#FBF7EF" });
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
       const imgData = canvas.toDataURL("image/jpeg", 0.95);
       const pdf = new jsPDF({ unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
@@ -2729,7 +2729,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
       let position = 0;
       pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
       heightLeft -= pageHeight;
-      while (heightLeft > 0) {
+      while (heightLeft > 3) { // tolérance : ignore les dépassements d'arrondi de quelques mm
         position -= pageHeight;
         pdf.addPage();
         pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
