@@ -648,17 +648,25 @@ export default function DeviFactApp() {
     // une), à chaque connexion/inscription, et à chaque déconnexion —
     // qu'il s'agisse du même utilisateur ou d'un utilisateur différent.
     const { data: authListener } = db.auth.onAuthStateChange(async (_event, session) => {
-      if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
-      if (session?.user) {
-        const profile = await loadProfile(session.user.id, session.user.email);
-        setActiveOrganization(profile?.organizationId || null);
-        await loadUserData();
-        setAccount(profile);
-      } else {
-        clearUserData();
+      try {
+        if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
+        if (session?.user) {
+          const profile = await loadProfile(session.user.id, session.user.email);
+          setActiveOrganization(profile?.organizationId || null);
+          await loadUserData();
+          setAccount(profile);
+        } else {
+          clearUserData();
+          setAccount(null);
+        }
+      } catch (err) {
+        // Ne doit jamais laisser l'écran de connexion bloqué indéfiniment,
+        // même si une étape du chargement échoue de façon inattendue.
+        console.error("Erreur lors du chargement de la session :", err);
         setAccount(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
     return () => authListener?.subscription?.unsubscribe();
   }, []);
@@ -1648,6 +1656,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
       } else {
         const { error: signInError } = await db.auth.signInWithPassword({ email: cleanEmail, password });
         if (signInError) { setError("Email ou mot de passe incorrect."); setBusy(false); return; }
+        setBusy(false);
       }
     } catch (err) {
       console.error(err);
