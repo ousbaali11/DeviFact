@@ -3019,17 +3019,6 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
             </div>
           </div>
 
-          <div className="mb-2 hidden gap-2 px-2 text-xs font-medium sm:flex" style={{ color: colors.inkSoft }}>
-            <span className="grow basis-56">Désignation</span>
-            <span className="w-14 text-right">Qté</span>
-            <span className="w-20">Unité</span>
-            <span className="w-24 text-right">PU HT</span>
-            <span className="w-16 text-right">TVA</span>
-            <span className="w-16 text-right">Remise</span>
-            <span className="w-24 text-right">Total HT</span>
-            <span className="no-print w-24" />
-          </div>
-
           <div className="space-y-2">
             {localDoc.items.map((it, idx) => it.type === "section" ? (
               <div key={it.id} className="group flex items-start gap-2 rounded-lg py-2" style={{ borderTop: `2px solid ${colors.slate}` }}>
@@ -3086,17 +3075,17 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                     )}
                   </div>
                   <label className="w-14 text-xs">
-                    <span className="mb-0.5 block sm:hidden" style={{ color: colors.inkSoft }}>Qté</span>
+                    <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Qté</span>
                     <input type="number" className="df-input df-mono w-14 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.qty} onChange={(e) => updateItem(it.id, { qty: e.target.value })} />
                   </label>
                   <label className="w-20 text-xs">
-                    <span className="mb-0.5 block sm:hidden" style={{ color: colors.inkSoft }}>Unité</span>
+                    <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Unité</span>
                     <select className="df-select w-20 rounded-md px-1 py-1.5 text-sm" style={inputStyle} value={it.unit} onChange={(e) => updateItem(it.id, { unit: e.target.value })}>
                       {UNIT_OPTIONS.map((u) => <option key={u || "none"} value={u}>{unitLabel(u)}</option>)}
                     </select>
                   </label>
                   <label className="w-24 text-xs">
-                    <span className="mb-0.5 block sm:hidden" style={{ color: colors.inkSoft }}>PU HT</span>
+                    <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>PU HT</span>
                     {it.marginScheme ? (
                       <div className="w-24 rounded-md px-1 py-1.5 text-right text-sm" style={{ color: colors.inkSoft }} title="Prix de vente TTC (voir ci-dessus)">TTC</div>
                     ) : (
@@ -3104,15 +3093,15 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                     )}
                   </label>
                   <label className="w-16 text-xs">
-                    <span className="mb-0.5 block sm:hidden" style={{ color: colors.inkSoft }}>TVA %</span>
+                    <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>TVA %</span>
                     <input type="number" step="0.1" min="0" title="Taux de TVA (%)" className="df-input df-mono w-16 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.tva} onChange={(e) => updateItem(it.id, { tva: e.target.value })} />
                   </label>
                   <label className="w-16 text-xs">
-                    <span className="mb-0.5 block sm:hidden" style={{ color: colors.inkSoft }}>Remise %</span>
+                    <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Remise %</span>
                     <input type="number" className="df-input df-mono w-16 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.discount} onChange={(e) => updateItem(it.id, { discount: e.target.value })} />
                   </label>
                   <div className="w-24 text-xs">
-                    <span className="mb-0.5 block sm:hidden" style={{ color: colors.inkSoft }}>Total HT</span>
+                    <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Total HT</span>
                     <div className="df-mono py-1.5 text-right text-sm font-medium">
                       {it.marginScheme
                         ? formatMoney(lineMarginCalc(it, it.discount, localDoc.globalDiscount).saleTTC, localDoc.currency)
