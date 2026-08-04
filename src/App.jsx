@@ -6,7 +6,7 @@ import { clearStorageCache, setActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
-  ArrowRightLeft, Eraser, ChevronUp, ChevronDown, LayoutList, ArrowLeft,
+  ArrowRightLeft, Eraser, ChevronUp, ChevronDown, LayoutList, ArrowLeft, TrendingUp, Info,
   Search, FileText, Receipt, Copy, Loader2, Inbox, Check, Users, Building2,
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
@@ -60,16 +60,19 @@ function hasAccess(account, minTier) {
 function docTypeIcon(type) {
   if (type === "devis") return FileText;
   if (type === "proforma") return Ship;
+  if (type === "revision") return TrendingUp;
   return Receipt;
 }
 function docTypeColor(type) {
   if (type === "devis") return colors.slate;
   if (type === "proforma") return colors.moss;
+  if (type === "revision") return colors.brick;
   return colors.brassDark;
 }
 function docTypeLabel(type) {
   if (type === "devis") return "Devis";
   if (type === "proforma") return "Proforma";
+  if (type === "revision") return "Revision-prix";
   return "Facture";
 }
 
@@ -143,13 +146,25 @@ function emptySection() {
   return { id: nextId("s"), type: "section", title: "", subtitle: "" };
 }
 const COUNTRIES = [
-  "France", "Belgique", "Suisse", "Luxembourg", "Monaco",
-  "Allemagne", "Espagne", "Italie", "Portugal", "Pays-Bas", "Royaume-Uni", "Irlande",
-  "Maroc", "Algérie", "Tunisie", "Sénégal", "Côte d'Ivoire", "Cameroun", "Mali", "Bénin", "Togo", "Burkina Faso", "Madagascar", "Congo (RDC)", "Congo (Brazzaville)", "Gabon", "Niger", "Guinée",
-  "Canada", "États-Unis", "Mexique", "Brésil", "Argentine",
-  "Chine", "Japon", "Corée du Sud", "Inde", "Émirats arabes unis", "Arabie saoudite", "Turquie", "Liban",
-  "Roumanie", "Pologne", "Grèce", "Autriche", "Suède", "Norvège", "Danemark", "Finlande",
-  "Australie", "Nouvelle-Zélande", "Afrique du Sud",
+  // Europe (exhaustive)
+  "🇫🇷 FR", "🇧🇪 BE", "🇨🇭 CH", "🇱🇺 LU", "🇲🇨 MC", "🇩🇪 DE", "🇪🇸 ES", "🇮🇹 IT", "🇵🇹 PT",
+  "🇳🇱 NL", "🇬🇧 GB", "🇮🇪 IE", "🇷🇴 RO", "🇵🇱 PL", "🇬🇷 GR", "🇦🇹 AT", "🇸🇪 SE", "🇳🇴 NO",
+  "🇩🇰 DK", "🇫🇮 FI", "🇮🇸 IS", "🇭🇺 HU", "🇨🇿 CZ", "🇸🇰 SK", "🇸🇮 SI", "🇭🇷 HR", "🇧🇬 BG",
+  "🇪🇪 EE", "🇱🇻 LV", "🇱🇹 LT", "🇲🇹 MT", "🇨🇾 CY", "🇱🇮 LI", "🇦🇩 AD", "🇸🇲 SM", "🇻🇦 VA",
+  "🇧🇦 BA", "🇷🇸 RS", "🇲🇪 ME", "🇲🇰 MK", "🇦🇱 AL", "🇽🇰 XK", "🇲🇩 MD", "🇺🇦 UA", "🇧🇾 BY",
+  // Afrique (exhaustive)
+  "🇲🇦 MA", "🇩🇿 DZ", "🇹🇳 TN", "🇱🇾 LY", "🇪🇬 EG", "🇸🇩 SD", "🇸🇸 SS", "🇸🇳 SN", "🇨🇮 CI",
+  "🇨🇲 CM", "🇲🇱 ML", "🇧🇯 BJ", "🇹🇬 TG", "🇧🇫 BF", "🇲🇬 MG", "🇨🇩 CD", "🇨🇬 CG", "🇬🇦 GA",
+  "🇳🇪 NE", "🇬🇳 GN", "🇲🇷 MR", "🇬🇼 GW", "🇬🇶 GQ", "🇹🇩 TD", "🇨🇫 CF", "🇷🇼 RW", "🇧🇮 BI",
+  "🇩🇯 DJ", "🇸🇴 SO", "🇪🇷 ER", "🇪🇹 ET", "🇰🇪 KE", "🇺🇬 UG", "🇹🇿 TZ", "🇿🇲 ZM", "🇿🇼 ZW",
+  "🇲🇼 MW", "🇲🇿 MZ", "🇦🇴 AO", "🇳🇦 NA", "🇧🇼 BW", "🇿🇦 ZA", "🇱🇸 LS", "🇸🇿 SZ", "🇬🇭 GH",
+  "🇳🇬 NG", "🇱🇷 LR", "🇸🇱 SL", "🇬🇲 GM", "🇨🇻 CV", "🇰🇲 KM", "🇸🇨 SC", "🇲🇺 MU", "🇸🇹 ST",
+  // Amériques
+  "🇨🇦 CA", "🇺🇸 US", "🇲🇽 MX", "🇧🇷 BR", "🇦🇷 AR", "🇨🇱 CL", "🇨🇴 CO", "🇵🇪 PE",
+  // Asie & Moyen-Orient
+  "🇨🇳 CN", "🇯🇵 JP", "🇰🇷 KR", "🇮🇳 IN", "🇦🇪 AE", "🇸🇦 SA", "🇹🇷 TR", "🇱🇧 LB", "🇯🇴 JO", "🇶🇦 QA", "🇰🇼 KW", "🇮🇱 IL",
+  // Océanie
+  "🇦🇺 AU", "🇳🇿 NZ",
   "Autre",
 ];
 
@@ -164,7 +179,7 @@ function emptyPrestation() {
 }
 
 function nextNumber(documents, type) {
-  const prefix = type === "devis" ? "DEV" : type === "proforma" ? "PRO" : "FAC";
+  const prefix = type === "devis" ? "DEV" : type === "proforma" ? "PRO" : type === "revision" ? "REV" : "FAC";
   const nums = documents.filter((d) => d.type === type).map((d) => parseInt((d.docNumber.match(/(\d+)$/) || [])[1] || "0", 10));
   const next = (nums.length ? Math.max(...nums) : 0) + 1;
   return `${prefix}-${String(next).padStart(3, "0")}`;
@@ -177,6 +192,69 @@ function emptyProforma() {
     originCountry: "", hsCode: "", loadingPort: "", dischargingPort: "", transportMode: "",
     customFields: [],
   };
+}
+
+const REVISION_SECTORS = [
+  "Gros œuvre / Maçonnerie", "Plomberie / Sanitaire", "Électricité", "Menuiserie",
+  "Peinture / Revêtements", "Couverture / Étanchéité", "Chauffage / Climatisation",
+  "Carrelage / Sols", "Terrassement / VRD", "Métallerie / Serrurerie", "Isolation",
+  "Travaux publics", "Autre secteur",
+];
+
+// Repères par pays pour la révision de prix — uniquement là où la
+// référence est bien établie et vérifiée. Pour tout autre pays, la
+// formule reste la même (universelle, réglable) mais sans repère
+// local inventé — mieux vaut ne rien affirmer que risquer une
+// référence fausse sur un document professionnel.
+const REVISION_COUNTRY_INFO = {
+  "🇫🇷 FR": { currency: "EUR", indexHint: "BT01 - Index national du bâtiment tous corps d'état", authority: "INSEE (insee.fr)" },
+  "🇧🇪 BE": { currency: "EUR", indexHint: "Indice matériaux / salaires de la construction", authority: "SPF Économie (economie.fgov.be)" },
+  "🇨🇭 CH": { currency: "CHF", indexHint: "Indice suisse des prix de la construction", authority: "Office fédéral de la statistique (bfs.admin.ch)" },
+  "🇱🇺 LU": { currency: "EUR", indexHint: "Indice des prix de la construction", authority: "STATEC (statistiques.public.lu)" },
+  "🇨🇦 CA": { currency: "CAD", indexHint: "Indices des prix de la construction", authority: "Statistique Canada (statcan.gc.ca)" },
+};
+function getRevisionCountryInfo(country) {
+  return REVISION_COUNTRY_INFO[country] || { currency: null, indexHint: "", authority: "l'organisme national de statistiques de ton pays" };
+}
+
+function newRevisionDocument(sector, country, documents) {
+  const info = getRevisionCountryInfo(country);
+  return {
+    id: nextId("doc"),
+    type: "revision",
+    docNumber: nextNumber(documents, "revision"),
+    issueDate: new Date().toISOString().slice(0, 10),
+    currency: info.currency || "EUR",
+    sector,
+    country,
+    company: { type: "entreprise", name: "", siret: "", address: "", country: country || "", email: "", phone: "", tva: "", logo: null },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
+    clientId: null,
+    montantInitialHT: "",
+    indexName: info.indexHint || "",
+    indexInitial: "",
+    indexActuel: "",
+    coeffFixe: 0.15,
+    coeffVariable: 0.85,
+    notes: "",
+    status: "brouillon",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function computeRevision(doc) {
+  const c0 = Number(doc.montantInitialHT) || 0;
+  const i0 = Number(doc.indexInitial) || 0;
+  const iN = Number(doc.indexActuel) || 0;
+  const a = Number(doc.coeffFixe);
+  const b = Number(doc.coeffVariable);
+  if (!c0 || !i0 || !iN) return { valid: false, montantRevise: 0, ecartMontant: 0, ecartPct: 0, coefficient: 0 };
+  const coefficient = a + b * (iN / i0);
+  const montantRevise = c0 * coefficient;
+  const ecartMontant = montantRevise - c0;
+  const ecartPct = c0 ? (ecartMontant / c0) * 100 : 0;
+  return { valid: true, montantRevise, ecartMontant, ecartPct, coefficient };
 }
 
 function newDocument(type, documents) {
@@ -493,6 +571,7 @@ export default function DeviFactApp() {
   const [activeId, setActiveId] = useState(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("tous");
+  const [revisionCountry, setRevisionCountry] = useState("🇫🇷 FR");
   const [limitNotice, setLimitNotice] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [splitNotice, setSplitNotice] = useState(null);
@@ -858,9 +937,23 @@ export default function DeviFactApp() {
     setActiveId(doc.id);
     setView("editor");
   }
+  function openNewRevision(sector, country) {
+    const plan = plans.find((p) => p.id === (account?.plan || "gratuit")) || PLANS[0];
+    if (documents.length >= plan.limit) {
+      setLimitNotice(true);
+      setView("pricing");
+      return;
+    }
+    const doc = newRevisionDocument(sector, country, documents);
+    if (companyProfile.name) doc.company = { ...companyProfile };
+    persist([doc, ...documents]);
+    setActiveId(doc.id);
+    setView("revision-editor");
+  }
   function openDoc(id) {
+    const target = documents.find((d) => d.id === id);
     setActiveId(id);
-    setView("editor");
+    setView(target?.type === "revision" ? "revision-editor" : "editor");
   }
   function backToDashboard() {
     setView("dashboard");
@@ -1000,9 +1093,14 @@ export default function DeviFactApp() {
       .slice()
       .sort((a, b) => new Date(a.issueDate) - new Date(b.issueDate))
       .forEach((d) => {
+        if (d.type === "revision") {
+          const r = computeRevision(d);
+          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number((Number(d.montantInitialHT) || 0).toFixed(2)), Number(r.ecartMontant.toFixed(2)), Number(r.montantRevise.toFixed(2))]);
+          return;
+        }
         const t = computeTotals(d);
         rows.push([
-          d.type === "devis" ? "Devis" : "Facture", d.docNumber, fr(new Date(d.issueDate)), d.client.name || "",
+          docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "",
           d.status, Number(t.subtotalHT.toFixed(2)), Number(t.totalTVA.toFixed(2)), Number(t.totalTTC.toFixed(2)),
         ]);
       });
@@ -1073,7 +1171,74 @@ export default function DeviFactApp() {
     );
   }
 
-  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), account, onLogout: logout, onSwitchOrganization: switchOrganization, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
+  if (view === "revision-editor" && activeDoc) {
+    return (
+      <RevisionEditor
+        doc={activeDoc}
+        saving={saving}
+        clients={clients}
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onBack={backToDashboard}
+        onSaveClient={upsertClient}
+        onGoToPricing={() => setView("pricing")}
+      />
+    );
+  }
+
+  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), account, onLogout: logout, onSwitchOrganization: switchOrganization, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
+
+  if (view === "revision-sector") {
+    const countryInfo = getRevisionCountryInfo(revisionCountry);
+    return (
+      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+        <GlobalStyle />
+        <TopNav {...navProps} />
+        <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+          <button onClick={backToDashboard} className="no-print mb-4 flex items-center gap-1 text-sm" style={{ color: colors.inkSoft }}><ArrowLeft size={15} /> Retour</button>
+          <h1 className="df-display mb-1 text-2xl font-semibold">Nouvelle révision de prix</h1>
+          <p className="mb-6 text-sm" style={{ color: colors.inkSoft }}>Choisis le pays, puis le secteur concerné.</p>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Pays</label>
+          <select
+            value={revisionCountry}
+            onChange={(e) => setRevisionCountry(e.target.value)}
+            className="df-select mb-2 w-full max-w-sm rounded-md px-3 py-2 text-sm"
+            style={{ border: `1px solid ${colors.line}` }}
+          >
+            {COUNTRIES.filter((c) => c !== "Autre").map((c) => <option key={c} value={c}>{c}</option>)}
+            <option value="Autre">Autre pays</option>
+          </select>
+          <div className="mb-6 flex items-start gap-2 rounded-lg p-3 text-xs" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}>
+            <Info size={14} className="mt-0.5 shrink-0" />
+            {countryInfo.currency ? (
+              <span>Devise suggérée : <strong>{countryInfo.currency}</strong>. Indice de référence usuel : <strong>{countryInfo.indexHint}</strong>, publié par {countryInfo.authority}. À vérifier avec ton contrat.</span>
+            ) : (
+              <span>Pas de repère spécifique enregistré pour ce pays — renseigne toi-même le nom et les valeurs de l'indice applicable (contrat, ou {countryInfo.authority}). La formule de calcul reste la même et s'adapte à tes propres valeurs.</span>
+            )}
+          </div>
+
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Secteur</label>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {REVISION_SECTORS.map((sector) => (
+              <button
+                key={sector}
+                onClick={() => openNewRevision(sector, revisionCountry)}
+                className="flex items-center justify-between gap-2 rounded-xl px-4 py-3 text-left text-sm font-medium"
+                style={{ background: colors.surface, border: `1px solid ${colors.line}` }}
+              >
+                {sector} <ArrowRight size={15} style={{ color: colors.inkSoft }} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (view === "clients") {
     return (
@@ -1248,7 +1413,7 @@ export default function DeviFactApp() {
             <input className="df-input bg-transparent text-sm outline-none" placeholder="Rechercher un client ou un numéro..." value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <div className="flex gap-1 rounded-lg p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-            {[["tous", "Tous"], ["devis", "Devis"], ["facture", "Factures"], ["proforma", "Proforma"]].map(([id, label]) => (
+            {[["tous", "Tous"], ["devis", "Devis"], ["facture", "Factures"], ["proforma", "Proforma"], ["revision", "Révisions"]].map(([id, label]) => (
               <button key={id} onClick={() => setTypeFilter(id)} className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: typeFilter === id ? colors.ink : "transparent", color: typeFilter === id ? "white" : colors.inkSoft }}>
                 {label}
               </button>
@@ -1301,7 +1466,8 @@ export default function DeviFactApp() {
               Sélectionne plusieurs devis (ou plusieurs factures) pour les <strong>fusionner</strong> en un seul document.
             </p>
             {filtered.map((d, idx) => {
-              const { totalTTC } = computeTotals(d);
+              const isRevision = d.type === "revision";
+              const totalTTC = isRevision ? computeRevision(d).montantRevise : computeTotals(d).totalTTC;
               const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
               const TypeIconComp = docTypeIcon(d.type);
               return (
@@ -1816,7 +1982,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   );
 }
 
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, account, onLogout, onSwitchOrganization, siteSettings, companyProfile, onSetCompanyType }) {
+function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, account, onLogout, onSwitchOrganization, siteSettings, companyProfile, onSetCompanyType }) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
@@ -1920,6 +2086,9 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
         <button onClick={onNewProforma} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
           <Plus size={15} /> Proforma
         </button>
+        <button onClick={onNewRevision} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.slate, color: "white" }} title="Nouvelle révision des prix">
+          <TrendingUp size={15} /> Révision des prix
+        </button>
         <button onClick={onLogout} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Se déconnecter">
           <LogOut size={15} />
         </button>
@@ -1930,6 +2099,280 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
             <Icon size={13} /> {label}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, watermarkEnabled = true }, ref) {
+  const result = computeRevision(doc);
+  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const inkSoft = "#4A5B63", brass = "#B8763E", brassDark = "#8F5C2E", line = "#DAE1DC";
+  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
+  const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
+  const mono = { fontFamily: "'IBM Plex Mono', monospace" };
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
+  const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
+  const pStyle = {
+    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10.5pt", lineHeight: 1.4,
+    background: pageBg,
+    width: "210mm", minHeight: "294mm", boxSizing: "border-box",
+    padding: "24px 28px", position: "relative", overflow: "hidden",
+  };
+
+  return (
+    <div ref={ref} className="print-doc" style={pStyle}>
+      {watermarkEnabled && (
+        <div style={{
+          position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-32deg)",
+          fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.08)",
+          whiteSpace: "nowrap", pointerEvents: "none",
+        }}>{watermarkText}</div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "14pt" }}>RÉVISION DE PRIX N° :{doc.docNumber}</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          <div style={{ color: inkSoft }}>Secteur : {doc.sector}</div>
+        </div>
+        {doc.company.logo ? (
+          <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} />
+        ) : (
+          <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: "16px", marginTop: "20px", position: "relative", zIndex: 1 }}>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
+          {doc.company.address && <div>{doc.company.address}</div>}
+          {doc.company.email && <div>{doc.company.email}</div>}
+        </div>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          {doc.client.name && <div style={{ fontWeight: 600 }}>{doc.client.name}</div>}
+          {doc.client.address && <div>{doc.client.address}</div>}
+          {doc.client.email && <div>{doc.client.email}</div>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
+        <div style={{ fontWeight: 700, marginBottom: "8px", fontSize: "11pt" }}>Calcul de la révision</div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "10pt" }}>
+          <tbody>
+            <tr style={{ borderBottom: `1px solid ${line}` }}>
+              <td style={{ padding: "6px 0", color: inkSoft }}>Montant initial HT (C0)</td>
+              <td style={{ padding: "6px 0", textAlign: "right", ...mono }}>{formatMoney(Number(doc.montantInitialHT) || 0, doc.currency)}</td>
+            </tr>
+            <tr style={{ borderBottom: `1px solid ${line}` }}>
+              <td style={{ padding: "6px 0", color: inkSoft }}>Indice de référence</td>
+              <td style={{ padding: "6px 0", textAlign: "right" }}>{doc.indexName}</td>
+            </tr>
+            <tr style={{ borderBottom: `1px solid ${line}` }}>
+              <td style={{ padding: "6px 0", color: inkSoft }}>Valeur de l'indice à l'origine (I0)</td>
+              <td style={{ padding: "6px 0", textAlign: "right", ...mono }}>{doc.indexInitial}</td>
+            </tr>
+            <tr style={{ borderBottom: `1px solid ${line}` }}>
+              <td style={{ padding: "6px 0", color: inkSoft }}>Valeur de l'indice actuelle (In)</td>
+              <td style={{ padding: "6px 0", textAlign: "right", ...mono }}>{doc.indexActuel}</td>
+            </tr>
+            <tr style={{ borderBottom: `1px solid ${line}` }}>
+              <td style={{ padding: "6px 0", color: inkSoft }}>Formule appliquée</td>
+              <td style={{ padding: "6px 0", textAlign: "right", ...mono, fontSize: "9pt" }}>Cn = C0 × ({doc.coeffFixe} + {doc.coeffVariable} × In/I0)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+          <div style={{ width: "260px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px", color: inkSoft }}>
+              <span>Écart</span>
+              <span style={mono}>{result.ecartMontant >= 0 ? "+" : ""}{formatMoney(result.ecartMontant, doc.currency)} ({result.ecartPct >= 0 ? "+" : ""}{result.ecartPct.toFixed(2)}%)</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: ink, color: "white", fontWeight: 700, borderRadius: "4px" }}>
+              <span>Montant révisé HT</span>
+              <span style={mono}>{formatMoney(result.montantRevise, doc.currency)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {doc.notes && (
+        <div style={{ marginTop: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, marginBottom: "4px" }}>Note :</div>
+          <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{renderMarkup(doc.notes)}</div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onSaveClient, onGoToPricing }) {
+  const [localDoc, setLocalDoc] = useState(doc);
+  const saveTimer = useRef(null);
+  useEffect(() => setLocalDoc(doc), [doc.id]);
+
+  function patch(p) {
+    const next = { ...localDoc, ...p };
+    setLocalDoc(next);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => onChange(p), 400);
+  }
+  function patchDeep(field, p) {
+    patch({ [field]: { ...localDoc[field], ...p } });
+  }
+
+  const result = computeRevision(localDoc);
+  const currentPlanData = (plans || []).find((p) => p.id === (account?.plan || "gratuit"));
+  const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
+  const printRef = useRef(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el || pdfGenerating) return;
+    setPdfGenerating(true);
+    const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
+    el.style.display = "block";
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    el.style.top = "0";
+    el.style.zIndex = "-1";
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 3) {
+        position -= pageHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      pdf.save(`Revision-${(localDoc.docNumber || "document").replace(/[\\/:*?"<>|]/g, "-")}.pdf`);
+    } catch (err) {
+      console.error("Erreur de génération du PDF", err);
+      alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      el.style.display = prevStyle.display;
+      el.style.position = prevStyle.position;
+      el.style.left = prevStyle.left;
+      el.style.top = prevStyle.top;
+      el.style.zIndex = prevStyle.zIndex;
+      setPdfGenerating(false);
+    }
+  }
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
+          </button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        {isLocked && (
+          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+              <Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}
+            </span>
+            {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
+          </div>
+        )}
+        <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: colors.line }}>
+            <div>
+              <h1 className="df-display text-xl font-semibold">Révision de prix</h1>
+              <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.slate}18`, color: colors.slate }}>{localDoc.sector}</span>
+              {localDoc.country && <span className="ml-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>{localDoc.country}</span>}
+            </div>
+            <div className="text-right">
+              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>N°</label>
+              <input className="df-input df-mono w-28 rounded-md px-2 py-1 text-right text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Émetteur</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom de l'entreprise" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+            </div>
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du client" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 rounded-xl p-4" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+            <label className="mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Calcul de la révision</label>
+            <div className="mb-3">
+              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant initial HT (marché d'origine)</label>
+              <input type="number" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.montantInitialHT} onChange={(e) => patch({ montantInitialHT: e.target.value })} placeholder="0" />
+            </div>
+            <div className="mb-3">
+              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice de référence (précise celui de ton contrat)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indexName} onChange={(e) => patch({ indexName: e.target.value })} />
+              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Valeurs à récupérer sur <a href="https://www.insee.fr" target="_blank" rel="noreferrer" className="underline">insee.fr</a> ou dans ton contrat.</p>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à l'origine (I0)</label>
+                <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indexInitial} onChange={(e) => patch({ indexInitial: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice actuel (In)</label>
+                <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indexActuel} onChange={(e) => patch({ indexActuel: e.target.value })} />
+              </div>
+            </div>
+            <div className="mb-1 grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie fixe (a)</label>
+                <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.coeffFixe} onChange={(e) => { const a = Number(e.target.value) || 0; patch({ coeffFixe: a, coeffVariable: Math.round((1 - a) * 100) / 100 }); }} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie variable (b)</label>
+                <input disabled type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.surface, color: colors.inkSoft }} value={localDoc.coeffVariable} />
+              </div>
+            </div>
+            <p className="text-xs" style={{ color: colors.inkSoft }}>a + b = 1 toujours (b se calcule automatiquement). Valeurs usuelles : 0,15 / 0,85 — vérifie celles de ton contrat (CCTP).</p>
+          </div>
+
+          <div className="mb-6 rounded-xl p-4" style={{ background: result.valid ? `${colors.moss}0D` : colors.paper, border: `1px solid ${result.valid ? colors.moss + "40" : colors.line}` }}>
+            {!result.valid ? (
+              <p className="text-sm" style={{ color: colors.inkSoft }}>Renseigne le montant initial et les deux valeurs d'indice pour voir le résultat.</p>
+            ) : (
+              <>
+                <div className="flex items-center justify-between text-sm" style={{ color: colors.inkSoft }}>
+                  <span>Écart</span>
+                  <span className="df-mono">{result.ecartMontant >= 0 ? "+" : ""}{formatMoney(result.ecartMontant, localDoc.currency)} ({result.ecartPct >= 0 ? "+" : ""}{result.ecartPct.toFixed(2)}%)</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-lg font-semibold">
+                  <span>Montant révisé HT</span>
+                  <span className="df-mono" style={{ color: colors.moss }}>{formatMoney(result.montantRevise, localDoc.currency)}</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
+          <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+        </div>
+      </div>
+
+      <div style={{ position: "fixed", top: 0, left: "-9999px", display: "none" }}>
+        <PrintRevision ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
       </div>
     </div>
   );
