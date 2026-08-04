@@ -1629,6 +1629,18 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
         if (password.length < 6) { setError("Le mot de passe doit faire au moins 6 caractères."); setBusy(false); return; }
         const { data, error: signUpError } = await db.auth.signUp({ email: cleanEmail, password });
         if (signUpError) { setError(signUpError.message); setBusy(false); return; }
+
+        // Un email déjà utilisé ne renvoie pas d'erreur explicite (mesure
+        // de sécurité de Supabase), mais son tableau "identities" est vide
+        // dans ce cas — c'est le seul moyen fiable de détecter la situation.
+        const alreadyExists = data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0;
+        if (alreadyExists) {
+          setError("Un compte existe déjà avec cet email. Connecte-toi plutôt, ou utilise \"Mot de passe oublié ?\" si besoin.");
+          setMode("login");
+          setBusy(false);
+          return;
+        }
+
         if (data.user) {
           if (companyName.trim() || firstName.trim() || lastName.trim()) {
             await db.from("profiles").update({ company_name: companyName.trim(), first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", data.user.id);
