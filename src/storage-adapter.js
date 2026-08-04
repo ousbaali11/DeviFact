@@ -1,22 +1,15 @@
-// storage-adapter-supabase.js
-// Remplace le stockage temporaire (localStorage) par une vraie base de
-// données Supabase. Reproduit exactement la même interface window.storage
-// que l'application utilise déjà — aucune modification du code de
-// createur/tableau de bord/clients/prestations n'est nécessaire.
-//
-// IMPORTANT : ce fichier doit être importé APRÈS que l'utilisateur soit
-// connecté (un utilisateur non connecté n'a accès à aucune donnée,
-// c'est voulu — voir les règles de sécurité dans schema.sql).
+// storage-adapter.js — pont entre le stockage clé/valeur utilisé par
+// l'application et la table kv_store en base.
 
-import { supabase } from './supabase-client.js';
+import { db } from './client.js';
 
 if (typeof window !== "undefined") {
   window.storage = {
     async get(key, shared = false) {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) throw new Error("Non connecté");
 
-      let query = supabase.from('kv_store').select('value').eq('key', key).eq('shared', shared);
+      let query = db.from('kv_store').select('value').eq('key', key).eq('shared', shared);
       query = shared ? query : query.eq('user_id', user.id);
 
       const { data, error } = await query.maybeSingle();
@@ -26,10 +19,10 @@ if (typeof window !== "undefined") {
     },
 
     async set(key, value, shared = false) {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) throw new Error("Non connecté");
 
-      const { error } = await supabase.from('kv_store').upsert({
+      const { error } = await db.from('kv_store').upsert({
         user_id: user.id,
         key,
         value: JSON.parse(value),
@@ -42,19 +35,19 @@ if (typeof window !== "undefined") {
     },
 
     async delete(key, shared = false) {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) throw new Error("Non connecté");
 
-      const { error } = await supabase.from('kv_store').delete().eq('user_id', user.id).eq('key', key).eq('shared', shared);
+      const { error } = await db.from('kv_store').delete().eq('user_id', user.id).eq('key', key).eq('shared', shared);
       if (error) throw error;
       return { key, deleted: true, shared };
     },
 
     async list(prefix = "", shared = false) {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) throw new Error("Non connecté");
 
-      let query = supabase.from('kv_store').select('key').eq('shared', shared).like('key', `${prefix}%`);
+      let query = db.from('kv_store').select('key').eq('shared', shared).like('key', `${prefix}%`);
       query = shared ? query : query.eq('user_id', user.id);
 
       const { data, error } = await query;

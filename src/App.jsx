@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, forwardRef } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
-import { supabase } from "./supabase-client.js";
+import { db } from "./client.js";
 import * as XLSX from "xlsx";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
@@ -499,7 +499,7 @@ export default function DeviFactApp() {
   const [plans, setPlans] = useState(PLANS);
 
   async function loadProfile(userId, email) {
-    const { data: profile } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+    const { data: profile } = await db.from("profiles").select("*").eq("id", userId).maybeSingle();
     if (!profile) return null;
     return {
       id: userId,
@@ -513,7 +513,7 @@ export default function DeviFactApp() {
     };
   }
   async function loadPlans() {
-    const { data, error } = await supabase.from("plans").select("*");
+    const { data, error } = await db.from("plans").select("*");
     if (error || !data) {
       console.error("Erreur de chargement des forfaits (état précédent conservé)", error);
       return; // on garde l'état actuel plutôt que d'écraser avec les valeurs par défaut
@@ -536,14 +536,14 @@ export default function DeviFactApp() {
   async function updatePlanPaypalId(planId, field, value) {
     setSavingPlanSettings(true);
     const column = field === "monthly" ? "paypal_plan_id_monthly" : "paypal_plan_id_annual";
-    const { error } = await supabase.from("plans").update({ [column]: value || null }).eq("id", planId);
+    const { error } = await db.from("plans").update({ [column]: value || null }).eq("id", planId);
     if (error) console.error("Erreur de mise à jour de l'identifiant PayPal (droits admin requis)", error);
     await loadPlans();
     setSavingPlanSettings(false);
   }
 
   async function loadSiteSettings() {
-    const { data, error } = await supabase.from("site_settings").select("*").eq("id", 1).maybeSingle();
+    const { data, error } = await db.from("site_settings").select("*").eq("id", 1).maybeSingle();
     if (error || !data) {
       console.error("Erreur de chargement des paramètres du site (état précédent conservé)", error);
       return;
@@ -555,7 +555,7 @@ export default function DeviFactApp() {
     const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
-    const { error } = await supabase.from("site_settings").update(dbPatch).eq("id", 1);
+    const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
     if (error) console.error("Erreur de mise à jour des paramètres du site (droits admin requis)", error);
     await loadSiteSettings();
     setSavingSiteSettings(false);
@@ -592,7 +592,7 @@ export default function DeviFactApp() {
     // se déclenche à l'ouverture (avec la session actuelle, s'il y en a
     // une), à chaque connexion/inscription, et à chaque déconnexion —
     // qu'il s'agisse du même utilisateur ou d'un utilisateur différent.
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: authListener } = db.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         await loadUserData();
         const profile = await loadProfile(session.user.id, session.user.email);
@@ -609,7 +609,7 @@ export default function DeviFactApp() {
   async function updatePlanPrice(planId, field, value) {
     setSavingPlanSettings(true);
     const column = field === "monthly" ? "monthly_price" : "annual_price";
-    const { error } = await supabase.from("plans").update({ [column]: value === "" ? null : Number(value) }).eq("id", planId);
+    const { error } = await db.from("plans").update({ [column]: value === "" ? null : Number(value) }).eq("id", planId);
     if (error) console.error("Erreur de mise à jour du prix (droits admin requis)", error);
     await loadPlans();
     setSavingPlanSettings(false);
@@ -617,7 +617,7 @@ export default function DeviFactApp() {
   async function togglePlanVisibility(planId) {
     setSavingPlanSettings(true);
     const current = plans.find((p) => p.id === planId);
-    const { error } = await supabase.from("plans").update({ is_visible: !!current?.hidden }).eq("id", planId);
+    const { error } = await db.from("plans").update({ is_visible: !!current?.hidden }).eq("id", planId);
     if (error) console.error("Erreur de mise à jour de la visibilité (droits admin requis)", error);
     await loadPlans();
     setSavingPlanSettings(false);
@@ -625,7 +625,7 @@ export default function DeviFactApp() {
   async function toggleWatermark(planId) {
     setSavingPlanSettings(true);
     const current = plans.find((p) => p.id === planId);
-    const { error } = await supabase.from("plans").update({ watermark_enabled: !current?.watermarkEnabled }).eq("id", planId);
+    const { error } = await db.from("plans").update({ watermark_enabled: !current?.watermarkEnabled }).eq("id", planId);
     if (error) console.error("Erreur de mise à jour du filigrane (droits admin requis)", error);
     await loadPlans();
     setSavingPlanSettings(false);
@@ -633,13 +633,13 @@ export default function DeviFactApp() {
 
   async function persistAccount(next) {
     setAccount(next);
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return;
     try {
       // Le forfait payant n'est jamais confirmé ici : seul le webhook PayPal,
       // qui tourne côté serveur, a le droit de faire passer un compte sur un
-      // forfait payant. Voir supabase-functions/paypal-webhook.
-      await supabase.from("profiles").update({
+      // forfait payant. Voir functions/paypal-webhook.
+      await db.from("profiles").update({
         company_name: next.companyName,
         billing_cycle: next.billing,
       }).eq("id", user.id);
@@ -648,13 +648,13 @@ export default function DeviFactApp() {
     }
   }
   async function logout() {
-    await supabase.auth.signOut();
+    await db.auth.signOut();
     setAccount(null);
   }
   async function chooseFreePlan() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return;
-    const { error } = await supabase.from("profiles").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", user.id);
+    const { error } = await db.from("profiles").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", user.id);
     if (error) { console.error("Erreur de passage au forfait gratuit", error); return; }
     setAccount((prev) => ({ ...prev, plan: "gratuit", paymentStatus: "gratuit" }));
   }
@@ -664,34 +664,33 @@ export default function DeviFactApp() {
   // peut modifier (RLS) — un utilisateur ne peut pas déclencher ceci en
   // falsifiant un prix depuis son navigateur.
   async function chooseZeroPricePlan(planId, billingCycle) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return;
-    const { error } = await supabase.from("profiles").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", user.id);
+    const { error } = await db.from("profiles").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", user.id);
     if (error) { console.error("Erreur d'activation du forfait à 0€", error); return; }
     setAccount((prev) => ({ ...prev, plan: planId, billing: billingCycle, paymentStatus: "payé" }));
   }
   async function togglePaymentStatus() {
     if (!account) return;
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return;
     const nextStatus = account.paymentStatus === "payé" ? "impayé" : "payé";
-    const { error } = await supabase.from("profiles").update({ payment_status: nextStatus }).eq("id", user.id);
+    const { error } = await db.from("profiles").update({ payment_status: nextStatus }).eq("id", user.id);
     if (error) { console.error("Erreur de mise à jour du statut de paiement", error); return; }
     setAccount({ ...account, paymentStatus: nextStatus });
   }
   async function deleteCurrentAccount() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await db.auth.getUser();
     if (!user) return;
     // Supprime les données applicatives. La suppression du compte
-    // d'authentification lui-même doit se faire depuis le dashboard
-    // Supabase (Authentication → Users), ou via une fonction serveur
-    // dédiée avec la clé "service role" — jamais depuis le navigateur.
+    // d'authentification lui-même se fait depuis le dashboard du
+    // fournisseur (Authentication → Users), jamais depuis le navigateur.
     await Promise.allSettled([
       window.storage.set("documents", JSON.stringify([]), false),
       window.storage.set("clients", JSON.stringify([]), false),
       window.storage.set("prestations", JSON.stringify([]), false),
       window.storage.set("company-profile", JSON.stringify(emptyCompanyProfile()), false),
-      supabase.from("profiles").update({ plan: "gratuit", is_admin: false, payment_status: "gratuit" }).eq("id", user.id),
+      db.from("profiles").update({ plan: "gratuit", is_admin: false, payment_status: "gratuit" }).eq("id", user.id),
     ]);
     setDocuments([]); setClients([]); setPrestations([]); setCompanyProfile(emptyCompanyProfile());
     await logout();
@@ -1418,14 +1417,14 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
     try {
       if (mode === "signup") {
         if (password.length < 6) { setError("Le mot de passe doit faire au moins 6 caractères."); setBusy(false); return; }
-        const { data, error: signUpError } = await supabase.auth.signUp({ email: cleanEmail, password });
+        const { data, error: signUpError } = await db.auth.signUp({ email: cleanEmail, password });
         if (signUpError) { setError(signUpError.message); setBusy(false); return; }
         if (companyName.trim() && data.user) {
-          await supabase.from("profiles").update({ company_name: companyName.trim() }).eq("id", data.user.id);
+          await db.from("profiles").update({ company_name: companyName.trim() }).eq("id", data.user.id);
         }
         if (!data.session) {
-          // La confirmation par email est activée sur ce projet Supabase :
-          // pas de session immédiate, il faut d'abord cliquer le lien reçu par mail.
+          // Si la confirmation par email est activée côté serveur, pas de
+          // session immédiate : il faut cliquer le lien reçu par mail.
           setInfo("Compte créé ! Vérifie ta boîte mail pour confirmer ton adresse, puis reviens te connecter ici.");
           setMode("login");
           setBusy(false);
@@ -1434,7 +1433,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
         // Sinon : session créée immédiatement, l'écouteur onAuthStateChange
         // dans le composant principal prend le relais automatiquement.
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
+        const { error: signInError } = await db.auth.signInWithPassword({ email: cleanEmail, password });
         if (signInError) { setError("Email ou mot de passe incorrect."); setBusy(false); return; }
       }
     } catch (err) {
@@ -1521,7 +1520,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           </div>
         </div>
         <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-xs" style={{ color: colors.inkSoft }}>
-          <Lock size={12} /> Authentification sécurisée par Supabase (mots de passe hachés, jamais stockés en clair).
+          <Lock size={12} /> Authentification sécurisée (mots de passe hachés, jamais stockés en clair).
         </p>
       </div>
     </div>
@@ -2181,7 +2180,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         <div className="flex items-start gap-2">
           <Check size={16} style={{ color: colors.moss, marginTop: "2px", flexShrink: 0 }} />
           <p className="text-xs" style={{ color: colors.moss }}>
-            Cet espace est maintenant connecté à une vraie base de données (Supabase). Ton statut administrateur est vérifié côté serveur (RLS) — il ne peut pas être falsifié depuis le navigateur. La liste ci-dessous ne montre encore que <strong>tes propres statistiques</strong> ; une vraie table listant tous les comptes réels peut être ajoutée facilement une fois que tu as de premiers utilisateurs (voir le Dossier de passation technique).
+            Cet espace est connecté à une vraie base de données. Ton statut administrateur est vérifié côté serveur (RLS) — il ne peut pas être falsifié depuis le navigateur. La liste ci-dessous ne montre encore que <strong>tes propres statistiques</strong> ; une vraie table listant tous les comptes réels peut être ajoutée facilement une fois que tu as de premiers utilisateurs (voir le Dossier de passation technique).
           </p>
         </div>
       </div>
@@ -2211,7 +2210,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
           )}
         </div>
         <p className="border-t px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-          En production, ce statut doit être mis à jour automatiquement par la fonction de webhook PayPal (voir <code>supabase-functions/paypal-webhook</code>), pas manuellement.
+          En production, ce statut doit être mis à jour automatiquement par la fonction de webhook PayPal (voir <code>functions/paypal-webhook</code>), pas manuellement.
         </p>
       </div>
 
@@ -2276,7 +2275,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
           <AlertTriangle size={15} /> Zone dangereuse
         </div>
         <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>
-          Réinitialise tes devis, factures, clients et prestations, et te déconnecte. Pour supprimer complètement le compte d'authentification, va dans ton dashboard Supabase → Authentication → Users.
+          Réinitialise tes devis, factures, clients et prestations, et te déconnecte. Pour supprimer complètement le compte d'authentification, va dans le dashboard d'administration de la base de données → Authentication → Users.
         </p>
         {!confirmDelete ? (
           <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.brick}`, color: colors.brick }}>
@@ -2578,8 +2577,8 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     setAiLoading(true);
     setAiError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const { data, error } = await supabase.functions.invoke("suggest-lines", {
+      const { data: { session } } = await db.auth.getSession();
+      const { data, error } = await db.functions.invoke("suggest-lines", {
         body: { description: aiDescription.trim() },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });

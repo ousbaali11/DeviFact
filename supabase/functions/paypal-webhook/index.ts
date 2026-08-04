@@ -1,4 +1,4 @@
-// supabase/functions/paypal-webhook/index.ts
+// paypal-webhook/index.ts
 //
 // Fonction serveur qui reçoit les notifications de PayPal (abonnement
 // activé, annulé, paiement échoué...), VÉRIFIE qu'elles viennent bien
@@ -18,7 +18,7 @@ const PAYPAL_CLIENT_ID = Deno.env.get("PAYPAL_CLIENT_ID")!;
 const PAYPAL_CLIENT_SECRET = Deno.env.get("PAYPAL_CLIENT_SECRET")!;
 const PAYPAL_WEBHOOK_ID = Deno.env.get("PAYPAL_WEBHOOK_ID")!;
 
-const supabaseAdmin = createClient(
+const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")! // clé secrète, jamais utilisée côté navigateur
 );
@@ -77,7 +77,7 @@ serve(async (req) => {
     if (!userId) { console.error("custom_id manquant sur l'abonnement"); return new Response("ok"); }
 
     // Retrouve à quel forfait DeviFact correspond ce plan_id PayPal
-    const { data: plan } = await supabaseAdmin
+    const { data: plan } = await dbAdmin
       .from("plans")
       .select("id, paypal_plan_id_monthly, paypal_plan_id_annual")
       .or(`paypal_plan_id_monthly.eq.${paypalPlanId},paypal_plan_id_annual.eq.${paypalPlanId}`)
@@ -87,7 +87,7 @@ serve(async (req) => {
 
     const billingCycle = plan.paypal_plan_id_annual === paypalPlanId ? "annuel" : "mensuel";
 
-    await supabaseAdmin.from("profiles").update({
+    await dbAdmin.from("profiles").update({
       plan: plan.id,
       billing_cycle: billingCycle,
       payment_status: "payé",
@@ -96,14 +96,14 @@ serve(async (req) => {
   }
 
   if (eventType === "BILLING.SUBSCRIPTION.CANCELLED" || eventType === "BILLING.SUBSCRIPTION.SUSPENDED") {
-    const { error } = await supabaseAdmin.from("profiles")
+    const { error } = await dbAdmin.from("profiles")
       .update({ plan: "gratuit", payment_status: "impayé" })
       .eq("paypal_subscription_id", resource.id);
     if (error) console.error("Erreur lors de la désactivation de l'abonnement", error);
   }
 
   if (eventType === "PAYMENT.SALE.DENIED" || eventType === "BILLING.SUBSCRIPTION.PAYMENT.FAILED") {
-    const { error } = await supabaseAdmin.from("profiles")
+    const { error } = await dbAdmin.from("profiles")
       .update({ payment_status: "impayé" })
       .eq("paypal_subscription_id", resource.billing_agreement_id || resource.id);
     if (error) console.error("Erreur lors du marquage impayé", error);

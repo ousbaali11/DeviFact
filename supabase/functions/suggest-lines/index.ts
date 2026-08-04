@@ -1,4 +1,4 @@
-// supabase/functions/suggest-lines/index.ts
+// suggest-lines/index.ts
 //
 // Reçoit la description d'un chantier depuis l'application, appelle
 // l'API Gemini (gratuite) avec une clé gardée secrète côté serveur,
@@ -32,12 +32,12 @@ serve(async (req) => {
     // l'application (pas d'un script extérieur qui viderait le quota
     // gratuit). On utilise le jeton envoyé par le navigateur.
     const authHeader = req.headers.get("Authorization") || "";
-    const supabaseClient = createClient(
+    const authClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
       { global: { headers: { Authorization: authHeader } } }
     );
-    const { data: { user } } = await supabaseClient.auth.getUser();
+    const { data: { user } } = await authClient.auth.getUser();
     if (!user) {
       return new Response(JSON.stringify({ error: "Non connecté" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
