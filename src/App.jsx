@@ -2230,7 +2230,7 @@ function TeamView({ account }) {
     try {
       const { data: { session } } = await db.auth.getSession();
       const { data, error: fnError } = await db.functions.invoke("invite-member", {
-        body: { email: cleanEmail, role: inviteRole },
+        body: { email: cleanEmail, role: inviteRole, organizationId: account.organizationId },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
       if (fnError || data?.error) {

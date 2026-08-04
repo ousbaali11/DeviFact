@@ -35,23 +35,30 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Non connecté" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { email, role } = await req.json();
+    const { email, role, organizationId: requestedOrgId } = await req.json();
     const cleanEmail = String(email || "").trim().toLowerCase();
     const cleanRole = ["owner", "editor", "viewer"].includes(role) ? role : "editor";
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return new Response(JSON.stringify({ error: "Email invalide" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    if (!requestedOrgId) {
+      return new Response(JSON.stringify({ error: "Organisation manquante" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
-    // Vérifie que l'appelant est bien propriétaire d'une organisation.
+    // Vérifie que l'appelant est bien propriétaire PRÉCISÉMENT de
+    // l'organisation ciblée — une personne peut appartenir à plusieurs
+    // organisations avec des rôles différents dans chacune, donc on ne
+    // se contente jamais de vérifier "propriétaire de l'une d'elles".
     const { data: membership } = await dbAdmin
       .from("organization_members")
       .select("organization_id, role")
       .eq("user_id", user.id)
+      .eq("organization_id", requestedOrgId)
       .eq("status", "active")
       .maybeSingle();
 
     if (!membership || membership.role !== "owner") {
-      return new Response(JSON.stringify({ error: "Seul le propriétaire peut inviter des membres" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Seul le propriétaire de cette organisation peut y inviter des membres" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const organizationId = membership.organization_id;
 
