@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, forwardRef } from "react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import { supabase } from "./supabase-client.js";
 import * as XLSX from "xlsx";
 import {
@@ -253,7 +255,7 @@ const GlobalStyle = () => (
   `}</style>
 );
 
-function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true }) {
+const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
   const dueDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
@@ -270,7 +272,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnable
   };
 
   return (
-    <div className="print-doc" style={pStyle}>
+    <div ref={ref} className="print-doc" style={pStyle}>
       {isFreeWatermark && (
         <div style={{
           position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-32deg)",
@@ -468,7 +470,7 @@ function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnable
       )}
     </div>
   );
-}
+});
 
 export default function DeviFactApp() {
   const [view, setView] = useState("dashboard");
@@ -2663,16 +2665,56 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     reader.readAsDataURL(file);
   }
 
-  function printAsPdf() {
-    // Le nom du fichier suggéré par le navigateur lors de l'enregistrement
-    // en PDF reprend le titre de la page — on le change juste le temps de
-    // l'impression, puis on le remet comme avant.
-    const original = document.title;
-    const safeName = `${docTypeLabel(localDoc.type)}-${(localDoc.docNumber || "document").replace(/[\\/:*?"<>|]/g, "-")}`;
-    document.title = safeName;
-    const restore = () => { document.title = original; window.removeEventListener("afterprint", restore); };
-    window.addEventListener("afterprint", restore);
-    window.print();
+  const printRef = useRef(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el || pdfGenerating) return;
+    setPdfGenerating(true);
+
+    // L'élément est masqué en dehors de l'impression classique — on le
+    // rend temporairement visible (hors champ visuel) pour pouvoir le
+    // capturer, puis on le recache immédiatement après.
+    const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
+    el.style.display = "block";
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    el.style.top = "0";
+    el.style.zIndex = "-1";
+
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: "#FBF7EF" });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position -= pageHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const safeName = `${docTypeLabel(localDoc.type)}-${(localDoc.docNumber || "document").replace(/[\\/:*?"<>|]/g, "-")}.pdf`;
+      pdf.save(safeName);
+    } catch (err) {
+      console.error("Erreur de génération du PDF", err);
+      alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      el.style.display = prevStyle.display;
+      el.style.position = prevStyle.position;
+      el.style.left = prevStyle.left;
+      el.style.top = prevStyle.top;
+      el.style.zIndex = prevStyle.zIndex;
+      setPdfGenerating(false);
+    }
   }
 
   function exportExcel() {
@@ -2746,8 +2788,8 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
               <ArrowRightLeft size={15} /> Convertir en facture
             </button>
           )}
-          <button onClick={printAsPdf} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
-            <Printer size={15} /> PDF
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
             <FileSpreadsheet size={15} /> Excel
@@ -3266,7 +3308,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
           </div>
         </div>
       </div>
-      <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+      <PrintDocument ref={printRef} doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
 }
