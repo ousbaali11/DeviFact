@@ -625,6 +625,14 @@ export default function DeviFactApp() {
     await loadPlans();
     setSavingPlanSettings(false);
   }
+  async function updatePlanLimit(planId, value) {
+    setSavingPlanSettings(true);
+    const limit = value === "" ? null : Math.max(0, parseInt(value, 10) || 0);
+    const { error } = await db.from("plans").update({ document_limit: limit }).eq("id", planId);
+    if (error) console.error("Erreur de mise à jour de la limite (droits admin requis)", error);
+    await loadPlans();
+    setSavingPlanSettings(false);
+  }
   async function togglePlanVisibility(planId) {
     setSavingPlanSettings(true);
     const current = plans.find((p) => p.id === planId);
@@ -730,6 +738,7 @@ export default function DeviFactApp() {
     }
   }
   async function persistCompanyProfile(next) {
+    if (isLocked) return;
     setCompanyProfile(next);
     setSavingCompany(true);
     try {
@@ -741,11 +750,13 @@ export default function DeviFactApp() {
     }
   }
   function upsertClient(clientData) {
+    if (isLocked) return;
     const exists = clients.some((c) => c.id === clientData.id);
     const next = exists ? clients.map((c) => (c.id === clientData.id ? clientData : c)) : [clientData, ...clients];
     persistClients(next);
   }
   function deleteClient(id) {
+    if (isLocked) return;
     persistClients(clients.filter((c) => c.id !== id));
   }
   async function persistPrestations(next) {
@@ -768,6 +779,7 @@ export default function DeviFactApp() {
     persistPrestations(prestations.filter((x) => x.id !== id));
   }
   async function resetTestData() {
+    if (isLocked) return;
     setDocuments([]);
     setClients([]);
     setPrestations([]);
@@ -805,19 +817,23 @@ export default function DeviFactApp() {
     setActiveId(null);
   }
   function updateDoc(id, patch) {
+    if (isLocked) return;
     persist(documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
   }
   function deleteDoc(id) {
+    if (isLocked) return;
     persist(documents.filter((d) => d.id !== id));
     if (activeId === id) backToDashboard();
   }
   function duplicateDoc(id) {
+    if (isLocked) return;
     const original = documents.find((d) => d.id === id);
     if (!original) return;
     const copy = { ...original, id: nextId("doc"), docNumber: nextNumber(documents, original.type), status: "brouillon", createdAt: Date.now(), updatedAt: Date.now() };
     persist([copy, ...documents]);
   }
   function convertToInvoice(id) {
+    if (isLocked) return;
     const original = documents.find((d) => d.id === id);
     if (!original || original.type !== "devis") return;
     const invoice = {
@@ -839,6 +855,7 @@ export default function DeviFactApp() {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
   function mergeDocuments(ids) {
+    if (isLocked) return;
     const docs = documents.filter((d) => ids.includes(d.id));
     if (docs.length < 2) return;
     const type = docs[0].type;
@@ -985,6 +1002,7 @@ export default function DeviFactApp() {
         account={account}
         plans={plans}
         siteSettings={siteSettings}
+        isLocked={isLocked}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
         onBack={backToDashboard}
         onConvert={() => convertToInvoice(activeDoc.id)}
@@ -999,6 +1017,9 @@ export default function DeviFactApp() {
     );
   }
 
+  const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
+  const isLocked = (account?.plan || "gratuit") === "gratuit" && documents.length >= freeLimit;
+
   const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), account, onLogout: logout, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
 
   if (view === "clients") {
@@ -1006,7 +1027,7 @@ export default function DeviFactApp() {
       <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} />
+        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} onGoToPricing={() => setView("pricing")} />
       </div>
     );
   }
@@ -1016,7 +1037,7 @@ export default function DeviFactApp() {
       <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} />
+        <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} onGoToPricing={() => setView("pricing")} />
       </div>
     );
   }
@@ -1067,6 +1088,7 @@ export default function DeviFactApp() {
           onTogglePlan={togglePlanVisibility}
           onToggleWatermark={toggleWatermark}
           onUpdatePlanPrice={updatePlanPrice}
+          onUpdatePlanLimit={updatePlanLimit}
           onUpdatePlanPaypalId={updatePlanPaypalId}
           onTogglePayment={togglePaymentStatus}
           onDeleteAccount={deleteCurrentAccount}
@@ -1084,18 +1106,16 @@ export default function DeviFactApp() {
       <TopNav {...navProps} />
 
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {(account?.plan || "gratuit") === "gratuit" && (() => {
-          const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
-          const atLimit = documents.length >= freeLimit;
-          return (
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: atLimit ? `${colors.brick}12` : colors.surface, border: `1px solid ${atLimit ? colors.brick + "40" : colors.line}` }}>
-              <span className="text-sm" style={{ color: atLimit ? colors.brick : colors.inkSoft }}>
-                Forfait Gratuit — <strong className="df-mono">{documents.length}/{freeLimit}</strong> devis/factures utilisés
-              </span>
-              <button onClick={() => setView("pricing")} className="text-xs font-medium underline" style={{ color: colors.brassDark }}>Passer à un forfait payant</button>
-            </div>
-          );
-        })()}
+        {(account?.plan || "gratuit") === "gratuit" && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: isLocked ? `${colors.brick}12` : colors.surface, border: `1px solid ${isLocked ? colors.brick + "40" : colors.line}` }}>
+            <span className="flex items-center gap-2 text-sm" style={{ color: isLocked ? colors.brick : colors.inkSoft }}>
+              {isLocked && <Lock size={15} />}
+              Forfait Gratuit — <strong className="df-mono">{documents.length}/{freeLimit}</strong> devis/factures/proforma utilisés
+              {isLocked && " — compte verrouillé jusqu'au passage à un forfait payant"}
+            </span>
+            <button onClick={() => setView("pricing")} className={isLocked ? "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" : "text-xs font-medium underline"} style={isLocked ? { background: colors.brick } : { color: colors.brassDark }}>Passer à un forfait payant</button>
+          </div>
+        )}
         {/* Stats */}
         <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
@@ -1154,7 +1174,7 @@ export default function DeviFactApp() {
           {selectedIds.length > 0 && (() => {
             const selectedDocs = documents.filter((d) => selectedIds.includes(d.id));
             const sameType = selectedDocs.every((d) => d.type === selectedDocs[0].type);
-            const canMerge = selectedDocs.length >= 2 && sameType;
+            const canMerge = selectedDocs.length >= 2 && sameType && !isLocked;
             return (
               <div className="ml-auto flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
                 <span className="text-xs font-medium" style={{ color: colors.inkSoft }}>{selectedIds.length} sélectionné(s)</span>
@@ -1213,8 +1233,8 @@ export default function DeviFactApp() {
                     {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <div className="flex shrink-0 gap-2">
-                    <button onClick={() => duplicateDoc(d.id)} title="Dupliquer" style={{ color: colors.inkSoft }}><Copy size={15} /></button>
-                    <button onClick={() => deleteDoc(d.id)} title="Supprimer" style={{ color: colors.brick }}><Trash2 size={15} /></button>
+                    <button onClick={() => duplicateDoc(d.id)} disabled={isLocked} title={isLocked ? "Verrouillé — passe à un forfait payant" : "Dupliquer"} style={{ color: colors.inkSoft, opacity: isLocked ? 0.4 : 1, cursor: isLocked ? "not-allowed" : "pointer" }}><Copy size={15} /></button>
+                    <button onClick={() => deleteDoc(d.id)} disabled={isLocked} title={isLocked ? "Verrouillé — passe à un forfait payant" : "Supprimer"} style={{ color: colors.brick, opacity: isLocked ? 0.4 : 1, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
                   </div>
                 </div>
 
@@ -1742,7 +1762,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
   );
 }
 
-function ClientsView({ clients, documents, saving, onSave, onDelete }) {
+function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, onGoToPricing }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
 
@@ -1755,10 +1775,10 @@ function ClientsView({ clients, documents, saving, onSave, onDelete }) {
   function countDocs(clientId) {
     return documents.filter((d) => d.clientId === clientId).length;
   }
-  function startNew() { setEditing(emptyClient()); }
-  function startEdit(c) { setEditing({ ...c }); }
+  function startNew() { if (!isLocked) setEditing(emptyClient()); }
+  function startEdit(c) { if (!isLocked) setEditing({ ...c }); }
   function save() {
-    if (!editing.name.trim()) return;
+    if (isLocked || !editing.name.trim()) return;
     onSave(editing);
     setEditing(null);
   }
@@ -1770,12 +1790,21 @@ function ClientsView({ clients, documents, saving, onSave, onDelete }) {
           <h1 className="df-display text-2xl font-semibold">Clients</h1>
           <p className="text-sm" style={{ color: colors.inkSoft }}>Ta base de clients, réutilisable dans chaque devis ou facture.</p>
         </div>
-        <button onClick={startNew} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.ink }}>
-          <UserPlus size={15} /> Nouveau client
+        <button onClick={startNew} disabled={isLocked} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: isLocked ? colors.line : colors.ink, color: isLocked ? colors.inkSoft : "white", cursor: isLocked ? "not-allowed" : "pointer" }}>
+          {isLocked ? <Lock size={15} /> : <UserPlus size={15} />} Nouveau client
         </button>
       </div>
 
-      {editing && (
+      {isLocked && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+          <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+            <Lock size={15} /> Limite du forfait Gratuit atteinte — la gestion des clients est verrouillée.
+          </span>
+          <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>
+        </div>
+      )}
+
+      {editing && !isLocked && (
         <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brass}` }}>
           <div className="mb-3 flex items-center justify-between">
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>{clients.some((c) => c.id === editing.id) ? "Modifier le client" : "Nouveau client"}</span>
@@ -1812,8 +1841,8 @@ function ClientsView({ clients, documents, saving, onSave, onDelete }) {
               <div className="w-28 shrink-0 text-xs" style={{ color: colors.inkSoft }}>{c.phone || "—"}</div>
               <div className="w-24 shrink-0 df-mono text-xs" style={{ color: colors.inkSoft }}>{countDocs(c.id)} document(s)</div>
               <div className="flex shrink-0 gap-2">
-                <button onClick={() => startEdit(c)} style={{ color: colors.slate }}><Pencil size={15} /></button>
-                <button onClick={() => onDelete(c.id)} style={{ color: colors.brick }}><Trash2 size={15} /></button>
+                <button onClick={() => startEdit(c)} disabled={isLocked} style={{ color: isLocked ? colors.line : colors.slate, cursor: isLocked ? "not-allowed" : "pointer" }}><Pencil size={15} /></button>
+                <button onClick={() => onDelete(c.id)} disabled={isLocked} style={{ color: isLocked ? colors.line : colors.brick, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
               </div>
             </div>
           ))}
@@ -1908,7 +1937,7 @@ function PrestationsView({ prestations, saving, onSave, onDelete }) {
   );
 }
 
-function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account }) {
+function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, onGoToPricing }) {
   const [local, setLocal] = useState(profile);
   const [editing, setEditing] = useState(!profile.name);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1930,6 +1959,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
     setEditing(false);
   }
   function startEdit() {
+    if (isLocked) return;
     setLocal(profile);
     setEditing(true);
   }
@@ -1948,6 +1978,15 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
         {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={12} className="animate-spin" /> Enregistrement</span>}
       </div>
 
+      {isLocked && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+          <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+            <Lock size={15} /> Limite du forfait Gratuit atteinte — ces informations ne sont plus modifiables.
+          </span>
+          <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>
+        </div>
+      )}
+
       {!editing ? (
         <div className="rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <div className="mb-4 flex items-center justify-between">
@@ -1960,8 +1999,8 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
                 <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.slate}18`, color: colors.slate }}>{profile.type === "particulier" ? "Particulier" : "Entreprise"}</span>
               </div>
             </div>
-            <button onClick={startEdit} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white" style={{ background: colors.ink }}>
-              <Pencil size={13} /> Modifier
+            <button onClick={startEdit} disabled={isLocked} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white" style={{ background: isLocked ? colors.line : colors.ink, color: isLocked ? colors.inkSoft : "white", cursor: isLocked ? "not-allowed" : "pointer" }}>
+              {isLocked ? <Lock size={13} /> : <Pencil size={13} />} Modifier
             </button>
           </div>
           <dl className="space-y-1.5 text-sm">
@@ -2051,7 +2090,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
           Tu as actuellement <strong>{documentCount} devis/factures</strong> et <strong>{clientCount} clients</strong> enregistrés (accumulés pendant les tests). Cette action supprime tous les devis, factures, clients et prestations pour repartir de zéro — ton compte et tes infos d'entreprise sont conservés.
         </p>
         {!confirmReset ? (
-          <button onClick={() => setConfirmReset(true)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.brick}`, color: colors.brick }}>
+          <button onClick={() => !isLocked && setConfirmReset(true)} disabled={isLocked} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${isLocked ? colors.line : colors.brick}`, color: isLocked ? colors.inkSoft : colors.brick, cursor: isLocked ? "not-allowed" : "pointer" }}>
             <RotateCcw size={13} /> Réinitialiser les données de test
           </button>
         ) : (
@@ -2331,10 +2370,20 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
   const paid = account?.paymentStatus === "payé";
+
+  const TABS = [
+    { id: "apercu", label: "Vue d'ensemble", icon: LayoutDashboard },
+    { id: "identite", label: "Identité du site", icon: Building2 },
+    { id: "forfaits", label: "Forfaits & tarifs", icon: CreditCard },
+    { id: "paiement", label: "Paiement (PayPal)", icon: KeyRound },
+    { id: "compte", label: "Mon compte", icon: Users },
+    { id: "danger", label: "Zone dangereuse", icon: AlertTriangle },
+  ];
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
@@ -2343,112 +2392,159 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         <p className="text-sm" style={{ color: colors.inkSoft }}>Vue d'ensemble, gestion des forfaits et du compte.</p>
       </div>
 
-      <div className="mb-6 rounded-2xl p-4" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}40` }}>
-        <div className="flex items-start gap-2">
-          <Check size={16} style={{ color: colors.moss, marginTop: "2px", flexShrink: 0 }} />
-          <p className="text-xs" style={{ color: colors.moss }}>
-            Cet espace est connecté à une vraie base de données. Ton statut administrateur est vérifié côté serveur (RLS) — il ne peut pas être falsifié depuis le navigateur. La liste ci-dessous ne montre encore que <strong>tes propres statistiques</strong> ; une vraie table listant tous les comptes réels peut être ajoutée facilement une fois que tu as de premiers utilisateurs (voir le Dossier de passation technique).
-          </p>
-        </div>
-      </div>
-
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Ton compte" value={account ? 1 : 0} sub={account?.email || "—"} color={colors.slate} />
-        <StatCard label="Documents créés" value={documents.length} sub={eur(totalTTC) + " au total"} color={colors.moss} />
-        <StatCard label="Clients enregistrés" value={clients.length} sub={companyProfile.name || "Entreprise non renseignée"} color={colors.brassDark} />
-      </div>
-
-      <SiteIdentitySettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
-
-      <div className="mb-6 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-        <div className="border-b px-4 py-3" style={{ borderColor: colors.line }}>
-          <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Compte utilisateur</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-          <div className="flex items-center gap-2" style={{ color: colors.slate }}><Users size={16} /></div>
-          <div className="min-w-0 grow basis-40 truncate text-sm font-medium">{account?.email || "—"}</div>
-          <div className="text-sm" style={{ color: colors.inkSoft }}>{account?.companyName || companyProfile.name || "—"}</div>
-          <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brass}22`, color: colors.brassDark }}>{planLabel(account?.plan)}</span>
-          {account?.isAdmin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.moss}22`, color: colors.moss }}>Admin</span>}
-          {account?.plan !== "gratuit" && (
-            <button onClick={onTogglePayment} className="ml-auto flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: paid ? `${colors.moss}18` : `${colors.brick}18`, color: paid ? colors.moss : colors.brick }} title="Forcer le statut (usage exceptionnel — normalement mis à jour par le webhook PayPal)">
-                {paid ? <Check size={12} /> : <AlertTriangle size={12} />} {paid ? "Payé" : "Impayé"}
-              </button>
-          )}
-        </div>
-        <p className="border-t px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-          En production, ce statut doit être mis à jour automatiquement par la fonction de webhook PayPal (voir <code>functions/paypal-webhook</code>), pas manuellement.
-        </p>
-      </div>
-
-      <div className="mb-6 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
-          <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Gestion des forfaits</span>
-          {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
-        </div>
-        <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-          Modifie le prix affiché, masque un forfait de la page publique, et colle l'identifiant du forfait créé côté PayPal (obligatoire pour que le bouton d'abonnement fonctionne).
-        </p>
-        <div className="flex items-start gap-2 border-b px-4 py-2.5" style={{ borderColor: colors.line, background: `${colors.brick}0D` }}>
-          <AlertTriangle size={13} style={{ color: colors.brick, marginTop: "2px", flexShrink: 0 }} />
-          <p className="text-xs" style={{ color: colors.brick }}>
-            <strong>Le prix ci-dessous n'est qu'un texte affiché sur le site — PayPal facture le prix défini dans SON tableau de bord à la création du plan, pas celui-ci.</strong> Si tu changes un prix ici, crée un nouveau plan côté PayPal avec le bon montant, puis colle son nouvel identifiant ci-dessous (l'ancien ne peut pas être modifié). Exception : un prix mis à <strong>0€</strong> active le forfait directement, sans passer par PayPal.
-          </p>
-        </div>
-        {plans.map((plan, idx) => (
-          <div key={plan.id} className="flex flex-wrap items-center gap-3 border-b px-4 py-3" style={{ borderColor: colors.line }}>
-            <div className="min-w-0 basis-32 grow">
-              <div className="text-sm font-medium">{plan.name}</div>
-              <div className="text-xs" style={{ color: colors.inkSoft }}>{plan.tagline}</div>
-            </div>
-            {plan.monthly !== null ? (
-              <>
-                <PriceInput label="Mensuel €" value={plan.monthly} onSave={(v) => onUpdatePlanPrice(plan.id, "monthly", v)} />
-                <PriceInput label="Annuel €" value={plan.annual} onSave={(v) => onUpdatePlanPrice(plan.id, "annual", v)} />
-                <PaypalIdField label="ID forfait PayPal (mensuel)" value={plan.paypalPlanIdMonthly} onSave={(v) => onUpdatePlanPaypalId(plan.id, "monthly", v)} />
-                <PaypalIdField label="ID forfait PayPal (annuel)" value={plan.paypalPlanIdAnnual} onSave={(v) => onUpdatePlanPaypalId(plan.id, "annual", v)} />
-              </>
-            ) : (
-              <span className="text-xs" style={{ color: colors.inkSoft }}>Sur devis</span>
-            )}
-            <div className="ml-auto flex items-center gap-4">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-medium" style={{ color: plan.watermarkEnabled === false ? colors.inkSoft : colors.brassDark }}>Filigrane</span>
-                <button
-                  onClick={() => onToggleWatermark(plan.id)}
-                  title={plan.watermarkEnabled === false ? "Activer le filigrane pour ce forfait" : "Retirer le filigrane pour ce forfait"}
-                  style={{ color: plan.watermarkEnabled === false ? colors.line : colors.brassDark }}
-                >
-                  {plan.watermarkEnabled === false ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
-                </button>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-medium" style={{ color: plan.hidden ? colors.brick : colors.moss }}>{plan.hidden ? "Masqué" : "Visible"}</span>
-                <button
-                  onClick={() => onTogglePlan(plan.id)}
-                  title={plan.hidden ? "Rendre visible" : "Masquer ce forfait"}
-                  style={{ color: plan.hidden ? colors.inkSoft : colors.moss }}
-                >
-                  {plan.hidden ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
-                </button>
-              </div>
-            </div>
-          </div>
+      <div className="mb-6 flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
+        {TABS.map(({ id, label, icon: Icon }) => (
+          <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? colors.ink : "transparent", color: tab === id ? "white" : colors.inkSoft }}>
+            <Icon size={13} /> {label}
+          </button>
         ))}
       </div>
 
-      <div className="mt-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
-        <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.brick }}>
-          <AlertTriangle size={15} /> Zone dangereuse
+      {tab === "apercu" && (
+        <>
+          <div className="mb-6 rounded-2xl p-4" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}40` }}>
+            <div className="flex items-start gap-2">
+              <Check size={16} style={{ color: colors.moss, marginTop: "2px", flexShrink: 0 }} />
+              <p className="text-xs" style={{ color: colors.moss }}>
+                Cet espace est connecté à une vraie base de données. Ton statut administrateur est vérifié côté serveur (RLS) — il ne peut pas être falsifié depuis le navigateur. La liste ci-dessous ne montre encore que <strong>tes propres statistiques</strong> ; une vraie table listant tous les comptes réels peut être ajoutée facilement une fois que tu as de premiers utilisateurs (voir le Dossier de passation technique).
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard label="Ton compte" value={account ? 1 : 0} sub={account?.email || "—"} color={colors.slate} />
+            <StatCard label="Documents créés" value={documents.length} sub={eur(totalTTC) + " au total"} color={colors.moss} />
+            <StatCard label="Clients enregistrés" value={clients.length} sub={companyProfile.name || "Entreprise non renseignée"} color={colors.brassDark} />
+          </div>
+        </>
+      )}
+
+      {tab === "identite" && (
+        <SiteIdentitySettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
+      )}
+
+      {tab === "compte" && (
+        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="border-b px-4 py-3" style={{ borderColor: colors.line }}>
+            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Compte utilisateur</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <div className="flex items-center gap-2" style={{ color: colors.slate }}><Users size={16} /></div>
+            <div className="min-w-0 grow basis-40 truncate text-sm font-medium">{account?.email || "—"}</div>
+            <div className="text-sm" style={{ color: colors.inkSoft }}>{account?.companyName || companyProfile.name || "—"}</div>
+            <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brass}22`, color: colors.brassDark }}>{planLabel(account?.plan)}</span>
+            {account?.isAdmin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.moss}22`, color: colors.moss }}>Admin</span>}
+            {account?.plan !== "gratuit" && (
+              <button onClick={onTogglePayment} className="ml-auto flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: paid ? `${colors.moss}18` : `${colors.brick}18`, color: paid ? colors.moss : colors.brick }} title="Forcer le statut (usage exceptionnel — normalement mis à jour par le webhook PayPal)">
+                  {paid ? <Check size={12} /> : <AlertTriangle size={12} />} {paid ? "Payé" : "Impayé"}
+                </button>
+            )}
+          </div>
+          <p className="border-t px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+            En production, ce statut doit être mis à jour automatiquement par la fonction de webhook PayPal (voir <code>functions/paypal-webhook</code>), pas manuellement.
+          </p>
         </div>
-        <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>
-          Réinitialise tes devis, factures, clients et prestations, et te déconnecte. Pour supprimer complètement le compte d'authentification, va dans le dashboard d'administration de la base de données → Authentication → Users.
-        </p>
-        {!confirmDelete ? (
-          <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.brick}`, color: colors.brick }}>
-            <Trash2 size={13} /> Réinitialiser mon compte
-          </button>
-        ) : (
+      )}
+
+      {tab === "forfaits" && (
+        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Forfaits & tarifs</span>
+            {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+          </div>
+          <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+            Prix affiché, visibilité publique, filigrane, et nombre de documents autorisés avant blocage du compte. Laisse le nombre de documents vide pour "illimité".
+          </p>
+          <div className="flex items-start gap-2 border-b px-4 py-2.5" style={{ borderColor: colors.line, background: `${colors.brick}0D` }}>
+            <AlertTriangle size={13} style={{ color: colors.brick, marginTop: "2px", flexShrink: 0 }} />
+            <p className="text-xs" style={{ color: colors.brick }}>
+              Si tu réduis le nombre de documents d'un forfait en dessous de ce qu'un compte a déjà créé, ce compte se verrouille automatiquement (fonctionnalités bloquées) sans perdre ses documents existants — il doit passer à un forfait payant pour continuer.
+            </p>
+          </div>
+          {plans.map((plan) => (
+            <div key={plan.id} className="flex flex-wrap items-center gap-3 border-b px-4 py-3" style={{ borderColor: colors.line }}>
+              <div className="min-w-0 basis-32 grow">
+                <div className="text-sm font-medium">{plan.name}</div>
+                <div className="text-xs" style={{ color: colors.inkSoft }}>{plan.tagline}</div>
+              </div>
+              {plan.monthly !== null ? (
+                <>
+                  <PriceInput label="Mensuel €" value={plan.monthly} onSave={(v) => onUpdatePlanPrice(plan.id, "monthly", v)} />
+                  <PriceInput label="Annuel €" value={plan.annual} onSave={(v) => onUpdatePlanPrice(plan.id, "annual", v)} />
+                </>
+              ) : (
+                <span className="text-xs" style={{ color: colors.inkSoft }}>Sur devis</span>
+              )}
+              <label className="text-xs" style={{ color: colors.inkSoft }}>
+                Documents max
+                <input
+                  type="number" min="0" placeholder="Illimité"
+                  className="df-input df-mono mt-0.5 block w-20 rounded-md px-2 py-1 text-sm"
+                  style={{ border: `1px solid ${colors.line}` }}
+                  defaultValue={plan.limit === Infinity ? "" : plan.limit}
+                  key={`${plan.id}-${plan.limit}`}
+                  onBlur={(e) => onUpdatePlanLimit(plan.id, e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                />
+              </label>
+              <div className="ml-auto flex items-center gap-4">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium" style={{ color: plan.watermarkEnabled === false ? colors.inkSoft : colors.brassDark }}>Filigrane</span>
+                  <button
+                    onClick={() => onToggleWatermark(plan.id)}
+                    title={plan.watermarkEnabled === false ? "Activer le filigrane pour ce forfait" : "Retirer le filigrane pour ce forfait"}
+                    style={{ color: plan.watermarkEnabled === false ? colors.line : colors.brassDark }}
+                  >
+                    {plan.watermarkEnabled === false ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium" style={{ color: plan.hidden ? colors.brick : colors.moss }}>{plan.hidden ? "Masqué" : "Visible"}</span>
+                  <button
+                    onClick={() => onTogglePlan(plan.id)}
+                    title={plan.hidden ? "Rendre visible" : "Masquer ce forfait"}
+                    style={{ color: plan.hidden ? colors.inkSoft : colors.moss }}
+                  >
+                    {plan.hidden ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "paiement" && (
+        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Paiement — identifiants PayPal</span>
+            {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+          </div>
+          <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+            Colle ici l'identifiant du plan créé côté PayPal pour chaque forfait — obligatoire pour que le bouton d'abonnement fonctionne. Le prix facturé est celui défini dans PayPal, pas celui de l'onglet "Forfaits & tarifs".
+          </p>
+          {plans.filter((p) => p.monthly !== null).map((plan) => (
+            <div key={plan.id} className="flex flex-wrap items-center gap-4 border-b px-4 py-3" style={{ borderColor: colors.line }}>
+              <div className="min-w-0 basis-28 shrink-0 text-sm font-medium">{plan.name}</div>
+              <PaypalIdField label="ID forfait PayPal (mensuel)" value={plan.paypalPlanIdMonthly} onSave={(v) => onUpdatePlanPaypalId(plan.id, "monthly", v)} />
+              <PaypalIdField label="ID forfait PayPal (annuel)" value={plan.paypalPlanIdAnnual} onSave={(v) => onUpdatePlanPaypalId(plan.id, "annual", v)} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "danger" && (
+        <div className="rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.brick }}>
+            <AlertTriangle size={15} /> Zone dangereuse
+          </div>
+          <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>
+            Réinitialise tes devis, factures, clients et prestations, et te déconnecte. Pour supprimer complètement le compte d'authentification, va dans le dashboard d'administration de la base de données → Authentication → Users.
+          </p>
+          {!confirmDelete ? (
+            <button onClick={() => setConfirmDelete(true)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.brick}`, color: colors.brick }}>
+              <Trash2 size={13} /> Réinitialiser mon compte
+            </button>
+          ) : (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium" style={{ color: colors.brick }}>Confirmer la réinitialisation définitive ?</span>
             <button onClick={onDeleteAccount} className="rounded-lg px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Oui, réinitialiser</button>
@@ -2456,6 +2552,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -2594,7 +2691,7 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
+function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, isLocked, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
@@ -2950,7 +3047,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
         </div>
         <div className="flex items-center gap-2">
           {localDoc.type === "devis" && (
-            <button onClick={onConvert} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
+            <button onClick={onConvert} disabled={isLocked} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate, opacity: isLocked ? 0.5 : 1 }}>
               <ArrowRightLeft size={15} /> Convertir en facture
             </button>
           )}
@@ -2975,7 +3072,15 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
             </div>
           </div>
         )}
-        <div className="editor-form rounded-2xl p-6 shadow-sm sm:p-10" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        {isLocked && (
+          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+              <Lock size={15} /> Limite du forfait Gratuit atteinte — ce document n'est plus modifiable.
+            </span>
+            <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>
+          </div>
+        )}
+        <div className="editor-form rounded-2xl p-6 shadow-sm sm:p-10" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
 
           <div className="mb-8 flex flex-wrap items-start justify-between gap-6 border-b pb-6" style={{ borderColor: colors.line }}>
             <div>
