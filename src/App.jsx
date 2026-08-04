@@ -1807,6 +1807,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
 }
 
 function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, account, onLogout, onSwitchOrganization, siteSettings, companyProfile, onSetCompanyType }) {
+  const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "clients", label: "Clients", icon: Users },
@@ -1859,19 +1860,34 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
           </div>
           <div className="flex items-center gap-2">
             {account?.memberships?.length > 1 && (
-              <select
-                value={account.organizationId || ""}
-                onChange={(e) => onSwitchOrganization(e.target.value)}
-                className="df-select rounded-lg px-2 py-1.5 text-xs font-medium"
-                style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
-                title="Changer d'organisation"
-              >
-                {account.memberships.map((m) => (
-                  <option key={m.organizationId} value={m.organizationId} style={{ color: colors.ink }}>
-                    {m.name || "Organisation"} {m.role !== "owner" ? `(${ROLE_LABELS[m.role] || m.role})` : ""}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <button
+                  onClick={() => setOrgMenuOpen((v) => !v)}
+                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium"
+                  style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
+                  title="Changer d'organisation"
+                >
+                  <UserPlus size={13} /> Invité <ChevronDown size={12} />
+                </button>
+                {orgMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
+                    <div className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                      {account.memberships.map((m) => (
+                        <button
+                          key={m.organizationId}
+                          onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }}
+                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
+                          style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}
+                        >
+                          <span className="truncate">{m.name || "Organisation"}</span>
+                          <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
             <div className="flex items-center gap-1">
               {rightTabs.map(({ id, label, icon: Icon }) => (
