@@ -265,13 +265,16 @@ function getRevisionCountryInfo(country) {
 
 function emptyRevisionSector(sector, country) {
   const info = getRevisionCountryInfo(country);
+  const today = new Date().toISOString().slice(0, 10);
   return {
     id: nextId("rs"),
     sector: sector || REVISION_SECTORS[0],
     montantInitialHT: "",
     indexName: info.indexHint || "",
     indexInitial: "",
+    dateInitiale: today,
     indexActuel: "",
+    dateActuelle: today,
     coeffFixe: 0.15,
     coeffVariable: 0.85,
   };
@@ -311,7 +314,9 @@ function getRevisionSectors(doc) {
       montantInitialHT: doc.montantInitialHT,
       indexName: doc.indexName,
       indexInitial: doc.indexInitial,
+      dateInitiale: doc.dateInitiale || doc.issueDate,
       indexActuel: doc.indexActuel,
+      dateActuelle: doc.dateActuelle || doc.issueDate,
       coeffFixe: doc.coeffFixe,
       coeffVariable: doc.coeffVariable,
     }];
@@ -2255,6 +2260,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
               <th style={{ padding: "6px 4px", textAlign: "left" }}>Indice</th>
               <th style={{ padding: "6px 4px", textAlign: "right" }}>Montant initial</th>
               <th style={{ padding: "6px 4px", textAlign: "right" }}>I0 → In</th>
+              <th style={{ padding: "6px 4px", textAlign: "right" }}>Dates</th>
               <th style={{ padding: "6px 4px", textAlign: "right" }}>Montant révisé</th>
             </tr>
           </thead>
@@ -2267,6 +2273,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
                   <td style={{ padding: "6px 4px", fontSize: "8pt", color: inkSoft }}>{l.indexName}</td>
                   <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(l.montantInitialHT) || 0, doc.currency)}</td>
                   <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontSize: "8pt" }}>{l.indexInitial} → {l.indexActuel}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{l.dateInitiale ? new Date(l.dateInitiale).toLocaleDateString("fr-FR") : "—"} → {l.dateActuelle ? new Date(l.dateActuelle).toLocaleDateString("fr-FR") : "—"}</td>
                   <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{r.valid ? formatMoney(r.montantRevise, doc.currency) : "—"}</td>
                 </tr>
               );
@@ -2374,6 +2381,37 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     }
   }
 
+  function exportExcel() {
+    const wb = XLSX.utils.book_new();
+    const rows = [];
+    rows.push(["RÉVISION DE PRIX", localDoc.docNumber]);
+    rows.push(["Date d'émission", frLong(localDoc.issueDate)]);
+    rows.push(["Pays", localDoc.country || ""]);
+    rows.push(["Devise", localDoc.currency || "EUR"]);
+    rows.push([]);
+    rows.push(["Émetteur", localDoc.company.name]);
+    rows.push(["Client", localDoc.client.name]);
+    rows.push([]);
+    rows.push(["Secteur", "Indice", "Montant initial HT", "Date indice initial", "I0", "Date indice actuel", "In", "Coeff. fixe (a)", "Coeff. variable (b)", "Montant révisé HT", "Écart"]);
+    sectorLines.forEach((l) => {
+      const r = computeRevisionLine(l);
+      rows.push([
+        l.sector, l.indexName, Number(l.montantInitialHT) || 0,
+        l.dateInitiale ? frLong(l.dateInitiale) : "", Number(l.indexInitial) || 0,
+        l.dateActuelle ? frLong(l.dateActuelle) : "", Number(l.indexActuel) || 0,
+        Number(l.coeffFixe) || 0, Number(l.coeffVariable) || 0,
+        r.valid ? Number(r.montantRevise.toFixed(2)) : "", r.valid ? Number(r.ecartMontant.toFixed(2)) : "",
+      ]);
+    });
+    rows.push([]);
+    rows.push(["", "", "", "", "", "", "", "", "TOTAL", Number(total.montantRevise.toFixed(2)), Number(total.ecartMontant.toFixed(2))]);
+    if (localDoc.notes) { rows.push([]); rows.push(["Note", localDoc.notes]); }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 24 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Révision");
+    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  }
+
   return (
     <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
       <GlobalStyle />
@@ -2382,6 +2420,9 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         <div className="flex items-center gap-2">
           <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
+          </button>
+          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
+            <Download size={15} /> Excel
           </button>
         </div>
       </div>
@@ -2455,10 +2496,14 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                     <div>
                       <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à l'origine (I0)</label>
                       <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexInitial} onChange={(e) => patchSector(sec.id, { indexInitial: e.target.value })} />
+                      <label className="mb-1 mt-2 block text-xs" style={{ color: colors.inkSoft }}>Date de cet indice</label>
+                      <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateInitiale} onChange={(e) => patchSector(sec.id, { dateInitiale: e.target.value })} />
                     </div>
                     <div>
                       <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice actuel (In)</label>
                       <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexActuel} onChange={(e) => patchSector(sec.id, { indexActuel: e.target.value })} />
+                      <label className="mb-1 mt-2 block text-xs" style={{ color: colors.inkSoft }}>Date de cet indice</label>
+                      <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateActuelle} onChange={(e) => patchSector(sec.id, { dateActuelle: e.target.value })} />
                     </div>
                   </div>
                   <div className="mb-3 grid grid-cols-2 gap-3">
@@ -2516,9 +2561,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         </div>
       </div>
 
-      <div style={{ position: "fixed", top: 0, left: "-9999px", display: "none" }}>
-        <PrintRevision ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
-      </div>
+      <PrintRevision ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
 }
