@@ -484,6 +484,7 @@ export default function DeviFactApp() {
   const [companyProfile, setCompanyProfile] = useState(emptyCompanyProfile());
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingClients, setSavingClients] = useState(false);
   const [savingPrestations, setSavingPrestations] = useState(false);
@@ -602,6 +603,7 @@ export default function DeviFactApp() {
     // une), à chaque connexion/inscription, et à chaque déconnexion —
     // qu'il s'agisse du même utilisateur ou d'un utilisateur différent.
     const { data: authListener } = db.auth.onAuthStateChange(async (_event, session) => {
+      if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
       if (session?.user) {
         await loadUserData();
         const profile = await loadProfile(session.user.id, session.user.email);
@@ -953,6 +955,10 @@ export default function DeviFactApp() {
         <Loader2 className="animate-spin" size={22} style={{ color: colors.slate }} />
       </div>
     );
+  }
+
+  if (recoveryMode) {
+    return <ResetPasswordScreen siteSettings={siteSettings} onDone={() => setRecoveryMode(false)} />;
   }
 
   if (!account || !account.loggedIn) {
@@ -1401,6 +1407,79 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
   );
 }
 
+function ResetPasswordScreen({ siteSettings, onDone }) {
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit() {
+    setError("");
+    if (password.length < 6) { setError("Le mot de passe doit faire au moins 6 caractères."); return; }
+    setBusy(true);
+    try {
+      const { error: updateError } = await db.auth.updateUser({ password });
+      if (updateError) { setError(updateError.message); setBusy(false); return; }
+      onDone();
+    } catch (err) {
+      console.error(err);
+      setError("Une erreur est survenue. Réessaie.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="df-root flex min-h-full w-full items-center justify-center px-4 py-16" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex items-center justify-center gap-3">
+          {siteSettings?.logo ? (
+            <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
+          ) : (
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg df-mono text-base font-semibold" style={{ background: colors.brass, color: colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
+          )}
+          <span className="df-display text-xl font-semibold tracking-wide">{siteSettings?.name || "DeviFact"}</span>
+        </div>
+        <div className="rounded-2xl p-6" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <h1 className="df-display mb-1 text-lg font-semibold">Nouveau mot de passe</h1>
+          <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Choisis un nouveau mot de passe pour ton compte.</p>
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 flex items-center gap-1.5 text-xs font-medium" style={{ color: colors.inkSoft }}><KeyRound size={13} /> Nouveau mot de passe</label>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  className="df-input w-full rounded-md py-2 pl-3 pr-10 text-sm"
+                  style={{ border: `1px solid ${colors.line}` }}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
+                  placeholder="••••••••"
+                  autoFocus
+                />
+                <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute inset-y-0 right-0 flex w-9 items-center justify-center" style={{ color: colors.inkSoft }} title={showPassword ? "Masquer" : "Afficher"}>
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={busy}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-medium"
+              style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}
+            >
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <>Valider le nouveau mot de passe <ArrowRight size={15} /></>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   const [mode, setMode] = useState(initialMode);
   const [companyName, setCompanyName] = useState("");
@@ -1410,6 +1489,26 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
+
+  async function handleForgotPassword() {
+    setError("");
+    setInfo("");
+    const cleanEmail = email.trim();
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail);
+    if (!cleanEmail || !emailOk) { setError("Renseigne un email valide pour recevoir le lien."); return; }
+
+    setBusy(true);
+    try {
+      const { error: resetError } = await db.auth.resetPasswordForEmail(cleanEmail, { redirectTo: window.location.origin });
+      if (resetError) { setError(resetError.message); setBusy(false); return; }
+      setInfo("Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé. Vérifie ta boîte mail (et les spams).");
+      setBusy(false);
+    } catch (err) {
+      console.error(err);
+      setError("Une erreur est survenue. Réessaie.");
+      setBusy(false);
+    }
+  }
 
   async function handleSubmit() {
     setError("");
@@ -1474,11 +1573,36 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
         </div>
 
         <div className="rounded-2xl p-6" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-          <div className="mb-5 flex gap-1 rounded-lg p-1" style={{ background: colors.paper }}>
-            <button type="button" onClick={() => { setMode("signup"); setError(""); setInfo(""); }} className="grow rounded-md py-1.5 text-sm font-medium" style={{ background: mode === "signup" ? colors.ink : "transparent", color: mode === "signup" ? "white" : colors.inkSoft }}>Inscription</button>
-            <button type="button" onClick={() => { setMode("login"); setError(""); setInfo(""); }} className="grow rounded-md py-1.5 text-sm font-medium" style={{ background: mode === "login" ? colors.ink : "transparent", color: mode === "login" ? "white" : colors.inkSoft }}>Connexion</button>
-          </div>
+          {mode !== "forgot" && (
+            <div className="mb-5 flex gap-1 rounded-lg p-1" style={{ background: colors.paper }}>
+              <button type="button" onClick={() => { setMode("signup"); setError(""); setInfo(""); }} className="grow rounded-md py-1.5 text-sm font-medium" style={{ background: mode === "signup" ? colors.ink : "transparent", color: mode === "signup" ? "white" : colors.inkSoft }}>Inscription</button>
+              <button type="button" onClick={() => { setMode("login"); setError(""); setInfo(""); }} className="grow rounded-md py-1.5 text-sm font-medium" style={{ background: mode === "login" ? colors.ink : "transparent", color: mode === "login" ? "white" : colors.inkSoft }}>Connexion</button>
+            </div>
+          )}
 
+          {mode === "forgot" ? (
+            <div className="space-y-3">
+              <div>
+                <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Indique ton email, on t'envoie un lien pour choisir un nouveau mot de passe.</p>
+                <label className="mb-1 flex items-center gap-1.5 text-xs font-medium" style={{ color: colors.inkSoft }}><Mail size={13} /> Email</label>
+                <input type="text" autoComplete="email" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleForgotPassword(); }} placeholder="toi@entreprise.fr" />
+              </div>
+              {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
+              {info && <p className="text-xs" style={{ color: colors.moss }}>{info}</p>}
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                disabled={busy}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-medium"
+                style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}
+              >
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <>Envoyer le lien <ArrowRight size={15} /></>}
+              </button>
+              <button type="button" onClick={() => { setMode("login"); setError(""); setInfo(""); }} className="w-full text-center text-xs font-medium" style={{ color: colors.inkSoft }}>
+                ← Retour à la connexion
+              </button>
+            </div>
+          ) : (
           <div className="space-y-3">
             {mode === "signup" && (
               <div>
@@ -1491,7 +1615,14 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
               <input type="text" autoComplete="email" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={onEnterKey} placeholder="toi@entreprise.fr" />
             </div>
             <div>
-              <label className="mb-1 flex items-center gap-1.5 text-xs font-medium" style={{ color: colors.inkSoft }}><KeyRound size={13} /> Mot de passe</label>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-xs font-medium" style={{ color: colors.inkSoft }}><KeyRound size={13} /> Mot de passe</label>
+                {mode === "login" && (
+                  <button type="button" onClick={() => { setMode("forgot"); setError(""); setInfo(""); }} className="text-xs font-medium" style={{ color: colors.slate }}>
+                    Mot de passe oublié ?
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
@@ -1527,6 +1658,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
               {busy ? <Loader2 size={15} className="animate-spin" /> : <>{mode === "signup" ? "Créer mon compte" : "Se connecter"} <ArrowRight size={15} /></>}
             </button>
           </div>
+          )}
         </div>
         <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-xs" style={{ color: colors.inkSoft }}>
           <Lock size={12} /> Authentification sécurisée (mots de passe hachés, jamais stockés en clair).
