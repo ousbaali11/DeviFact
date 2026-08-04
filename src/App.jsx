@@ -992,6 +992,9 @@ export default function DeviFactApp() {
     return <AuthScreen initialMode={authMode} onBack={() => setPreAuthView("landing")} siteSettings={siteSettings} />;
   }
 
+  const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
+  const isLocked = (account?.plan || "gratuit") === "gratuit" && documents.length >= freeLimit;
+
   if (view === "editor" && activeDoc) {
     return (
       <Editor
@@ -1016,9 +1019,6 @@ export default function DeviFactApp() {
       />
     );
   }
-
-  const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
-  const isLocked = (account?.plan || "gratuit") === "gratuit" && documents.length >= freeLimit;
 
   const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), account, onLogout: logout, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
 
