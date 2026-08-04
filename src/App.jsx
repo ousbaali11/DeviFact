@@ -260,14 +260,18 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
   const dueDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
   const lineItems = (doc.items || []).filter((i) => i.type === "line" || i.type === "section");
-  const ink = "#1B2A33", inkSoft = "#4A5B63", brass = "#B8763E", brassDark = "#8F5C2E", line = "#DAE1DC", box = "#F1F0EA";
+  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const inkSoft = "#4A5B63", brass = "#B8763E", brassDark = "#8F5C2E", line = "#DAE1DC";
+  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
+  const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const mono = { fontFamily: "'IBM Plex Mono', monospace" };
   const isFreeWatermark = watermarkEnabled; // contrôlé par l'Admin, forfait par forfait
   const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10.5pt", lineHeight: 1.4,
-    background: "#FBF7EF",
+    background: pageBg,
+    width: "210mm", minHeight: "297mm", boxSizing: "border-box",
     padding: "24px 28px", margin: "5px", position: "relative", overflow: "hidden",
   };
 
@@ -492,7 +496,7 @@ export default function DeviFactApp() {
   const [splitNotice, setSplitNotice] = useState(null);
   const [savingPlanSettings, setSavingPlanSettings] = useState(false);
   const [preAuthView, setPreAuthView] = useState("landing"); // landing | auth
-  const [siteSettings, setSiteSettings] = useState({ name: "DeviFact", logo: null, logoWidth: 36, logoHeight: 36 });
+  const [siteSettings, setSiteSettings] = useState({ name: "DeviFact", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA" });
   const [savingSiteSettings, setSavingSiteSettings] = useState(false);
   const [authMode, setAuthMode] = useState("signup");
 
@@ -548,11 +552,16 @@ export default function DeviFactApp() {
       console.error("Erreur de chargement des paramètres du site (état précédent conservé)", error);
       return;
     }
-    setSiteSettings({ name: data.name || "DeviFact", logo: data.logo_url || null, logoWidth: data.logo_width || 36, logoHeight: data.logo_height || 36 });
+    setSiteSettings({
+      name: data.name || "DeviFact", logo: data.logo_url || null, logoWidth: data.logo_width || 36, logoHeight: data.logo_height || 36,
+      pdfBackground: data.pdf_background || "#FBF7EF",
+      pdfHeaderColor: data.pdf_header_color || "#1B2A33",
+      pdfBlockColor: data.pdf_block_color || "#F1F0EA",
+    });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -2123,7 +2132,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
         {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={13} className="animate-spin" /> Enregistrement</span>}
       </div>
       <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-        Change le nom affiché partout (menu, page d'accueil, connexion, filigrane des PDF Gratuit) et le logo du site — distinct du logo de chaque entreprise sur ses devis. N'oublie pas de cliquer "Enregistrer" en bas pour valider tes changements.
+        Change le nom, le logo et les couleurs des PDF générés (fond, en-tête de tableau, blocs émetteur/client). N'oublie pas de cliquer "Enregistrer" en bas pour valider tes changements.
       </p>
       <div className="space-y-4 p-4">
         <div>
@@ -2155,6 +2164,32 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
             Hauteur (px)
             <input type="number" min="16" max="200" className="df-input df-mono mt-0.5 block w-24 rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.logoHeight} onChange={(e) => patch({ logoHeight: Number(e.target.value) || 36 })} />
           </label>
+        </div>
+        <div className="border-t pt-4" style={{ borderColor: colors.line }}>
+          <label className="mb-2 block text-xs font-medium" style={{ color: colors.inkSoft }}>Couleurs des PDF (devis, factures, proforma)</label>
+          <div className="flex flex-wrap gap-4">
+            <label className="text-xs" style={{ color: colors.inkSoft }}>
+              Fond de page
+              <div className="mt-1 flex items-center gap-2">
+                <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfBackground} onChange={(e) => patch({ pdfBackground: e.target.value })} />
+                <span className="df-mono text-xs">{local.pdfBackground}</span>
+              </div>
+            </label>
+            <label className="text-xs" style={{ color: colors.inkSoft }}>
+              En-tête de tableau
+              <div className="mt-1 flex items-center gap-2">
+                <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfHeaderColor} onChange={(e) => patch({ pdfHeaderColor: e.target.value })} />
+                <span className="df-mono text-xs">{local.pdfHeaderColor}</span>
+              </div>
+            </label>
+            <label className="text-xs" style={{ color: colors.inkSoft }}>
+              Blocs émetteur / client
+              <div className="mt-1 flex items-center gap-2">
+                <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfBlockColor} onChange={(e) => patch({ pdfBlockColor: e.target.value })} />
+                <span className="df-mono text-xs">{local.pdfBlockColor}</span>
+              </div>
+            </label>
+          </div>
         </div>
         <button onClick={handleSave} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
           <Check size={14} /> Enregistrer
