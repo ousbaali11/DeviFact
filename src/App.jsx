@@ -1105,6 +1105,16 @@ export default function DeviFactApp() {
     );
   }
 
+  if (view === "api") {
+    return (
+      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+        <GlobalStyle />
+        <TopNav {...navProps} />
+        <ApiView account={account} />
+      </div>
+    );
+  }
+
   if (view === "account") {
     return (
       <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
@@ -1814,6 +1824,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
     { id: "prestations", label: "Bibliothèque", icon: Library },
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
+    ...(account?.plan === "entreprise" && account?.role === "owner" ? [{ id: "api", label: "API", icon: KeyRound }] : []),
   ];
   const rightTabs = [
     { id: "pricing", label: "Abonnement", icon: CreditCard },
@@ -2204,6 +2215,160 @@ function AccountView({ account }) {
         <button onClick={savePassword} disabled={savingPassword} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.ink, color: "white", opacity: savingPassword ? 0.7 : 1 }}>
           {savingPassword ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Mettre à jour le mot de passe
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ApiView({ account }) {
+  const [keys, setKeys] = useState(null);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [revealedKey, setRevealedKey] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const isOwner = account?.role === "owner";
+  const isEnterprise = account?.plan === "entreprise";
+
+  async function loadKeys() {
+    if (!account?.organizationId) { setKeys([]); return; }
+    const { data, error: loadError } = await db
+      .from("api_keys")
+      .select("id, name, key_prefix, created_at, last_used_at, revoked_at")
+      .eq("organization_id", account.organizationId)
+      .order("created_at", { ascending: false });
+    if (loadError) { console.error("Erreur de chargement des clés API", loadError); setKeys([]); return; }
+    setKeys(data || []);
+  }
+
+  useEffect(() => { loadKeys(); }, [account?.organizationId]);
+
+  async function createKey() {
+    setError("");
+    setCreating(true);
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const { data, error: fnError } = await db.functions.invoke("manage-api-key", {
+        body: { action: "create", organizationId: account.organizationId, name: newKeyName.trim() || "Clé API" },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      let realMessage = data?.error;
+      if (!realMessage && fnError?.context) {
+        try { realMessage = (await fnError.context.json())?.error; } catch { /* pas de corps JSON lisible */ }
+      }
+      if (fnError || data?.error) { setError(realMessage || fnError?.message || "Erreur de création."); setCreating(false); return; }
+      setRevealedKey(data.key);
+      setNewKeyName("");
+      await loadKeys();
+    } catch (err) {
+      console.error(err);
+      setError("Une erreur est survenue. Réessaie.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function revokeKey(keyId) {
+    const { data: { session } } = await db.auth.getSession();
+    await db.functions.invoke("manage-api-key", {
+      body: { action: "revoke", organizationId: account.organizationId, keyId },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    });
+    await loadKeys();
+  }
+
+  function copyKey() {
+    navigator.clipboard.writeText(revealedKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  if (!isEnterprise) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6">
+        <Lock size={28} className="mx-auto mb-3" style={{ color: colors.inkSoft }} />
+        <h1 className="df-display mb-1 text-lg font-semibold">Accès API réservé au forfait Entreprise</h1>
+        <p className="text-sm" style={{ color: colors.inkSoft }}>Contacte-nous pour en savoir plus sur le forfait Entreprise.</p>
+      </div>
+    );
+  }
+  if (!isOwner) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6">
+        <Lock size={28} className="mx-auto mb-3" style={{ color: colors.inkSoft }} />
+        <h1 className="df-display mb-1 text-lg font-semibold">Réservé au propriétaire de l'organisation</h1>
+        <p className="text-sm" style={{ color: colors.inkSoft }}>Seul le propriétaire peut créer et gérer les clés API.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mb-6">
+        <h1 className="df-display text-2xl font-semibold">Accès API</h1>
+        <p className="text-sm" style={{ color: colors.inkSoft }}>Récupère tes devis, factures et clients depuis un logiciel externe (comptabilité, CRM...).</p>
+      </div>
+
+      {revealedKey && (
+        <div className="mb-6 rounded-2xl p-5" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}40` }}>
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.moss }}>
+            <Check size={16} /> Clé créée — copie-la maintenant, elle ne sera plus jamais affichée.
+          </div>
+          <div className="flex items-center gap-2 rounded-lg p-3" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+            <code className="df-mono grow break-all text-xs">{revealedKey}</code>
+            <button onClick={copyKey} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: colors.ink, color: "white" }}>
+              {copied ? "Copié !" : "Copier"}
+            </button>
+          </div>
+          <button onClick={() => setRevealedKey(null)} className="mt-3 text-xs font-medium underline" style={{ color: colors.inkSoft }}>J'ai bien copié la clé, fermer</button>
+        </div>
+      )}
+
+      <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        <span className="df-display mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Nouvelle clé</span>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="grow basis-48 text-xs" style={{ color: colors.inkSoft }}>
+            Nom (pour t'y retrouver)
+            <input className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="Logiciel de comptabilité" onKeyDown={(e) => { if (e.key === "Enter") createKey(); }} />
+          </label>
+          <button onClick={createKey} disabled={creating} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: creating ? 0.7 : 1 }}>
+            {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Générer une clé
+          </button>
+        </div>
+        {error && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{error}</p>}
+      </div>
+
+      {keys === null ? (
+        <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin" style={{ color: colors.inkSoft }} /></div>
+      ) : keys.length === 0 ? (
+        <p className="mb-6 text-sm" style={{ color: colors.inkSoft }}>Aucune clé créée pour le moment.</p>
+      ) : (
+        <div className="mb-8 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          {keys.map((k, idx) => (
+            <div key={k.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none", opacity: k.revoked_at ? 0.5 : 1 }}>
+              <div className="min-w-0 grow basis-32">
+                <div className="text-sm font-medium">{k.name}</div>
+                <div className="df-mono text-xs" style={{ color: colors.inkSoft }}>{k.key_prefix}</div>
+              </div>
+              <div className="text-xs" style={{ color: colors.inkSoft }}>
+                {k.revoked_at ? "Révoquée" : k.last_used_at ? `Utilisée le ${new Date(k.last_used_at).toLocaleDateString("fr-FR")}` : "Jamais utilisée"}
+              </div>
+              {!k.revoked_at && (
+                <button onClick={() => revokeKey(k.id)} className="text-xs font-medium" style={{ color: colors.brick }}>Révoquer</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        <span className="df-display mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Comment l'utiliser</span>
+        <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Envoie ta clé dans l'en-tête <code className="df-mono">Authorization</code> de chaque requête. Deux ressources disponibles : <code className="df-mono">documents</code> (devis, factures, proforma) et <code className="df-mono">clients</code>.</p>
+        <pre className="df-mono overflow-x-auto rounded-lg p-3 text-xs" style={{ background: colors.ink, color: "#E8E4D8" }}>
+{`curl "https://ieshjvzmpbxtqielhaii.supabase.co/functions/v1/api?resource=documents" \\
+  -H "Authorization: Bearer dfk_ta_clé_ici"`}
+        </pre>
+        <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Ajoute <code className="df-mono">&id=xxx</code> pour récupérer un seul élément. Limite : 60 requêtes par minute et par clé.</p>
       </div>
     </div>
   );
