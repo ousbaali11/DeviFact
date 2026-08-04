@@ -8,7 +8,7 @@ import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
   ArrowRightLeft, Eraser, ChevronUp, ChevronDown, LayoutList, ArrowLeft,
   Search, FileText, Receipt, Copy, Loader2, Inbox, Check, Users, Building2,
-  Pencil, X, UserPlus, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
+  Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
   Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu,
@@ -522,6 +522,8 @@ export default function DeviFactApp() {
       id: userId,
       email,
       companyName: profile.company_name || "",
+      firstName: profile.first_name || "",
+      lastName: profile.last_name || "",
       isAdmin: profile.is_admin,
       loggedIn: true,
       organizationId: membership?.organization_id || null,
@@ -1062,6 +1064,22 @@ export default function DeviFactApp() {
         <GlobalStyle />
         <TopNav {...navProps} />
         <TeamView account={account} />
+      </div>
+    );
+  }
+
+  if (view === "account") {
+    return (
+      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+        <GlobalStyle />
+        <TopNav {...navProps} />
+        <AccountView
+          account={account}
+          onRefresh={async () => {
+            const { data: { user } } = await db.auth.getUser();
+            if (user) setAccount(await loadProfile(user.id, user.email));
+          }}
+        />
       </div>
     );
   }
@@ -1790,6 +1808,9 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
         <button onClick={() => setView("pricing")} className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: "rgba(255,255,255,0.1)", color: "white" }} title="Voir les forfaits">
           {planLabel(account?.plan)}
         </button>
+        <button onClick={() => setView("account")} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.75)" }} title="Mon compte">
+          <UserCircle size={16} /> Mon compte
+        </button>
         <button onClick={onLogout} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Se déconnecter">
           <LogOut size={15} />
         </button>
@@ -1983,6 +2004,97 @@ function PrestationsView({ prestations, saving, onSave, onDelete }) {
 const ROLE_LABELS = { owner: "Propriétaire", editor: "Éditeur", viewer: "Lecteur" };
 const ROLE_COLORS = { owner: colors.brassDark, editor: colors.moss, viewer: colors.slate };
 
+function AccountView({ account, onRefresh }) {
+  const [firstName, setFirstName] = useState(account?.firstName || "");
+  const [lastName, setLastName] = useState(account?.lastName || "");
+  const [savingInfo, setSavingInfo] = useState(false);
+  const [infoSaved, setInfoSaved] = useState(false);
+
+  const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSaved, setPasswordSaved] = useState(false);
+
+  async function saveInfo() {
+    setSavingInfo(true);
+    setInfoSaved(false);
+    const { error } = await db.from("profiles").update({ first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", account.id);
+    if (error) console.error("Erreur d'enregistrement des informations personnelles", error);
+    else { setInfoSaved(true); await onRefresh(); }
+    setSavingInfo(false);
+  }
+
+  async function savePassword() {
+    setPasswordError("");
+    setPasswordSaved(false);
+    if (newPassword.length < 6) { setPasswordError("Le mot de passe doit faire au moins 6 caractères."); return; }
+    setSavingPassword(true);
+    const { error } = await db.auth.updateUser({ password: newPassword });
+    if (error) setPasswordError(error.message);
+    else { setPasswordSaved(true); setNewPassword(""); }
+    setSavingPassword(false);
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+      <div className="mb-6">
+        <h1 className="df-display text-2xl font-semibold">Mon compte</h1>
+        <p className="text-sm" style={{ color: colors.inkSoft }}>Tes informations personnelles — distinctes des informations de ton entreprise.</p>
+      </div>
+
+      <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        <span className="df-display mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Informations personnelles</span>
+        <label className="mb-3 block text-xs" style={{ color: colors.inkSoft }}>
+          Email
+          <input disabled className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.paper, color: colors.inkSoft }} value={account?.email || ""} />
+        </label>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="text-xs" style={{ color: colors.inkSoft }}>
+            Prénom
+            <input className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={firstName} onChange={(e) => { setFirstName(e.target.value); setInfoSaved(false); }} />
+          </label>
+          <label className="text-xs" style={{ color: colors.inkSoft }}>
+            Nom
+            <input className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={lastName} onChange={(e) => { setLastName(e.target.value); setInfoSaved(false); }} />
+          </label>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button onClick={saveInfo} disabled={savingInfo} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: savingInfo ? 0.7 : 1 }}>
+            {savingInfo ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Enregistrer
+          </button>
+          {infoSaved && <span className="text-xs" style={{ color: colors.moss }}>Enregistré.</span>}
+        </div>
+      </div>
+
+      <div className="rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        <span className="df-display mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Changer de mot de passe</span>
+        <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Nouveau mot de passe</label>
+        <div className="relative max-w-xs">
+          <input
+            type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
+            className="df-input w-full rounded-md py-2 pl-3 pr-10 text-sm"
+            style={{ border: `1px solid ${colors.line}` }}
+            value={newPassword}
+            onChange={(e) => { setNewPassword(e.target.value); setPasswordSaved(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") savePassword(); }}
+            placeholder="••••••••"
+          />
+          <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute inset-y-0 right-0 flex w-9 items-center justify-center" style={{ color: colors.inkSoft }} title={showPassword ? "Masquer" : "Afficher"}>
+            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+        {passwordError && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{passwordError}</p>}
+        {passwordSaved && <p className="mt-2 text-xs" style={{ color: colors.moss }}>Mot de passe mis à jour.</p>}
+        <button onClick={savePassword} disabled={savingPassword} className="mt-3 flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.ink, color: "white", opacity: savingPassword ? 0.7 : 1 }}>
+          {savingPassword ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Mettre à jour le mot de passe
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TeamView({ account }) {
   const [members, setMembers] = useState(null);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -2017,7 +2129,13 @@ function TeamView({ account }) {
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
       if (fnError || data?.error) {
-        setError(data?.error || fnError?.message || "Impossible d'envoyer l'invitation.");
+        // Le SDK masque le vrai message derrière une erreur générique en
+        // cas de statut non-2xx — on va le chercher dans la réponse brute.
+        let realMessage = data?.error;
+        if (!realMessage && fnError?.context) {
+          try { realMessage = (await fnError.context.json())?.error; } catch { /* pas de corps JSON lisible */ }
+        }
+        setError(realMessage || fnError?.message || "Impossible d'envoyer l'invitation.");
       } else {
         setInfo(`${cleanEmail} a été ajouté à l'équipe.`);
         setInviteEmail("");
