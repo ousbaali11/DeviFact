@@ -152,6 +152,7 @@ const COUNTRIES = [
   "🇩🇰 DK", "🇫🇮 FI", "🇮🇸 IS", "🇭🇺 HU", "🇨🇿 CZ", "🇸🇰 SK", "🇸🇮 SI", "🇭🇷 HR", "🇧🇬 BG",
   "🇪🇪 EE", "🇱🇻 LV", "🇱🇹 LT", "🇲🇹 MT", "🇨🇾 CY", "🇱🇮 LI", "🇦🇩 AD", "🇸🇲 SM", "🇻🇦 VA",
   "🇧🇦 BA", "🇷🇸 RS", "🇲🇪 ME", "🇲🇰 MK", "🇦🇱 AL", "🇽🇰 XK", "🇲🇩 MD", "🇺🇦 UA", "🇧🇾 BY",
+  "🇷🇺 RU", "🇬🇪 GE", "🇦🇲 AM", "🇦🇿 AZ",
   // Afrique (exhaustive)
   "🇲🇦 MA", "🇩🇿 DZ", "🇹🇳 TN", "🇱🇾 LY", "🇪🇬 EG", "🇸🇩 SD", "🇸🇸 SS", "🇸🇳 SN", "🇨🇮 CI",
   "🇨🇲 CM", "🇲🇱 ML", "🇧🇯 BJ", "🇹🇬 TG", "🇧🇫 BF", "🇲🇬 MG", "🇨🇩 CD", "🇨🇬 CG", "🇬🇦 GA",
@@ -212,9 +213,68 @@ const REVISION_COUNTRY_INFO = {
   "🇨🇭 CH": { currency: "CHF", indexHint: "Indice suisse des prix de la construction", authority: "Office fédéral de la statistique (bfs.admin.ch)" },
   "🇱🇺 LU": { currency: "EUR", indexHint: "Indice des prix de la construction", authority: "STATEC (statistiques.public.lu)" },
   "🇨🇦 CA": { currency: "CAD", indexHint: "Indices des prix de la construction", authority: "Statistique Canada (statcan.gc.ca)" },
+  // Pays de l'UE / Espace économique européen : un indice de coût de la
+  // construction harmonisé existe pour tous, encadré par un règlement
+  // européen (Eurostat, code STS_COPI_m) — chacun a aussi son propre
+  // institut national qui publie le détail.
+  "🇩🇪 DE": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "Destatis (destatis.de)" },
+  "🇪🇸 ES": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "INE (ine.es)" },
+  "🇮🇹 IT": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "ISTAT (istat.it)" },
+  "🇵🇹 PT": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "INE Portugal (ine.pt)" },
+  "🇳🇱 NL": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "CBS (cbs.nl)" },
+  "🇬🇧 GB": { currency: "GBP", indexHint: "Construction cost index (Eurostat / national)", authority: "ONS (ons.gov.uk)" },
+  "🇮🇪 IE": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "CSO Irlande (cso.ie)" },
+  "🇷🇴 RO": { currency: "RON", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "INS Roumanie (insse.ro)" },
+  "🇵🇱 PL": { currency: "PLN", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "GUS (stat.gov.pl)" },
+  "🇬🇷 GR": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "ELSTAT (statistics.gr)" },
+  "🇦🇹 AT": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "Statistik Austria (statistik.at)" },
+  "🇸🇪 SE": { currency: "SEK", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "SCB (scb.se)" },
+  "🇳🇴 NO": { currency: "NOK", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "SSB (ssb.no)" },
+  "🇩🇰 DK": { currency: "DKK", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "Danmarks Statistik (dst.dk)" },
+  "🇫🇮 FI": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "Statistics Finland (stat.fi)" },
+  "🇮🇸 IS": { currency: "ISK", indexHint: "Indice des coûts de construction", authority: "Statistics Iceland (statice.is)" },
+  "🇭🇺 HU": { currency: "HUF", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "KSH (ksh.hu)" },
+  "🇨🇿 CZ": { currency: "CZK", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "ČSÚ (czso.cz)" },
+  "🇸🇰 SK": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "Štatistický úrad SR (statistics.sk)" },
+  "🇭🇷 HR": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "DZS Croatie (dzs.hr)" },
+  "🇧🇬 BG": { currency: "BGN", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "NSI Bulgarie (nsi.bg)" },
+  "🇪🇪 EE": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "Statistics Estonia (stat.ee)" },
+  "🇱🇻 LV": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "CSB Lettonie (stat.gov.lv)" },
+  "🇱🇹 LT": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "Statistics Lithuania (stat.gov.lt)" },
+  "🇲🇹 MT": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "NSO Malte (nso.gov.mt)" },
+  "🇨🇾 CY": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "CYSTAT (cystat.gov.cy)" },
+  "🇸🇮 SI": { currency: "EUR", indexHint: "Indice européen des coûts de construction (Eurostat)", authority: "SURS Slovénie (stat.si)" },
+  "🇧🇦 BA": { currency: "BAM", indexHint: "Indice des coûts de construction (référence Eurostat régionale)", authority: "BHAS (bhas.gov.ba)" },
+  "🇲🇪 ME": { currency: "EUR", indexHint: "Indice des coûts de construction (référence Eurostat régionale)", authority: "Monstat (monstat.org)" },
+  "🇲🇰 MK": { currency: "MKD", indexHint: "Indice des coûts de construction (référence Eurostat régionale)", authority: "État statistique de Macédoine du Nord" },
+  "🇦🇱 AL": { currency: "ALL", indexHint: "Indice des coûts de construction (référence Eurostat régionale)", authority: "INSTAT Albanie (instat.gov.al)" },
+  "🇷🇸 RS": { currency: "RSD", indexHint: "Indice des coûts de construction (référence Eurostat régionale)", authority: "RZS Serbie (stat.gov.rs)" },
+  "🇹🇷 TR": { currency: "TRY", indexHint: "Indice des coûts de construction (référence Eurostat régionale)", authority: "TÜİK Turquie (tuik.gov.tr)" },
+  // Afrique francophone : repères vérifiés directement auprès des
+  // instituts nationaux (pas de code d'indice deviné, uniquement ce
+  // qui est réellement publié).
+  "🇲🇦 MA": { currency: "MAD", indexHint: "BAT6 - Bâtiment tous corps d'état (barèmes d'indexation)", authority: "Ministère de l'Équipement et de l'Eau (index.ma ou bulletins officiels)" },
+  "🇹🇳 TN": { currency: "TND", indexHint: "Indice des prix de la construction / immobilier", authority: "INS Tunisie (ins.tn)" },
+  "🇨🇮 CI": { currency: "XOF", indexHint: "IABTP - Indicateur avancé des BTP", authority: "ANSTAT Côte d'Ivoire (anstat.ci)" },
+  "🇨🇲 CM": { currency: "XAF", indexHint: "Indice des prix à la production industrielle (BTP)", authority: "INS Cameroun (ins-cameroun.cm)" },
+  "🇸🇳 SN": { currency: "XOF", indexHint: "ICC - Indice du Coût de la Construction / IMC - Indice des Prix des Matériaux", authority: "ANSD Sénégal (ansd.sn)" },
 };
 function getRevisionCountryInfo(country) {
   return REVISION_COUNTRY_INFO[country] || { currency: null, indexHint: "", authority: "l'organisme national de statistiques de ton pays" };
+}
+
+function emptyRevisionSector(sector, country) {
+  const info = getRevisionCountryInfo(country);
+  return {
+    id: nextId("rs"),
+    sector: sector || REVISION_SECTORS[0],
+    montantInitialHT: "",
+    indexName: info.indexHint || "",
+    indexInitial: "",
+    indexActuel: "",
+    coeffFixe: 0.15,
+    coeffVariable: 0.85,
+  };
 }
 
 function newRevisionDocument(sector, country, documents) {
@@ -225,17 +285,12 @@ function newRevisionDocument(sector, country, documents) {
     docNumber: nextNumber(documents, "revision"),
     issueDate: new Date().toISOString().slice(0, 10),
     currency: info.currency || "EUR",
-    sector,
     country,
+    sectors: [emptyRevisionSector(sector, country)],
+    showTotal: false,
     company: { type: "entreprise", name: "", siret: "", address: "", country: country || "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
     clientId: null,
-    montantInitialHT: "",
-    indexName: info.indexHint || "",
-    indexInitial: "",
-    indexActuel: "",
-    coeffFixe: 0.15,
-    coeffVariable: 0.85,
     notes: "",
     status: "brouillon",
     createdAt: Date.now(),
@@ -243,18 +298,53 @@ function newRevisionDocument(sector, country, documents) {
   };
 }
 
-function computeRevision(doc) {
-  const c0 = Number(doc.montantInitialHT) || 0;
-  const i0 = Number(doc.indexInitial) || 0;
-  const iN = Number(doc.indexActuel) || 0;
-  const a = Number(doc.coeffFixe);
-  const b = Number(doc.coeffVariable);
+// Renvoie toujours un tableau de secteurs — recrée ce tableau à la
+// volée pour un document créé avant ce changement (un seul secteur,
+// champs directement sur le document), sans jamais rien casser de
+// ce qui existe déjà.
+function getRevisionSectors(doc) {
+  if (Array.isArray(doc.sectors)) return doc.sectors;
+  if (doc.sector !== undefined) {
+    return [{
+      id: "legacy",
+      sector: doc.sector,
+      montantInitialHT: doc.montantInitialHT,
+      indexName: doc.indexName,
+      indexInitial: doc.indexInitial,
+      indexActuel: doc.indexActuel,
+      coeffFixe: doc.coeffFixe,
+      coeffVariable: doc.coeffVariable,
+    }];
+  }
+  return [];
+}
+
+function computeRevisionLine(line) {
+  const c0 = Number(line?.montantInitialHT) || 0;
+  const i0 = Number(line?.indexInitial) || 0;
+  const iN = Number(line?.indexActuel) || 0;
+  const a = Number(line?.coeffFixe);
+  const b = Number(line?.coeffVariable);
   if (!c0 || !i0 || !iN) return { valid: false, montantRevise: 0, ecartMontant: 0, ecartPct: 0, coefficient: 0 };
   const coefficient = a + b * (iN / i0);
   const montantRevise = c0 * coefficient;
   const ecartMontant = montantRevise - c0;
   const ecartPct = c0 ? (ecartMontant / c0) * 100 : 0;
   return { valid: true, montantRevise, ecartMontant, ecartPct, coefficient };
+}
+
+// Total combiné de tous les secteurs d'un document — c'est cette
+// fonction que le tableau de bord et l'export comptable utilisent
+// déjà (via computeRevision), donc rien à changer de leur côté.
+function computeRevision(doc) {
+  const lines = getRevisionSectors(doc).map(computeRevisionLine);
+  const validLines = lines.filter((l) => l.valid);
+  if (!validLines.length) return { valid: false, montantRevise: 0, ecartMontant: 0, ecartPct: 0, coefficient: 0 };
+  const montantInitialTotal = getRevisionSectors(doc).reduce((s, l) => s + (Number(l.montantInitialHT) || 0), 0);
+  const montantRevise = validLines.reduce((s, l) => s + l.montantRevise, 0);
+  const ecartMontant = montantRevise - montantInitialTotal;
+  const ecartPct = montantInitialTotal ? (ecartMontant / montantInitialTotal) * 100 : 0;
+  return { valid: true, montantRevise, ecartMontant, ecartPct, montantInitialTotal, coefficient: 0 };
 }
 
 function newDocument(type, documents) {
@@ -1095,7 +1185,7 @@ export default function DeviFactApp() {
       .forEach((d) => {
         if (d.type === "revision") {
           const r = computeRevision(d);
-          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number((Number(d.montantInitialHT) || 0).toFixed(2)), Number(r.ecartMontant.toFixed(2)), Number(r.montantRevise.toFixed(2))]);
+          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number((r.montantInitialTotal || 0).toFixed(2)), Number(r.ecartMontant.toFixed(2)), Number(r.montantRevise.toFixed(2))]);
           return;
         }
         const t = computeTotals(d);
@@ -2105,7 +2195,8 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
 }
 
 const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, watermarkEnabled = true }, ref) {
-  const result = computeRevision(doc);
+  const sectorLines = getRevisionSectors(doc);
+  const total = computeRevision(doc);
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const inkSoft = "#4A5B63", brass = "#B8763E", brassDark = "#8F5C2E", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
@@ -2133,7 +2224,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
         <div>
           <div style={{ fontWeight: 700, fontSize: "14pt" }}>RÉVISION DE PRIX N° :{doc.docNumber}</div>
           <div style={{ color: inkSoft, marginTop: "4px" }}>Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
-          <div style={{ color: inkSoft }}>Secteur : {doc.sector}</div>
+          <div style={{ color: inkSoft }}>{sectorLines.length} secteur{sectorLines.length > 1 ? "s" : ""}</div>
         </div>
         {doc.company.logo ? (
           <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} />
@@ -2156,44 +2247,47 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
       </div>
 
       <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
-        <div style={{ fontWeight: 700, marginBottom: "8px", fontSize: "11pt" }}>Calcul de la révision</div>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "10pt" }}>
+        <div style={{ fontWeight: 700, marginBottom: "8px", fontSize: "11pt" }}>Calcul de la révision, par secteur</div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9pt" }}>
+          <thead>
+            <tr style={{ borderBottom: `2px solid ${ink}` }}>
+              <th style={{ padding: "6px 4px", textAlign: "left" }}>Secteur</th>
+              <th style={{ padding: "6px 4px", textAlign: "left" }}>Indice</th>
+              <th style={{ padding: "6px 4px", textAlign: "right" }}>Montant initial</th>
+              <th style={{ padding: "6px 4px", textAlign: "right" }}>I0 → In</th>
+              <th style={{ padding: "6px 4px", textAlign: "right" }}>Montant révisé</th>
+            </tr>
+          </thead>
           <tbody>
-            <tr style={{ borderBottom: `1px solid ${line}` }}>
-              <td style={{ padding: "6px 0", color: inkSoft }}>Montant initial HT (C0)</td>
-              <td style={{ padding: "6px 0", textAlign: "right", ...mono }}>{formatMoney(Number(doc.montantInitialHT) || 0, doc.currency)}</td>
-            </tr>
-            <tr style={{ borderBottom: `1px solid ${line}` }}>
-              <td style={{ padding: "6px 0", color: inkSoft }}>Indice de référence</td>
-              <td style={{ padding: "6px 0", textAlign: "right" }}>{doc.indexName}</td>
-            </tr>
-            <tr style={{ borderBottom: `1px solid ${line}` }}>
-              <td style={{ padding: "6px 0", color: inkSoft }}>Valeur de l'indice à l'origine (I0)</td>
-              <td style={{ padding: "6px 0", textAlign: "right", ...mono }}>{doc.indexInitial}</td>
-            </tr>
-            <tr style={{ borderBottom: `1px solid ${line}` }}>
-              <td style={{ padding: "6px 0", color: inkSoft }}>Valeur de l'indice actuelle (In)</td>
-              <td style={{ padding: "6px 0", textAlign: "right", ...mono }}>{doc.indexActuel}</td>
-            </tr>
-            <tr style={{ borderBottom: `1px solid ${line}` }}>
-              <td style={{ padding: "6px 0", color: inkSoft }}>Formule appliquée</td>
-              <td style={{ padding: "6px 0", textAlign: "right", ...mono, fontSize: "9pt" }}>Cn = C0 × ({doc.coeffFixe} + {doc.coeffVariable} × In/I0)</td>
-            </tr>
+            {sectorLines.map((l, idx) => {
+              const r = computeRevisionLine(l);
+              return (
+                <tr key={l.id || idx} style={{ borderBottom: `1px solid ${line}` }}>
+                  <td style={{ padding: "6px 4px" }}>{l.sector}</td>
+                  <td style={{ padding: "6px 4px", fontSize: "8pt", color: inkSoft }}>{l.indexName}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(l.montantInitialHT) || 0, doc.currency)}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontSize: "8pt" }}>{l.indexInitial} → {l.indexActuel}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{r.valid ? formatMoney(r.montantRevise, doc.currency) : "—"}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
-          <div style={{ width: "260px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px", color: inkSoft }}>
-              <span>Écart</span>
-              <span style={mono}>{result.ecartMontant >= 0 ? "+" : ""}{formatMoney(result.ecartMontant, doc.currency)} ({result.ecartPct >= 0 ? "+" : ""}{result.ecartPct.toFixed(2)}%)</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: ink, color: "white", fontWeight: 700, borderRadius: "4px" }}>
-              <span>Montant révisé HT</span>
-              <span style={mono}>{formatMoney(result.montantRevise, doc.currency)}</span>
+        {doc.showTotal && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+            <div style={{ width: "260px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px", color: inkSoft }}>
+                <span>Écart total</span>
+                <span style={mono}>{total.ecartMontant >= 0 ? "+" : ""}{formatMoney(total.ecartMontant, doc.currency)} ({total.ecartPct >= 0 ? "+" : ""}{total.ecartPct.toFixed(2)}%)</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: ink, color: "white", fontWeight: 700, borderRadius: "4px" }}>
+                <span>Total révisé HT</span>
+                <span style={mono}>{formatMoney(total.montantRevise, doc.currency)}</span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {doc.notes && (
@@ -2221,11 +2315,23 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     patch({ [field]: { ...localDoc[field], ...p } });
   }
 
-  const result = computeRevision(localDoc);
+  const total = computeRevision(localDoc);
+  const sectorLines = getRevisionSectors(localDoc);
   const currentPlanData = (plans || []).find((p) => p.id === (account?.plan || "gratuit"));
   const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
   const printRef = useRef(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  function patchSector(sectorId, p) {
+    patch({ sectors: sectorLines.map((l) => (l.id === sectorId ? { ...l, ...p } : l)) });
+  }
+  function addSector() {
+    patch({ sectors: [...sectorLines, emptyRevisionSector(REVISION_SECTORS[0], localDoc.country)] });
+  }
+  function removeSector(sectorId) {
+    if (sectorLines.length <= 1) return;
+    patch({ sectors: sectorLines.filter((l) => l.id !== sectorId) });
+  }
 
   async function downloadPdf() {
     const el = printRef.current;
@@ -2293,8 +2399,8 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
           <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: colors.line }}>
             <div>
               <h1 className="df-display text-xl font-semibold">Révision de prix</h1>
-              <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.slate}18`, color: colors.slate }}>{localDoc.sector}</span>
-              {localDoc.country && <span className="ml-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>{localDoc.country}</span>}
+              {localDoc.country && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>{localDoc.country}</span>}
+              <span className="ml-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.slate}18`, color: colors.slate }}>{sectorLines.length} secteur{sectorLines.length > 1 ? "s" : ""}</span>
             </div>
             <div className="text-right">
               <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>N°</label>
@@ -2315,56 +2421,95 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
             </div>
           </div>
 
-          <div className="mb-6 rounded-xl p-4" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
-            <label className="mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Calcul de la révision</label>
-            <div className="mb-3">
-              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant initial HT (marché d'origine)</label>
-              <input type="number" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.montantInitialHT} onChange={(e) => patch({ montantInitialHT: e.target.value })} placeholder="0" />
-            </div>
-            <div className="mb-3">
-              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice de référence (précise celui de ton contrat)</label>
-              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indexName} onChange={(e) => patch({ indexName: e.target.value })} />
-              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Valeurs à récupérer sur <a href="https://www.insee.fr" target="_blank" rel="noreferrer" className="underline">insee.fr</a> ou dans ton contrat.</p>
-            </div>
-            <div className="mb-3 grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à l'origine (I0)</label>
-                <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indexInitial} onChange={(e) => patch({ indexInitial: e.target.value })} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice actuel (In)</label>
-                <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indexActuel} onChange={(e) => patch({ indexActuel: e.target.value })} />
-              </div>
-            </div>
-            <div className="mb-1 grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie fixe (a)</label>
-                <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.coeffFixe} onChange={(e) => { const a = Number(e.target.value) || 0; patch({ coeffFixe: a, coeffVariable: Math.round((1 - a) * 100) / 100 }); }} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie variable (b)</label>
-                <input disabled type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.surface, color: colors.inkSoft }} value={localDoc.coeffVariable} />
-              </div>
-            </div>
-            <p className="text-xs" style={{ color: colors.inkSoft }}>a + b = 1 toujours (b se calcule automatiquement). Valeurs usuelles : 0,15 / 0,85 — vérifie celles de ton contrat (CCTP).</p>
+          <div className="mb-4 flex items-center justify-between">
+            <label className="block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Secteurs du chantier</label>
+            <button onClick={addSector} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: colors.ink, color: "white" }}>
+              <Plus size={13} /> Ajouter un secteur
+            </button>
           </div>
 
-          <div className="mb-6 rounded-xl p-4" style={{ background: result.valid ? `${colors.moss}0D` : colors.paper, border: `1px solid ${result.valid ? colors.moss + "40" : colors.line}` }}>
-            {!result.valid ? (
-              <p className="text-sm" style={{ color: colors.inkSoft }}>Renseigne le montant initial et les deux valeurs d'indice pour voir le résultat.</p>
-            ) : (
-              <>
-                <div className="flex items-center justify-between text-sm" style={{ color: colors.inkSoft }}>
-                  <span>Écart</span>
-                  <span className="df-mono">{result.ecartMontant >= 0 ? "+" : ""}{formatMoney(result.ecartMontant, localDoc.currency)} ({result.ecartPct >= 0 ? "+" : ""}{result.ecartPct.toFixed(2)}%)</span>
+          <div className="mb-6 space-y-4">
+            {sectorLines.map((sec, idx) => {
+              const r = computeRevisionLine(sec);
+              return (
+                <div key={sec.id || idx} className="rounded-xl p-4" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+                  <div className="mb-3 flex items-center gap-2">
+                    <select className="df-select grow rounded-md px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}` }} value={sec.sector} onChange={(e) => patchSector(sec.id, { sector: e.target.value })}>
+                      {REVISION_SECTORS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    {sectorLines.length > 1 && (
+                      <button onClick={() => removeSector(sec.id)} title="Retirer ce secteur" style={{ color: colors.brick }}><Trash2 size={16} /></button>
+                    )}
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant initial HT (marché d'origine)</label>
+                    <input type="number" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.montantInitialHT} onChange={(e) => patchSector(sec.id, { montantInitialHT: e.target.value })} placeholder="0" />
+                  </div>
+                  <div className="mb-3">
+                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice de référence (précise celui de ton contrat)</label>
+                    <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexName} onChange={(e) => patchSector(sec.id, { indexName: e.target.value })} />
+                    <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Valeurs à récupérer auprès de {getRevisionCountryInfo(localDoc.country).authority}, ou dans ton contrat.</p>
+                  </div>
+                  <div className="mb-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à l'origine (I0)</label>
+                      <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexInitial} onChange={(e) => patchSector(sec.id, { indexInitial: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice actuel (In)</label>
+                      <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexActuel} onChange={(e) => patchSector(sec.id, { indexActuel: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="mb-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie fixe (a)</label>
+                      <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.coeffFixe} onChange={(e) => { const a = Number(e.target.value) || 0; patchSector(sec.id, { coeffFixe: a, coeffVariable: Math.round((1 - a) * 100) / 100 }); }} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie variable (b)</label>
+                      <input disabled type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.surface, color: colors.inkSoft }} value={sec.coeffVariable} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg p-3" style={{ background: r.valid ? `${colors.moss}0D` : colors.surface, border: `1px solid ${r.valid ? colors.moss + "40" : colors.line}` }}>
+                    {!r.valid ? (
+                      <p className="text-xs" style={{ color: colors.inkSoft }}>Renseigne le montant et les deux indices pour voir le résultat de ce secteur.</p>
+                    ) : (
+                      <div className="flex items-center justify-between text-sm font-semibold">
+                        <span>Montant révisé HT</span>
+                        <span className="df-mono" style={{ color: colors.moss }}>{formatMoney(r.montantRevise, localDoc.currency)}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-lg font-semibold">
-                  <span>Montant révisé HT</span>
-                  <span className="df-mono" style={{ color: colors.moss }}>{formatMoney(result.montantRevise, localDoc.currency)}</span>
-                </div>
-              </>
-            )}
+              );
+            })}
           </div>
+
+          <label className="mb-6 flex items-center gap-2 text-sm" style={{ color: colors.ink }}>
+            <input type="checkbox" checked={!!localDoc.showTotal} onChange={(e) => patch({ showTotal: e.target.checked })} style={{ accentColor: colors.brick }} />
+            Afficher le total combiné de tous les secteurs (en plus du détail de chacun)
+          </label>
+
+          {localDoc.showTotal && (
+            <div className="mb-6 rounded-xl p-4" style={{ background: total.valid ? `${colors.ink}` : colors.paper, border: `1px solid ${colors.line}` }}>
+              {!total.valid ? (
+                <p className="text-sm" style={{ color: colors.inkSoft }}>Complète au moins un secteur pour voir le total combiné.</p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>
+                    <span>Écart total</span>
+                    <span className="df-mono">{total.ecartMontant >= 0 ? "+" : ""}{formatMoney(total.ecartMontant, localDoc.currency)} ({total.ecartPct >= 0 ? "+" : ""}{total.ecartPct.toFixed(2)}%)</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-lg font-semibold text-white">
+                    <span>Total révisé HT</span>
+                    <span className="df-mono">{formatMoney(total.montantRevise, localDoc.currency)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
           <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
