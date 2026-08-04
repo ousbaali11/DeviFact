@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, forwardRef } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { db } from "./client.js";
-import { clearStorageCache } from "./storage-adapter.js";
+import { clearStorageCache, setActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
@@ -39,7 +39,7 @@ const PROFORMA_STATUSES = ["brouillon", "envoyée", "acceptée", "expirée"];
 const PLANS = [
   { id: "gratuit", name: "Gratuit", monthly: 0, annual: 0, limit: 3, tagline: "Pour découvrir", features: ["3 devis ou factures", "Export PDF", "1 utilisateur"] },
   { id: "essentiel", name: "Essentiel", monthly: 19, annual: 182, limit: Infinity, tagline: "Pour l'artisan solo", features: ["Devis et factures illimités", "Export PDF/Excel", "Signature électronique", "1 utilisateur"] },
-  { id: "pro", name: "Pro", monthly: 39, annual: 374, limit: Infinity, tagline: "Pour l'entreprise", features: ["Tout Essentiel", "Multi-utilisateurs (bientôt disponible)", "Bibliothèque de prestations", "Suggestions IA", "Relances automatiques"] },
+  { id: "pro", name: "Pro", monthly: 39, annual: 374, limit: Infinity, tagline: "Pour l'entreprise", features: ["Tout Essentiel", "Multi-utilisateurs", "Bibliothèque de prestations", "Suggestions IA", "Relances automatiques"] },
   { id: "entreprise", name: "Entreprise", monthly: null, annual: null, limit: Infinity, tagline: "Sur mesure", features: ["Tout Pro", "API (bientôt disponible)", "Support prioritaire"] },
 ];
 function planLabel(id) { return PLANS.find((p) => p.id === id)?.name || "Gratuit"; }
@@ -504,17 +504,29 @@ export default function DeviFactApp() {
 
   const [plans, setPlans] = useState(PLANS);
 
-  async function loadProfile(userId, email) {
+  async function loadProfile(userId, email, preferredOrgId = null) {
     const { data: profile } = await db.from("profiles").select("*").eq("id", userId).maybeSingle();
     if (!profile) return null;
 
-    const { data: membership } = await db
+    const { data: memberships } = await db
       .from("organization_members")
       .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
       .eq("user_id", userId)
       .eq("status", "active")
-      .limit(1)
-      .maybeSingle();
+      .order("created_at", { ascending: true });
+
+    const list = memberships || [];
+    // Choix déterministe de l'organisation active — jamais au hasard,
+    // pour ne jamais mélanger les données de deux organisations
+    // différentes dont ferait partie la même personne :
+    // 1. celle demandée explicitement (changement d'organisation), sinon
+    // 2. celle dont la personne est propriétaire (son propre espace), sinon
+    // 3. la plus ancienne organisation dont elle est membre.
+    const membership =
+      list.find((m) => m.organization_id === preferredOrgId) ||
+      list.find((m) => m.role === "owner") ||
+      list[0] ||
+      null;
 
     const org = membership?.organizations;
 
@@ -529,6 +541,7 @@ export default function DeviFactApp() {
       organizationId: membership?.organization_id || null,
       organizationName: org?.name || "",
       role: membership?.role || "owner",
+      memberships: list.map((m) => ({ organizationId: m.organization_id, name: m.organizations?.name || "", role: m.role })),
       plan: org?.plan || "gratuit",
       billing: org?.billing_cycle || "mensuel",
       paymentStatus: org?.payment_status || "gratuit",
@@ -610,6 +623,21 @@ export default function DeviFactApp() {
     setActiveId(null);
   }
 
+  // Change l'organisation actuellement affichée, parmi celles dont la
+  // personne connectée est membre — jamais de mélange : les données
+  // de l'ancienne organisation sont d'abord entièrement vidées, avant
+  // de charger celles de la nouvelle.
+  async function switchOrganization(organizationId) {
+    const { data: { user } } = await db.auth.getUser();
+    if (!user) return;
+    clearUserData();
+    const profile = await loadProfile(user.id, user.email, organizationId);
+    setActiveOrganization(profile?.organizationId || null);
+    await loadUserData();
+    setAccount(profile);
+    setView("dashboard");
+  }
+
   useEffect(() => {
     (async () => {
       await Promise.all([loadPlans(), loadSiteSettings()]);
@@ -622,8 +650,9 @@ export default function DeviFactApp() {
     const { data: authListener } = db.auth.onAuthStateChange(async (_event, session) => {
       if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
       if (session?.user) {
-        await loadUserData();
         const profile = await loadProfile(session.user.id, session.user.email);
+        setActiveOrganization(profile?.organizationId || null);
+        await loadUserData();
         setAccount(profile);
       } else {
         clearUserData();
@@ -1036,7 +1065,7 @@ export default function DeviFactApp() {
     );
   }
 
-  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), account, onLogout: logout, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
+  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), account, onLogout: logout, onSwitchOrganization: switchOrganization, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
 
   if (view === "clients") {
     return (
@@ -1073,13 +1102,7 @@ export default function DeviFactApp() {
       <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <AccountView
-          account={account}
-          onRefresh={async () => {
-            const { data: { user } } = await db.auth.getUser();
-            if (user) setAccount(await loadProfile(user.id, user.email));
-          }}
-        />
+        <AccountView account={account} />
       </div>
     );
   }
@@ -1551,6 +1574,8 @@ function ResetPasswordScreen({ siteSettings, onDone }) {
 
 function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   const [mode, setMode] = useState(initialMode);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -1597,8 +1622,8 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
         const { data, error: signUpError } = await db.auth.signUp({ email: cleanEmail, password });
         if (signUpError) { setError(signUpError.message); setBusy(false); return; }
         if (data.user) {
-          if (companyName.trim()) {
-            await db.from("profiles").update({ company_name: companyName.trim() }).eq("id", data.user.id);
+          if (companyName.trim() || firstName.trim() || lastName.trim()) {
+            await db.from("profiles").update({ company_name: companyName.trim(), first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", data.user.id);
           }
           // Crée l'organisation du nouvel inscrit, dont il devient
           // aussitôt propriétaire — c'est elle qui portera l'abonnement
@@ -1685,6 +1710,18 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           ) : (
           <div className="space-y-3">
             {mode === "signup" && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Prénom</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={firstName} onChange={(e) => setFirstName(e.target.value)} onKeyDown={onEnterKey} placeholder="Jean" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Nom</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={lastName} onChange={(e) => setLastName(e.target.value)} onKeyDown={onEnterKey} placeholder="Martin" />
+                </div>
+              </div>
+            )}
+            {mode === "signup" && (
               <div>
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-medium" style={{ color: colors.inkSoft }}><Building2 size={13} /> Nom de l'entreprise</label>
                 <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={companyName} onChange={(e) => setCompanyName(e.target.value)} onKeyDown={onEnterKey} placeholder="Martin Rénovation" />
@@ -1748,20 +1785,24 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   );
 }
 
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, account, onLogout, siteSettings, companyProfile, onSetCompanyType }) {
-  const tabs = [
+function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, account, onLogout, onSwitchOrganization, siteSettings, companyProfile, onSetCompanyType }) {
+  const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "clients", label: "Clients", icon: Users },
     { id: "prestations", label: "Bibliothèque", icon: Library },
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
+  ];
+  const rightTabs = [
     { id: "pricing", label: "Abonnement", icon: CreditCard },
     ...(account?.isAdmin ? [{ id: "admin", label: "Admin", icon: Shield }] : []),
+    { id: "account", label: "Mon compte", icon: UserCircle },
   ];
+  const tabs = [...mainTabs, ...rightTabs];
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-3">
+      <div className="flex min-w-0 grow items-center gap-6">
+        <div className="flex shrink-0 items-center gap-3">
           {siteSettings?.logo ? (
             <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
           ) : (
@@ -1769,30 +1810,56 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
           )}
           <span className="df-display text-lg font-semibold tracking-wide text-white">{siteSettings?.name || "DeviFact"}</span>
         </div>
-        <div className="hidden items-center gap-1 lg:flex">
-          {tabs.map(({ id, label, icon: Icon }) =>
-            id === "company" ? (
-              <div key={id} className="relative flex items-center">
-                <select
-                  value=""
-                  onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
-                  onClick={() => setView("company")}
-                  className="df-select appearance-none rounded-lg py-1.5 pl-8 pr-3 text-sm font-medium"
-                  style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)", border: "none" }}
-                  title="Mon entreprise"
-                >
-                  <option value="" disabled hidden style={{ color: colors.ink }}>Entreprise/Particulier</option>
-                  <option value="entreprise" style={{ color: colors.ink }}>Entreprise</option>
-                  <option value="particulier" style={{ color: colors.ink }}>Particulier</option>
-                </select>
-                <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: view === id ? "white" : "rgba(255,255,255,0.65)" }} />
-              </div>
-            ) : (
-              <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
-                <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} />}
-              </button>
-            )
-          )}
+        <div className="hidden min-w-0 grow items-center justify-between gap-3 lg:flex">
+          <div className="flex items-center gap-1">
+            {mainTabs.map(({ id, label, icon: Icon }) =>
+              id === "company" ? (
+                <div key={id} className="relative flex items-center">
+                  <select
+                    value=""
+                    onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
+                    onClick={() => setView("company")}
+                    className="df-select appearance-none rounded-lg py-1.5 pl-8 pr-3 text-sm font-medium"
+                    style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)", border: "none" }}
+                    title="Mon entreprise"
+                  >
+                    <option value="" disabled hidden style={{ color: colors.ink }}>Entreprise/Particulier</option>
+                    <option value="entreprise" style={{ color: colors.ink }}>Entreprise</option>
+                    <option value="particulier" style={{ color: colors.ink }}>Particulier</option>
+                  </select>
+                  <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: view === id ? "white" : "rgba(255,255,255,0.65)" }} />
+                </div>
+              ) : (
+                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                  <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} />}
+                </button>
+              )
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {account?.memberships?.length > 1 && (
+              <select
+                value={account.organizationId || ""}
+                onChange={(e) => onSwitchOrganization(e.target.value)}
+                className="df-select rounded-lg px-2 py-1.5 text-xs font-medium"
+                style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
+                title="Changer d'organisation"
+              >
+                {account.memberships.map((m) => (
+                  <option key={m.organizationId} value={m.organizationId} style={{ color: colors.ink }}>
+                    {m.name || "Organisation"} {m.role !== "owner" ? `(${ROLE_LABELS[m.role] || m.role})` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="flex items-center gap-1">
+              {rightTabs.map(({ id, label, icon: Icon }) => (
+                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                  <Icon size={15} /> {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -1804,12 +1871,6 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, accoun
         </button>
         <button onClick={onNewProforma} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
           <Plus size={15} /> Proforma
-        </button>
-        <button onClick={() => setView("pricing")} className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium" style={{ background: "rgba(255,255,255,0.1)", color: "white" }} title="Voir les forfaits">
-          {planLabel(account?.plan)}
-        </button>
-        <button onClick={() => setView("account")} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.75)" }} title="Mon compte">
-          <UserCircle size={16} /> Mon compte
         </button>
         <button onClick={onLogout} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Se déconnecter">
           <LogOut size={15} />
@@ -2004,35 +2065,32 @@ function PrestationsView({ prestations, saving, onSave, onDelete }) {
 const ROLE_LABELS = { owner: "Propriétaire", editor: "Éditeur", viewer: "Lecteur" };
 const ROLE_COLORS = { owner: colors.brassDark, editor: colors.moss, viewer: colors.slate };
 
-function AccountView({ account, onRefresh }) {
-  const [firstName, setFirstName] = useState(account?.firstName || "");
-  const [lastName, setLastName] = useState(account?.lastName || "");
-  const [savingInfo, setSavingInfo] = useState(false);
-  const [infoSaved, setInfoSaved] = useState(false);
-
+function AccountView({ account }) {
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSaved, setPasswordSaved] = useState(false);
 
-  async function saveInfo() {
-    setSavingInfo(true);
-    setInfoSaved(false);
-    const { error } = await db.from("profiles").update({ first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", account.id);
-    if (error) console.error("Erreur d'enregistrement des informations personnelles", error);
-    else { setInfoSaved(true); await onRefresh(); }
-    setSavingInfo(false);
-  }
-
   async function savePassword() {
     setPasswordError("");
     setPasswordSaved(false);
-    if (newPassword.length < 6) { setPasswordError("Le mot de passe doit faire au moins 6 caractères."); return; }
+    if (!currentPassword) { setPasswordError("Renseigne ton mot de passe actuel."); return; }
+    if (newPassword.length < 6) { setPasswordError("Le nouveau mot de passe doit faire au moins 6 caractères."); return; }
+    if (newPassword !== confirmPassword) { setPasswordError("Les deux saisies du nouveau mot de passe ne correspondent pas."); return; }
+
     setSavingPassword(true);
+    // Vérifie le mot de passe actuel avant tout changement, en tentant
+    // une reconnexion avec — c'est le seul moyen de le confirmer côté
+    // client sans exposer de logique de vérification séparée.
+    const { error: checkError } = await db.auth.signInWithPassword({ email: account.email, password: currentPassword });
+    if (checkError) { setPasswordError("Mot de passe actuel incorrect."); setSavingPassword(false); return; }
+
     const { error } = await db.auth.updateUser({ password: newPassword });
     if (error) setPasswordError(error.message);
-    else { setPasswordSaved(true); setNewPassword(""); }
+    else { setPasswordSaved(true); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); }
     setSavingPassword(false);
   }
 
@@ -2040,37 +2098,44 @@ function AccountView({ account, onRefresh }) {
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         <h1 className="df-display text-2xl font-semibold">Mon compte</h1>
-        <p className="text-sm" style={{ color: colors.inkSoft }}>Tes informations personnelles — distinctes des informations de ton entreprise.</p>
+        <p className="text-sm" style={{ color: colors.inkSoft }}>Tes informations personnelles, saisies à l'inscription.</p>
       </div>
 
       <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
         <span className="df-display mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Informations personnelles</span>
-        <label className="mb-3 block text-xs" style={{ color: colors.inkSoft }}>
-          Email
-          <input disabled className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.paper, color: colors.inkSoft }} value={account?.email || ""} />
-        </label>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="text-xs" style={{ color: colors.inkSoft }}>
             Prénom
-            <input className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={firstName} onChange={(e) => { setFirstName(e.target.value); setInfoSaved(false); }} />
+            <input disabled className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.paper, color: colors.inkSoft }} value={account?.firstName || "—"} />
           </label>
           <label className="text-xs" style={{ color: colors.inkSoft }}>
             Nom
-            <input className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={lastName} onChange={(e) => { setLastName(e.target.value); setInfoSaved(false); }} />
+            <input disabled className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.paper, color: colors.inkSoft }} value={account?.lastName || "—"} />
           </label>
         </div>
-        <div className="mt-3 flex items-center gap-2">
-          <button onClick={saveInfo} disabled={savingInfo} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: savingInfo ? 0.7 : 1 }}>
-            {savingInfo ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Enregistrer
-          </button>
-          {infoSaved && <span className="text-xs" style={{ color: colors.moss }}>Enregistré.</span>}
-        </div>
+        <label className="mt-3 block text-xs" style={{ color: colors.inkSoft }}>
+          Email
+          <input disabled className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.paper, color: colors.inkSoft }} value={account?.email || ""} />
+        </label>
+        <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Ces informations ne sont pas modifiables ici. Contacte le support si besoin de les corriger.</p>
       </div>
 
       <div className="rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
         <span className="df-display mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Changer de mot de passe</span>
+
+        <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Mot de passe actuel</label>
+        <input
+          type="password"
+          autoComplete="current-password"
+          className="df-input mb-3 block w-full max-w-xs rounded-md px-3 py-2 text-sm"
+          style={{ border: `1px solid ${colors.line}` }}
+          value={currentPassword}
+          onChange={(e) => { setCurrentPassword(e.target.value); setPasswordSaved(false); }}
+          placeholder="••••••••"
+        />
+
         <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Nouveau mot de passe</label>
-        <div className="relative max-w-xs">
+        <div className="relative mb-3 max-w-xs">
           <input
             type={showPassword ? "text" : "password"}
             autoComplete="new-password"
@@ -2078,16 +2143,28 @@ function AccountView({ account, onRefresh }) {
             style={{ border: `1px solid ${colors.line}` }}
             value={newPassword}
             onChange={(e) => { setNewPassword(e.target.value); setPasswordSaved(false); }}
-            onKeyDown={(e) => { if (e.key === "Enter") savePassword(); }}
             placeholder="••••••••"
           />
           <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute inset-y-0 right-0 flex w-9 items-center justify-center" style={{ color: colors.inkSoft }} title={showPassword ? "Masquer" : "Afficher"}>
             {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         </div>
-        {passwordError && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{passwordError}</p>}
-        {passwordSaved && <p className="mt-2 text-xs" style={{ color: colors.moss }}>Mot de passe mis à jour.</p>}
-        <button onClick={savePassword} disabled={savingPassword} className="mt-3 flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.ink, color: "white", opacity: savingPassword ? 0.7 : 1 }}>
+
+        <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Confirme le nouveau mot de passe</label>
+        <input
+          type={showPassword ? "text" : "password"}
+          autoComplete="new-password"
+          className="df-input mb-3 block w-full max-w-xs rounded-md px-3 py-2 text-sm"
+          style={{ border: `1px solid ${colors.line}` }}
+          value={confirmPassword}
+          onChange={(e) => { setConfirmPassword(e.target.value); setPasswordSaved(false); }}
+          onKeyDown={(e) => { if (e.key === "Enter") savePassword(); }}
+          placeholder="••••••••"
+        />
+
+        {passwordError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{passwordError}</p>}
+        {passwordSaved && <p className="mb-2 text-xs" style={{ color: colors.moss }}>Mot de passe mis à jour.</p>}
+        <button onClick={savePassword} disabled={savingPassword} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.ink, color: "white", opacity: savingPassword ? 0.7 : 1 }}>
           {savingPassword ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Mettre à jour le mot de passe
         </button>
       </div>
@@ -2097,6 +2174,7 @@ function AccountView({ account, onRefresh }) {
 
 function TeamView({ account }) {
   const [members, setMembers] = useState(null);
+  const [membersError, setMembersError] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
   const [inviting, setInviting] = useState(false);
@@ -2105,13 +2183,19 @@ function TeamView({ account }) {
   const isOwner = account?.role === "owner";
 
   async function loadMembers() {
-    if (!account?.organizationId) return;
+    if (!account?.organizationId) { setMembers([]); return; }
     const { data, error: loadError } = await db
       .from("organization_members")
       .select("id, user_id, role, status, profiles:user_id ( email, company_name )")
       .eq("organization_id", account.organizationId)
       .order("created_at", { ascending: true });
-    if (loadError) { console.error("Erreur de chargement de l'équipe", loadError); return; }
+    if (loadError) {
+      console.error("Erreur de chargement de l'équipe", loadError);
+      setMembersError("Impossible de charger la liste des membres. Réessaie dans un instant.");
+      setMembers([]);
+      return;
+    }
+    setMembersError("");
     setMembers(data || []);
   }
 
@@ -2202,6 +2286,11 @@ function TeamView({ account }) {
 
       {members === null ? (
         <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin" style={{ color: colors.inkSoft }} /></div>
+      ) : membersError ? (
+        <div className="flex flex-col items-center gap-2 rounded-2xl px-6 py-10 text-center" style={{ background: colors.surface, border: `1px dashed ${colors.brick}` }}>
+          <p className="text-sm" style={{ color: colors.brick }}>{membersError}</p>
+          <button onClick={loadMembers} className="text-xs font-medium underline" style={{ color: colors.brassDark }}>Réessayer</button>
+        </div>
       ) : (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           {members.map((m, idx) => (
@@ -2422,7 +2511,7 @@ function PayPalButton({ planId, organizationId, onApproved }) {
       createSubscription: (data, actions) => actions.subscription.create({ plan_id: planId, custom_id: organizationId }),
       onApprove: () => onApproved && onApproved(),
     }).render(containerRef.current);
-  }, [sdkReady, planId, userId]);
+  }, [sdkReady, planId, organizationId]);
 
   if (sdkError) return <p className="text-xs" style={{ color: colors.brick }}>Configuration PayPal manquante côté site (VITE_PAYPAL_CLIENT_ID).</p>;
   return <div ref={containerRef} />;

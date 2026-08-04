@@ -1,49 +1,41 @@
 // storage-adapter.js — pont entre le stockage clé/valeur utilisé par
 // l'application et la table kv_store en base.
 //
-// Depuis le passage au multi-utilisateurs, les données appartiennent
-// à l'ORGANISATION du compte connecté (partagées entre tous ses
-// membres), plus à l'utilisateur individuel — d'où la résolution de
-// l'organisation avant chaque opération.
+// Les données appartiennent à l'ORGANISATION actuellement active,
+// partagées entre tous ses membres. Cette organisation est définie
+// explicitement par l'application (setActiveOrganization) après avoir
+// déterminé, parmi toutes les organisations dont fait partie la
+// personne connectée, laquelle est actuellement affichée — jamais
+// devinée automatiquement ici, pour éviter tout mélange entre
+// plusieurs organisations d'une même personne.
 
 import { db } from './client.js';
 
-let cachedOrgId = null;
-let cachedOrgUserId = null;
+let activeOrgId = null;
 
-async function getOrganizationId() {
-  const { data: { user } } = await db.auth.getUser();
-  if (!user) throw new Error("Non connecté");
+export function setActiveOrganization(orgId) {
+  activeOrgId = orgId;
+}
 
-  if (cachedOrgId && cachedOrgUserId === user.id) return cachedOrgId;
-
-  const { data, error } = await db
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', user.id)
-    .eq('status', 'active')
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (!data) throw new Error("Aucune organisation trouvée pour ce compte");
-
-  cachedOrgId = data.organization_id;
-  cachedOrgUserId = user.id;
-  return cachedOrgId;
+export function getActiveOrganization() {
+  return activeOrgId;
 }
 
 // À appeler à la déconnexion pour ne pas garder l'organisation d'un
 // compte en mémoire au moment où un autre compte se connecte.
 export function clearStorageCache() {
-  cachedOrgId = null;
-  cachedOrgUserId = null;
+  activeOrgId = null;
+}
+
+function requireOrganization() {
+  if (!activeOrgId) throw new Error("Aucune organisation active — reconnecte-toi.");
+  return activeOrgId;
 }
 
 if (typeof window !== "undefined") {
   window.storage = {
     async get(key, shared = false) {
-      const orgId = await getOrganizationId();
+      const orgId = requireOrganization();
       let query = db.from('kv_store').select('value').eq('key', key).eq('shared', shared);
       query = shared ? query : query.eq('organization_id', orgId);
 
@@ -54,7 +46,7 @@ if (typeof window !== "undefined") {
     },
 
     async set(key, value, shared = false) {
-      const orgId = await getOrganizationId();
+      const orgId = requireOrganization();
       const { data: { user } } = await db.auth.getUser();
 
       const { error } = await db.from('kv_store').upsert({
@@ -71,14 +63,14 @@ if (typeof window !== "undefined") {
     },
 
     async delete(key, shared = false) {
-      const orgId = await getOrganizationId();
+      const orgId = requireOrganization();
       const { error } = await db.from('kv_store').delete().eq('organization_id', orgId).eq('key', key).eq('shared', shared);
       if (error) throw error;
       return { key, deleted: true, shared };
     },
 
     async list(prefix = "", shared = false) {
-      const orgId = await getOrganizationId();
+      const orgId = requireOrganization();
       let query = db.from('kv_store').select('key').eq('shared', shared).like('key', `${prefix}%`);
       query = shared ? query : query.eq('organization_id', orgId);
 
