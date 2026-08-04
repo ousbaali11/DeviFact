@@ -3019,7 +3019,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
             </div>
           </div>
 
-          <div className="mb-2 hidden gap-2 px-2 text-xs font-medium sm:flex" style={{ color: colors.inkSoft }}>
+          <div className="mb-2 flex flex-wrap gap-2 px-2 text-xs font-medium" style={{ color: colors.inkSoft }}>
             <span className="grow basis-56">Désignation</span>
             <span className="w-14 text-right">Qté</span>
             <span className="w-20">Unité</span>
