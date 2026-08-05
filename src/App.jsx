@@ -6,7 +6,7 @@ import { clearStorageCache, setActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
-  ArrowRightLeft, Eraser, ChevronUp, ChevronDown, LayoutList, ArrowLeft, TrendingUp, Info,
+  ArrowRightLeft, Eraser, ChevronUp, ChevronDown, LayoutList, ArrowLeft, TrendingUp, Info, Minus,
   Search, FileText, Receipt, Copy, Loader2, Inbox, Check, Users, Building2,
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
@@ -209,10 +209,10 @@ const REVISION_SECTORS = [
 // référence fausse sur un document professionnel.
 const REVISION_COUNTRY_INFO = {
   "🇫🇷 FR": { currency: "EUR", indexHint: "BT01 - Index national du bâtiment tous corps d'état", authority: "INSEE (insee.fr)" },
-  "🇧🇪 BE": { currency: "EUR", indexHint: "Indice matériaux / salaires de la construction", authority: "SPF Économie (economie.fgov.be)" },
-  "🇨🇭 CH": { currency: "CHF", indexHint: "Indice suisse des prix de la construction", authority: "Office fédéral de la statistique (bfs.admin.ch)" },
-  "🇱🇺 LU": { currency: "EUR", indexHint: "Indice des prix de la construction", authority: "STATEC (statistiques.public.lu)" },
-  "🇨🇦 CA": { currency: "CAD", indexHint: "Indices des prix de la construction", authority: "Statistique Canada (statcan.gc.ca)" },
+  "🇧🇪 BE": { currency: "EUR", indexHint: "Indice I 2021 (Mercuriale des matériaux) + indice S (salaires)", authority: "SPF Économie (economie.fgov.be)" },
+  "🇨🇭 CH": { currency: "CHF", indexHint: "Norme SIA 122 (méthode paramétrique) — indices KBOB/OFS", authority: "Office fédéral de la statistique (bfs.admin.ch)" },
+  "🇱🇺 LU": { currency: "EUR", indexHint: "Indice STATEC des prix de la construction (par corps de métier)", authority: "STATEC (statistiques.public.lu) — matériaux : CRTIB (crtib.lu)" },
+  "🇨🇦 CA": { currency: "CAD", indexHint: "IPCB - Indice des prix de la construction de bâtiments", authority: "Statistique Canada (statcan.gc.ca, tableau 18-10-0004-01)" },
   // Pays de l'UE / Espace économique européen : un indice de coût de la
   // construction harmonisé existe pour tous, encadré par un règlement
   // européen (Eurostat, code STS_COPI_m) — chacun a aussi son propre
@@ -258,6 +258,15 @@ const REVISION_COUNTRY_INFO = {
   "🇨🇮 CI": { currency: "XOF", indexHint: "IABTP - Indicateur avancé des BTP", authority: "ANSTAT Côte d'Ivoire (anstat.ci)" },
   "🇨🇲 CM": { currency: "XAF", indexHint: "Indice des prix à la production industrielle (BTP)", authority: "INS Cameroun (ins-cameroun.cm)" },
   "🇸🇳 SN": { currency: "XOF", indexHint: "ICC - Indice du Coût de la Construction / IMC - Indice des Prix des Matériaux", authority: "ANSD Sénégal (ansd.sn)" },
+  // Pays où seul l'institut national a pu être confirmé (pas de nom
+  // d'indice BTP précis trouvé) — mieux vaut ce repère partiel
+  // qu'une référence générique, mais moins précis que le Sénégal ou
+  // la Côte d'Ivoire.
+  "🇲🇱 ML": { currency: "XOF", indexHint: "Indice des prix de la construction (nom exact à vérifier)", authority: "INSTAT Mali" },
+  "🇧🇯 BJ": { currency: "XOF", indexHint: "Indice des prix de la construction (nom exact à vérifier)", authority: "INSAE Bénin (instad.bj)" },
+  "🇧🇫 BF": { currency: "XOF", indexHint: "Indice des prix de la construction (nom exact à vérifier)", authority: "INSD Burkina Faso" },
+  "🇹🇩 TD": { currency: "XAF", indexHint: "Indice des prix de la construction (nom exact à vérifier)", authority: "INSEED Tchad" },
+  "🇲🇬 MG": { currency: "MGA", indexHint: "Indice des prix de la construction (nom exact à vérifier)", authority: "INSTAT Madagascar" },
 };
 function getRevisionCountryInfo(country) {
   return REVISION_COUNTRY_INFO[country] || { currency: null, indexHint: "", authority: "l'organisme national de statistiques de ton pays" };
@@ -295,27 +304,34 @@ function getRevisionIndexOptions(country) {
   return REVISION_INDEX_OPTIONS[country] || null;
 }
 
+// Un "terme" représente un indice de la formule (symbole + poids +
+// valeur de base) — une formule à 1 seul terme donne l'ancien modèle
+// simple, une formule à 5 ou 7 termes donne exactement ce qu'on voit
+// dans les vrais marchés publics marocains (chaque contrat définit
+// ses propres symboles et poids dans son CPS).
+function emptyRevisionTerm() {
+  return { id: nextId("tm"), symbole: "", poids: "", indexBase: "" };
+}
+
 function emptyRevisionSector(sector, country) {
   const info = getRevisionCountryInfo(country);
   const today = new Date().toISOString().slice(0, 10);
   return {
     id: nextId("rs"),
     sector: sector || REVISION_SECTORS[0],
-    montantInitialHT: "",
-    indexName: info.indexHint || "",
-    indexInitial: "",
-    dateInitiale: today,
-    indexActuel: "",
-    dateActuelle: today,
     coeffFixe: 0.15,
-    coeffVariable: 0.85,
+    terms: [{ ...emptyRevisionTerm(), symbole: info.indexHint || "", poids: 0.85 }],
+    dateBase: today,
+    montantInitialHT: "",
+    dateActuelle: today,
+    valeursActuelles: {},
     useDecomptes: false,
     decomptes: [],
   };
 }
 
 function emptyDecompte() {
-  return { id: nextId("dc"), label: "", dateDecompte: new Date().toISOString().slice(0, 10), montantHT: "", indexValeur: "", isFinal: false };
+  return { id: nextId("dc"), label: "", dateDecompte: new Date().toISOString().slice(0, 10), jours: "", montantHT: "", valeurs: {}, isFinal: false };
 }
 
 function newRevisionDocument(sector, country, documents) {
@@ -327,6 +343,8 @@ function newRevisionDocument(sector, country, documents) {
     issueDate: new Date().toISOString().slice(0, 10),
     currency: info.currency || "EUR",
     country,
+    marcheNumero: "",
+    objet: "",
     dateDemarrage: "",
     sectors: [emptyRevisionSector(sector, country)],
     showTotal: false,
@@ -341,23 +359,37 @@ function newRevisionDocument(sector, country, documents) {
 }
 
 // Renvoie toujours un tableau de secteurs — recrée ce tableau à la
-// volée pour un document créé avant ce changement (un seul secteur,
-// champs directement sur le document), sans jamais rien casser de
-// ce qui existe déjà.
+// volée pour un document créé avant ce changement (ancien modèle à
+// un seul indice), en le transformant en formule à 1 terme, sans
+// jamais rien casser de ce qui existe déjà.
 function getRevisionSectors(doc) {
-  if (Array.isArray(doc.sectors)) return doc.sectors;
+  if (Array.isArray(doc.sectors)) {
+    // Migration silencieuse : d'anciens secteurs (juste après le
+    // passage aux décomptes, avant les termes multiples) utilisaient
+    // encore indexName/indexInitial/indexActuel/coeffVariable.
+    return doc.sectors.map((s) => {
+      if (Array.isArray(s.terms)) return s;
+      const legacyTermId = "legacy-term";
+      return {
+        ...s,
+        terms: [{ id: legacyTermId, symbole: s.indexName || "", poids: s.coeffVariable, indexBase: s.indexInitial }],
+        dateBase: s.dateInitiale || doc.issueDate,
+        valeursActuelles: { [legacyTermId]: s.indexActuel },
+        decomptes: (s.decomptes || []).map((d) => ({ ...d, valeurs: { [legacyTermId]: d.indexValeur } })),
+      };
+    });
+  }
   if (doc.sector !== undefined) {
+    const legacyTermId = "legacy-term";
     return [{
       id: "legacy",
       sector: doc.sector,
       montantInitialHT: doc.montantInitialHT,
-      indexName: doc.indexName,
-      indexInitial: doc.indexInitial,
-      dateInitiale: doc.dateInitiale || doc.issueDate,
-      indexActuel: doc.indexActuel,
-      dateActuelle: doc.dateActuelle || doc.issueDate,
       coeffFixe: doc.coeffFixe,
-      coeffVariable: doc.coeffVariable,
+      terms: [{ id: legacyTermId, symbole: doc.indexName || "", poids: doc.coeffVariable, indexBase: doc.indexInitial }],
+      dateBase: doc.dateInitiale || doc.issueDate,
+      dateActuelle: doc.dateActuelle || doc.issueDate,
+      valeursActuelles: { [legacyTermId]: doc.indexActuel },
       useDecomptes: false,
       decomptes: [],
     }];
@@ -374,20 +406,32 @@ function getSectorMontantInitial(line) {
   return Number(line?.montantInitialHT) || 0;
 }
 
-// Calcule la révision d'un seul décompte, avec l'indice d'origine
-// et les coefficients du secteur auquel il appartient (chaque
-// décompte a sa propre date et sa propre valeur d'indice — c'est
-// justement ce qui permet de suivre un chantier mois par mois).
-function computeDecompteRevision(sector, decompte) {
-  const c0 = Number(decompte?.montantHT) || 0;
-  const i0 = Number(sector?.indexInitial) || 0;
-  const iN = Number(decompte?.indexValeur) || 0;
-  const a = Number(sector?.coeffFixe);
-  const b = Number(sector?.coeffVariable);
-  if (!c0 || !i0 || !iN) return { valid: false, montantRevise: 0, ecartMontant: 0, coefficient: 0 };
-  const coefficient = a + b * (iN / i0);
+// Cœur du calcul, valable pour 1 terme (formule simple, ex: Maroc
+// BAT6) comme pour 7 termes (formule composite négociée au contrat) :
+// coefficient = partie fixe + somme(poids du terme × valeur/valeur de base)
+function computeRevisionAmount(sector, montantHT, valeurs) {
+  const c0 = Number(montantHT) || 0;
+  const terms = Array.isArray(sector?.terms) ? sector.terms : [];
+  if (!c0 || !terms.length) return { valid: false, montantRevise: 0, ecartMontant: 0, coefficient: 0 };
+  const a = Number(sector.coeffFixe) || 0;
+  let variable = 0;
+  for (const t of terms) {
+    const base = Number(t.indexBase);
+    const val = Number(valeurs?.[t.id]);
+    if (!base || !val) return { valid: false, montantRevise: 0, ecartMontant: 0, coefficient: 0 };
+    variable += (Number(t.poids) || 0) * (val / base);
+  }
+  const coefficient = a + variable;
   const montantRevise = c0 * coefficient;
   return { valid: true, montantRevise, ecartMontant: montantRevise - c0, coefficient };
+}
+
+// Calcule la révision d'un seul décompte, avec les indices de base
+// du secteur auquel il appartient (chaque décompte a sa propre date
+// et ses propres valeurs d'indices — c'est ce qui permet de suivre
+// un chantier mois par mois, comme sur les vrais décomptes DP1, DP2...).
+function computeDecompteRevision(sector, decompte) {
+  return computeRevisionAmount(sector, decompte?.montantHT, decompte?.valeurs);
 }
 
 function computeRevisionLine(line) {
@@ -401,17 +445,10 @@ function computeRevisionLine(line) {
     const ecartPct = montantInitial ? (ecartMontant / montantInitial) * 100 : 0;
     return { valid: true, montantRevise, ecartMontant, ecartPct, coefficient: 0 };
   }
+  const result = computeRevisionAmount(line, line?.montantInitialHT, line?.valeursActuelles);
   const c0 = Number(line?.montantInitialHT) || 0;
-  const i0 = Number(line?.indexInitial) || 0;
-  const iN = Number(line?.indexActuel) || 0;
-  const a = Number(line?.coeffFixe);
-  const b = Number(line?.coeffVariable);
-  if (!c0 || !i0 || !iN) return { valid: false, montantRevise: 0, ecartMontant: 0, ecartPct: 0, coefficient: 0 };
-  const coefficient = a + b * (iN / i0);
-  const montantRevise = c0 * coefficient;
-  const ecartMontant = montantRevise - c0;
-  const ecartPct = c0 ? (ecartMontant / c0) * 100 : 0;
-  return { valid: true, montantRevise, ecartMontant, ecartPct, coefficient };
+  const ecartPct = result.valid && c0 ? (result.ecartMontant / c0) * 100 : 0;
+  return { ...result, ecartPct };
 }
 
 // Total combiné de tous les secteurs d'un document — c'est cette
@@ -2304,9 +2341,9 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: "14pt" }}>RÉVISION DE PRIX N° :{doc.docNumber}</div>
-          <div style={{ color: inkSoft, marginTop: "4px" }}>Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
-          <div style={{ color: inkSoft }}>{sectorLines.length} secteur{sectorLines.length > 1 ? "s" : ""}</div>
+          <div style={{ fontWeight: 700, fontSize: "14pt" }}>NOTE DE CALCUL DE LA RÉVISION DES PRIX</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>N° : {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          {doc.marcheNumero && <div style={{ color: inkSoft }}>Marché N° : {doc.marcheNumero}</div>}
         </div>
         {doc.company.logo ? (
           <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} />
@@ -2315,17 +2352,12 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
         )}
       </div>
 
-      <div style={{ display: "flex", gap: "16px", marginTop: "20px", position: "relative", zIndex: 1 }}>
-        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
-          <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
-          {doc.company.address && <div>{doc.company.address}</div>}
-          {doc.company.email && <div>{doc.company.email}</div>}
-        </div>
-        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
-          {doc.client.name && <div style={{ fontWeight: 600 }}>{doc.client.name}</div>}
-          {doc.client.address && <div>{doc.client.address}</div>}
-          {doc.client.email && <div>{doc.client.email}</div>}
-        </div>
+      {doc.objet && (
+        <div style={{ marginTop: "14px", fontSize: "9.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{doc.objet}</div>
+      )}
+
+      <div style={{ marginTop: "16px", background: box, borderRadius: "4px", padding: "10px 14px", position: "relative", zIndex: 1 }}>
+        <div style={{ fontWeight: 700 }}>ste : {doc.company.name || "—"}</div>
       </div>
 
       <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
@@ -2334,38 +2366,38 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
           <thead>
             <tr style={{ borderBottom: `2px solid ${ink}` }}>
               <th style={{ padding: "6px 4px", textAlign: "left" }}>Secteur</th>
-              <th style={{ padding: "6px 4px", textAlign: "left" }}>Indice</th>
+              <th style={{ padding: "6px 4px", textAlign: "left" }}>Termes (symbole : base → valeur)</th>
               <th style={{ padding: "6px 4px", textAlign: "right" }}>Montant initial</th>
-              <th style={{ padding: "6px 4px", textAlign: "right" }}>I0 → In</th>
-              <th style={{ padding: "6px 4px", textAlign: "right" }}>Dates</th>
+              <th style={{ padding: "6px 4px", textAlign: "right" }}>Date</th>
               <th style={{ padding: "6px 4px", textAlign: "right" }}>Montant révisé</th>
             </tr>
           </thead>
           <tbody>
             {sectorLines.flatMap((l, idx) => {
+              const terms = l.terms || [];
               if (l.useDecomptes && Array.isArray(l.decomptes) && l.decomptes.length) {
-                return l.decomptes.map((d, dIdx) => {
+                return l.decomptes.filter((d) => !d.isBlank).map((d, dIdx) => {
                   const dr = computeDecompteRevision(l, d);
+                  const termsSummary = terms.map((t) => `${t.symbole || "?"} : ${t.indexBase || "—"} → ${d.valeurs?.[t.id] || "—"}`).join(" · ");
                   return (
                     <tr key={`${l.id || idx}-${d.id || dIdx}`} style={{ borderBottom: `1px solid ${line}` }}>
                       <td style={{ padding: "6px 4px" }}>{l.sector}{d.label ? ` — ${d.label}` : ` — décompte ${dIdx + 1}`}</td>
-                      <td style={{ padding: "6px 4px", fontSize: "8pt", color: inkSoft }}>{l.indexName}</td>
+                      <td style={{ padding: "6px 4px", fontSize: "7.5pt", color: inkSoft }}>{termsSummary}</td>
                       <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(d.montantHT) || 0, doc.currency)}</td>
-                      <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontSize: "8pt" }}>{l.indexInitial} → {d.indexValeur}</td>
-                      <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{l.dateInitiale ? new Date(l.dateInitiale).toLocaleDateString("fr-FR") : "—"} → {d.dateDecompte ? new Date(d.dateDecompte).toLocaleDateString("fr-FR") : "—"}</td>
+                      <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{d.dateDecompte ? new Date(d.dateDecompte).toLocaleDateString("fr-FR") : "—"}</td>
                       <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{dr.valid ? formatMoney(dr.montantRevise, doc.currency) : "—"}</td>
                     </tr>
                   );
                 });
               }
               const r = computeRevisionLine(l);
+              const termsSummary = terms.map((t) => `${t.symbole || "?"} : ${t.indexBase || "—"} → ${l.valeursActuelles?.[t.id] || "—"}`).join(" · ");
               return [(
                 <tr key={l.id || idx} style={{ borderBottom: `1px solid ${line}` }}>
                   <td style={{ padding: "6px 4px" }}>{l.sector}</td>
-                  <td style={{ padding: "6px 4px", fontSize: "8pt", color: inkSoft }}>{l.indexName}</td>
+                  <td style={{ padding: "6px 4px", fontSize: "7.5pt", color: inkSoft }}>{termsSummary}</td>
                   <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(l.montantInitialHT) || 0, doc.currency)}</td>
-                  <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontSize: "8pt" }}>{l.indexInitial} → {l.indexActuel}</td>
-                  <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{l.dateInitiale ? new Date(l.dateInitiale).toLocaleDateString("fr-FR") : "—"} → {l.dateActuelle ? new Date(l.dateActuelle).toLocaleDateString("fr-FR") : "—"}</td>
+                  <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{l.dateActuelle ? new Date(l.dateActuelle).toLocaleDateString("fr-FR") : "—"}</td>
                   <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{r.valid ? formatMoney(r.montantRevise, doc.currency) : "—"}</td>
                 </tr>
               )];
@@ -2435,6 +2467,10 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     const sec = sectorLines.find((l) => l.id === sectorId);
     patchSector(sectorId, { decomptes: [...(sec?.decomptes || []), emptyDecompte()] });
   }
+  function addBlankRow(sectorId) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    patchSector(sectorId, { decomptes: [...(sec?.decomptes || []), { id: nextId("dc"), isBlank: true }] });
+  }
   function patchDecompte(sectorId, decompteId, p) {
     const sec = sectorLines.find((l) => l.id === sectorId);
     patchSector(sectorId, { decomptes: (sec?.decomptes || []).map((d) => (d.id === decompteId ? { ...d, ...p } : d)) });
@@ -2442,6 +2478,32 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   function removeDecompte(sectorId, decompteId) {
     const sec = sectorLines.find((l) => l.id === sectorId);
     patchSector(sectorId, { decomptes: (sec?.decomptes || []).filter((d) => d.id !== decompteId) });
+  }
+  function addTerm(sectorId) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    patchSector(sectorId, { terms: [...(sec?.terms || []), emptyRevisionTerm()] });
+  }
+  function patchTerm(sectorId, termId, p) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    patchSector(sectorId, { terms: (sec?.terms || []).map((t) => (t.id === termId ? { ...t, ...p } : t)) });
+  }
+  function removeTerm(sectorId, termId) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    if ((sec?.terms || []).length <= 1) return;
+    patchSector(sectorId, {
+      terms: sec.terms.filter((t) => t.id !== termId),
+      valeursActuelles: Object.fromEntries(Object.entries(sec.valeursActuelles || {}).filter(([k]) => k !== termId)),
+      decomptes: (sec.decomptes || []).map((d) => ({ ...d, valeurs: Object.fromEntries(Object.entries(d.valeurs || {}).filter(([k]) => k !== termId)) })),
+    });
+  }
+  function patchValeurActuelle(sectorId, termId, value) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    patchSector(sectorId, { valeursActuelles: { ...(sec?.valeursActuelles || {}), [termId]: value } });
+  }
+  function patchDecompteValeur(sectorId, decompteId, termId, value) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
+    patchDecompte(sectorId, decompteId, { valeurs: { ...(d?.valeurs || {}), [termId]: value } });
   }
 
   async function downloadPdf() {
@@ -2486,46 +2548,139 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   }
 
   function exportExcel() {
+    if (localDoc.country === "🇲🇦 MA") return exportExcelMaroc();
     const wb = XLSX.utils.book_new();
     const rows = [];
     rows.push(["RÉVISION DE PRIX", localDoc.docNumber]);
     rows.push(["Date d'émission", frLong(localDoc.issueDate)]);
+    rows.push(["Marché N°", localDoc.marcheNumero || ""]);
+    rows.push(["Objet", localDoc.objet || ""]);
+    rows.push(["Entreprise", localDoc.company.name]);
     rows.push(["Pays", localDoc.country || ""]);
     rows.push(["Devise", localDoc.currency || "EUR"]);
     rows.push([]);
-    rows.push(["Émetteur", localDoc.company.name]);
-    rows.push(["Client", localDoc.client.name]);
-    rows.push([]);
-    rows.push(["Secteur", "Indice", "Montant initial HT", "Date indice initial", "I0", "Date indice actuel", "In", "Coeff. fixe (a)", "Coeff. variable (b)", "Montant révisé HT", "Écart"]);
+    rows.push(["Secteur", "Termes de la formule (symbole = valeur/base)", "Montant initial HT", "Montant révisé HT", "Écart", "Écart %"]);
     sectorLines.forEach((l) => {
+      const termsLabel = (l.terms || []).map((t) => `${t.symbole || "?"} (poids ${t.poids})`).join(", ");
       if (l.useDecomptes && Array.isArray(l.decomptes) && l.decomptes.length) {
         l.decomptes.forEach((d, dIdx) => {
+          if (d.isBlank) { rows.push([]); return; }
           const dr = computeDecompteRevision(l, d);
           rows.push([
-            `${l.sector} — ${d.label || `décompte ${dIdx + 1}`}`, l.indexName, Number(d.montantHT) || 0,
-            l.dateInitiale ? frLong(l.dateInitiale) : "", Number(l.indexInitial) || 0,
-            d.dateDecompte ? frLong(d.dateDecompte) : "", Number(d.indexValeur) || 0,
-            Number(l.coeffFixe) || 0, Number(l.coeffVariable) || 0,
+            `${l.sector} — ${d.label || `décompte ${dIdx + 1}`}`, termsLabel, Number(d.montantHT) || 0,
             dr.valid ? Number(dr.montantRevise.toFixed(2)) : "", dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "",
+            dr.valid && d.montantHT ? `${((dr.ecartMontant / Number(d.montantHT)) * 100).toFixed(2)}%` : "",
           ]);
         });
         return;
       }
       const r = computeRevisionLine(l);
       rows.push([
-        l.sector, l.indexName, Number(l.montantInitialHT) || 0,
-        l.dateInitiale ? frLong(l.dateInitiale) : "", Number(l.indexInitial) || 0,
-        l.dateActuelle ? frLong(l.dateActuelle) : "", Number(l.indexActuel) || 0,
-        Number(l.coeffFixe) || 0, Number(l.coeffVariable) || 0,
+        l.sector, termsLabel, Number(l.montantInitialHT) || 0,
         r.valid ? Number(r.montantRevise.toFixed(2)) : "", r.valid ? Number(r.ecartMontant.toFixed(2)) : "",
+        r.valid ? `${r.ecartPct.toFixed(2)}%` : "",
       ]);
     });
     rows.push([]);
-    rows.push(["", "", "", "", "", "", "", "", "TOTAL", Number(total.montantRevise.toFixed(2)), Number(total.ecartMontant.toFixed(2))]);
+    rows.push(["", "", "TOTAL", Number(total.montantRevise.toFixed(2)), Number(total.ecartMontant.toFixed(2)), total.valid ? `${total.ecartPct.toFixed(2)}%` : ""]);
     if (localDoc.notes) { rows.push([]); rows.push(["Note", localDoc.notes]); }
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{ wch: 24 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 12 }];
+    ws["!cols"] = [{ wch: 28 }, { wch: 36 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, ws, "Révision");
+    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  }
+
+  // Export au format exact des notes de calcul marocaines (marchés
+  // publics) — une feuille par secteur, colonnes dynamiques selon le
+  // nombre de termes de la formule, reproduisant la mise en page de
+  // ce type de document (index de base, formule détaillée, décomptes,
+  // total HT/TVA/TTC, cadres de signature).
+  function exportExcelMaroc() {
+    const wb = XLSX.utils.book_new();
+    sectorLines.forEach((sec) => {
+      const terms = sec.terms || [];
+      const rows = [];
+      rows.push(["NOTE DE CALCUL DE LA REVISION DES PRIX"]);
+      rows.push([]);
+      rows.push([`MARCHE N°: ${localDoc.marcheNumero || ""}`]);
+      rows.push([]);
+      rows.push([localDoc.objet || ""]);
+      rows.push([]);
+      rows.push([`ste : ${localDoc.company.name || ""}`]);
+      rows.push([]);
+      rows.push(["Date de soumission :", "", sec.dateBase ? fr(sec.dateBase) : ""]);
+      rows.push(["Symbole d'index:", "", ...terms.map((t) => t.symbole || "")]);
+      rows.push(["Index de base:", "", ...terms.map((t) => Number(t.indexBase) || "")]);
+      if (localDoc.dateDemarrage) rows.push(["Ordre de service de commencer des travaux:", "", fr(localDoc.dateDemarrage)]);
+      const a = Number(sec.coeffFixe) || 0;
+      const formuleStr = `P/P0 = ${a} ${terms.map((t) => ` + ${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`).join("")}`;
+      rows.push(["Formule de révision des prix", "", formuleStr]);
+      rows.push([]);
+
+      // En-têtes de colonnes : Nb jours, Situation, un couple [index,
+      // valeur pondérée] par terme, puis P/P0, %, montants, formule, résultat.
+      const headers = ["N.B jours", "Situation"];
+      terms.forEach((t) => headers.push(`index "${t.symbole || "?"}"`));
+      terms.forEach((t) => headers.push(`${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`));
+      headers.push("P/P0", "%", "MT DE DECOMPTE", "MT A REVISER", "Formule", "MT DE LA REVISION");
+      rows.push(headers);
+
+      let totalHT = 0;
+      (sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d) => {
+        if (d.isBlank) { rows.push([]); return; }
+        const dr = computeDecompteRevision(sec, d);
+        const row = [Number(d.jours) || "", d.dateDecompte ? fr(d.dateDecompte) : (d.label || "")];
+        terms.forEach((t) => row.push(Number(d.valeurs?.[t.id]) || ""));
+        terms.forEach((t) => {
+          const base = Number(t.indexBase), val = Number(d.valeurs?.[t.id]);
+          row.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
+        });
+        row.push(dr.valid ? Number(dr.coefficient.toFixed(4)) : "");
+        row.push(dr.valid ? Number((dr.coefficient - 1).toFixed(4)) : "");
+        row.push(Number(d.montantHT) || "");
+        row.push(Number(d.montantHT) || "");
+        row.push(dr.valid ? `x ${dr.coefficient.toFixed(4)}${d.jours ? ` x ${d.jours}` : ""}` : "");
+        row.push(dr.valid ? Number(dr.montantRevise.toFixed(2)) : "");
+        rows.push(row);
+        if (dr.valid) totalHT += dr.montantRevise;
+      });
+
+      // Si le secteur n'utilise pas les décomptes multiples, on
+      // ajoute quand même une seule ligne de résultat.
+      if (!sec.useDecomptes) {
+        const r = computeRevisionLine(sec);
+        const row = ["", sec.dateActuelle ? fr(sec.dateActuelle) : ""];
+        terms.forEach((t) => row.push(Number(sec.valeursActuelles?.[t.id]) || ""));
+        terms.forEach((t) => {
+          const base = Number(t.indexBase), val = Number(sec.valeursActuelles?.[t.id]);
+          row.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
+        });
+        row.push(r.valid ? Number(r.coefficient.toFixed(4)) : "");
+        row.push(r.valid ? Number((r.coefficient - 1).toFixed(4)) : "");
+        row.push(Number(sec.montantInitialHT) || "");
+        row.push(Number(sec.montantInitialHT) || "");
+        row.push("");
+        row.push(r.valid ? Number(r.montantRevise.toFixed(2)) : "");
+        rows.push(row);
+        if (r.valid) totalHT += r.montantRevise;
+      }
+
+      const tvaRate = 0.20;
+      rows.push([]);
+      rows.push(["", "", "", "", "", "", "", "", "Total de la révision des prix HTVA", "", Number(totalHT.toFixed(2))]);
+      rows.push(["", "", "", "", "", "", "", "", `TVA ${Math.round(tvaRate * 100)}%`, "", Number((totalHT * tvaRate).toFixed(2))]);
+      rows.push(["", "", "", "", "", "", "", "", "Total de la révision des prix TTC", "", Number((totalHT * (1 + tvaRate)).toFixed(2))]);
+      rows.push([]);
+      rows.push(["ENTREPRISE", "", "", "", "", "", "", "", "SERVICE / MAÎTRE D'OUVRAGE"]);
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 10 }, { wch: 16 }, ...terms.map(() => ({ wch: 10 })), ...terms.map(() => ({ wch: 12 })), { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }];
+      // Nom de feuille limité à 31 caractères (limite Excel), sans caractères interdits.
+      const sheetName = (sec.sector || "Secteur").replace(/[\\/*?:[\]]/g, "").slice(0, 31) || `Secteur ${wb.SheetNames.length + 1}`;
+      let uniqueName = sheetName, n = 2;
+      while (wb.SheetNames.includes(uniqueName)) { uniqueName = `${sheetName.slice(0, 28)} (${n})`; n++; }
+      XLSX.utils.book_append_sheet(wb, ws, uniqueName);
+    });
     XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
   }
 
@@ -2567,16 +2722,19 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
           </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Émetteur</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom de l'entreprise" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
-              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Marché N°</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex: TA 23/2020" value={localDoc.marcheNumero || ""} onChange={(e) => patch({ marcheNumero: e.target.value })} />
             </div>
-            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du client" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
-              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom de l'entreprise" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
             </div>
+          </div>
+
+          <div className="mb-6">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet (description du marché)</label>
+            <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} placeholder="ex: Travaux d'assainissement liquide du centre..." value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
           </div>
 
           <div className="mb-6 max-w-xs">
@@ -2610,64 +2768,111 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                     <button onClick={() => patchSector(sec.id, { useDecomptes: true, decomptes: sec.decomptes?.length ? sec.decomptes : [emptyDecompte()] })} className="grow rounded-md py-1.5 text-xs font-medium" style={{ background: sec.useDecomptes ? colors.ink : "transparent", color: sec.useDecomptes ? "white" : colors.inkSoft }}>Plusieurs décomptes (chantier en plusieurs paiements)</button>
                   </div>
 
+                  <div className="mb-3">
+                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date de base (soumission / origine)</label>
+                    <input type="date" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateBase} onChange={(e) => patchSector(sec.id, { dateBase: e.target.value })} />
+                  </div>
+
                   {!sec.useDecomptes && (
                     <div className="mb-3">
                       <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant initial HT (marché d'origine)</label>
                       <input type="number" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.montantInitialHT} onChange={(e) => patchSector(sec.id, { montantInitialHT: e.target.value })} placeholder="0" />
                     </div>
                   )}
+
                   <div className="mb-3">
-                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Formule officielle de révision</label>
-                    {(() => {
-                      const options = getRevisionIndexOptions(localDoc.country);
-                      if (!options) {
-                        return <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexName} onChange={(e) => patchSector(sec.id, { indexName: e.target.value })} />;
-                      }
-                      const isCustom = !options.includes(sec.indexName);
-                      return (
-                        <>
-                          <select
-                            className="df-select w-full rounded-md px-3 py-2 text-sm"
-                            style={{ border: `1px solid ${colors.line}` }}
-                            value={isCustom ? REVISION_OTHER_OPTION : sec.indexName}
-                            onChange={(e) => patchSector(sec.id, { indexName: e.target.value === REVISION_OTHER_OPTION ? "" : e.target.value })}
-                          >
-                            {options.map((o) => <option key={o} value={o}>{o}</option>)}
-                            <option value={REVISION_OTHER_OPTION}>{REVISION_OTHER_OPTION}</option>
-                          </select>
-                          {isCustom && (
-                            <input className="df-input mt-2 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexName} onChange={(e) => patchSector(sec.id, { indexName: e.target.value })} placeholder="Précise le nom de l'indice" />
+                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie fixe non révisable (a)</label>
+                    <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full max-w-[120px] rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.coeffFixe} onChange={(e) => patchSector(sec.id, { coeffFixe: e.target.value })} />
+                  </div>
+
+                  <div className="mb-3 rounded-lg p-3" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="text-xs font-semibold" style={{ color: colors.slate }}>Termes de la formule (un par indice utilisé)</label>
+                      <button onClick={() => addTerm(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Terme</button>
+                    </div>
+                    <div className="space-y-2">
+                      {(sec.terms || []).map((t, tIdx) => (
+                        <div key={t.id || tIdx} className="rounded-md p-2" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+                          <div className="mb-2 flex items-center gap-2">
+                            {(() => {
+                              const options = getRevisionIndexOptions(localDoc.country);
+                              if (!options) {
+                                return <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Symbole (ex: S, ChTp, REP...)" value={t.symbole} onChange={(e) => patchTerm(sec.id, t.id, { symbole: e.target.value })} />;
+                              }
+                              const isCustom = !options.includes(t.symbole);
+                              return (
+                                <select className="df-select grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={isCustom ? REVISION_OTHER_OPTION : t.symbole} onChange={(e) => patchTerm(sec.id, t.id, { symbole: e.target.value === REVISION_OTHER_OPTION ? "" : e.target.value })}>
+                                  {options.map((o) => <option key={o} value={o}>{o}</option>)}
+                                  <option value={REVISION_OTHER_OPTION}>{REVISION_OTHER_OPTION}</option>
+                                </select>
+                              );
+                            })()}
+                            {(sec.terms || []).length > 1 && (
+                              <button onClick={() => removeTerm(sec.id, t.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                            )}
+                          </div>
+                          {getRevisionIndexOptions(localDoc.country) && !getRevisionIndexOptions(localDoc.country).includes(t.symbole) && (
+                            <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Précise le symbole (ex: S, ChTp...)" value={t.symbole} onChange={(e) => patchTerm(sec.id, t.id, { symbole: e.target.value })} />
                           )}
-                        </>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Poids dans la formule</label>
+                              <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.poids} onChange={(e) => patchTerm(sec.id, t.id, { poids: e.target.value })} />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Valeur de base</label>
+                              <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.indexBase} onChange={(e) => patchTerm(sec.id, t.id, { indexBase: e.target.value })} />
+                            </div>
+                          </div>
+                          {!sec.useDecomptes && (
+                            <div className="mt-2">
+                              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Valeur actuelle</label>
+                              <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={sec.valeursActuelles?.[t.id] || ""} onChange={(e) => patchValeurActuelle(sec.id, t.id, e.target.value)} />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {(() => {
+                      const a = Number(sec.coeffFixe) || 0;
+                      const sommePoids = (sec.terms || []).reduce((s, t) => s + (Number(t.poids) || 0), 0);
+                      const total = a + sommePoids;
+                      const ok = Math.abs(total - 1) < 0.005;
+                      return (
+                        <p className="mt-2 text-xs" style={{ color: ok ? colors.moss : colors.brick }}>
+                          {a.toFixed(2)} + {sommePoids.toFixed(2)} = {total.toFixed(2)} {ok ? "✓" : "— devrait faire 1,00 au total"}
+                        </p>
                       );
                     })()}
-                    <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Valeurs à récupérer auprès de {getRevisionCountryInfo(localDoc.country).authority}, ou dans ton contrat.</p>
+                    <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Valeurs à récupérer auprès de {getRevisionCountryInfo(localDoc.country).authority}, ou dans ton contrat (CPS).</p>
                   </div>
-                  <div className={sec.useDecomptes ? "mb-3" : "mb-3 grid grid-cols-2 gap-3"}>
-                    <div>
-                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à l'origine (I0){sec.useDecomptes && " — commun à tous les décomptes"}</label>
-                      <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexInitial} onChange={(e) => patchSector(sec.id, { indexInitial: e.target.value })} />
-                      <label className="mb-1 mt-2 block text-xs" style={{ color: colors.inkSoft }}>Date de cet indice</label>
-                      <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateInitiale} onChange={(e) => patchSector(sec.id, { dateInitiale: e.target.value })} />
+
+                  {!sec.useDecomptes && (
+                    <div className="mb-3 max-w-xs">
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date de cette révision</label>
+                      <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateActuelle} onChange={(e) => patchSector(sec.id, { dateActuelle: e.target.value })} />
                     </div>
-                    {!sec.useDecomptes && (
-                      <div>
-                        <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice actuel (In)</label>
-                        <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.indexActuel} onChange={(e) => patchSector(sec.id, { indexActuel: e.target.value })} />
-                        <label className="mb-1 mt-2 block text-xs" style={{ color: colors.inkSoft }}>Date de cet indice</label>
-                        <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateActuelle} onChange={(e) => patchSector(sec.id, { dateActuelle: e.target.value })} />
-                      </div>
-                    )}
-                  </div>
+                  )}
 
                   {sec.useDecomptes && (
                     <div className="mb-3">
                       <div className="mb-2 flex items-center justify-between">
                         <label className="block text-xs" style={{ color: colors.inkSoft }}>Décomptes (un par période de paiement)</label>
-                        <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => addBlankRow(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}><Minus size={12} /> Ligne vide</button>
+                          <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
+                        </div>
                       </div>
                       <div className="space-y-2">
                         {(sec.decomptes || []).map((d, dIdx) => {
+                          if (d.isBlank) {
+                            return (
+                              <div key={d.id || dIdx} className="flex items-center justify-between gap-2 rounded-lg px-3 py-2" style={{ background: "repeating-linear-gradient(45deg, transparent, transparent 6px, " + colors.line + "40 6px, " + colors.line + "40 12px)", border: `1px dashed ${colors.line}` }}>
+                                <span className="text-xs italic" style={{ color: colors.inkSoft }}>— ligne vide (séparateur dans l'Excel) —</span>
+                                <button onClick={() => removeDecompte(sec.id, d.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                              </div>
+                            );
+                          }
                           const dr = computeDecompteRevision(sec, d);
                           return (
                             <div key={d.id || dIdx} className="rounded-lg p-3" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
@@ -2677,19 +2882,27 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                                   <button onClick={() => removeDecompte(sec.id, d.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                                 )}
                               </div>
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="mb-2 grid grid-cols-3 gap-2">
                                 <div>
                                   <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date</label>
                                   <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.dateDecompte} onChange={(e) => patchDecompte(sec.id, d.id, { dateDecompte: e.target.value })} />
                                 </div>
                                 <div>
+                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Jours (optionnel)</label>
+                                  <input type="number" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.jours || ""} onChange={(e) => patchDecompte(sec.id, d.id, { jours: e.target.value })} placeholder="ex: 28" />
+                                </div>
+                                <div>
                                   <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant HT</label>
                                   <input type="number" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.montantHT} onChange={(e) => patchDecompte(sec.id, d.id, { montantHT: e.target.value })} placeholder="0" />
                                 </div>
-                                <div>
-                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Indice à cette date</label>
-                                  <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.indexValeur} onChange={(e) => patchDecompte(sec.id, d.id, { indexValeur: e.target.value })} />
-                                </div>
+                              </div>
+                              <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min((sec.terms || []).length, 4) || 1}, minmax(0,1fr))` }}>
+                                {(sec.terms || []).map((t) => (
+                                  <div key={t.id}>
+                                    <label className="mb-1 block truncate text-xs" style={{ color: colors.inkSoft }} title={t.symbole}>{t.symbole || "Indice"}</label>
+                                    <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.valeurs?.[t.id] || ""} onChange={(e) => patchDecompteValeur(sec.id, d.id, t.id, e.target.value)} />
+                                  </div>
+                                ))}
                               </div>
                               {dr.valid && (
                                 <div className="mt-2 flex items-center justify-between text-xs font-medium" style={{ color: colors.moss }}>
@@ -2703,17 +2916,6 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                       </div>
                     </div>
                   )}
-
-                  <div className="mb-3 grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie fixe (a)</label>
-                      <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.coeffFixe} onChange={(e) => { const a = Number(e.target.value) || 0; patchSector(sec.id, { coeffFixe: a, coeffVariable: Math.round((1 - a) * 100) / 100 }); }} />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Partie variable (b)</label>
-                      <input disabled type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, background: colors.surface, color: colors.inkSoft }} value={sec.coeffVariable} />
-                    </div>
-                  </div>
 
                   <div className="rounded-lg p-3" style={{ background: r.valid ? `${colors.moss}0D` : colors.surface, border: `1px solid ${r.valid ? colors.moss + "40" : colors.line}` }}>
                     {!r.valid ? (
