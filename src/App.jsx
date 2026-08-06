@@ -4,7 +4,6 @@ import jsPDF from "jspdf";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
-import ExcelJS from "exceljs";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
   ArrowRightLeft, Eraser, ChevronUp, ChevronDown, LayoutList, ArrowLeft, TrendingUp, Info, Minus,
@@ -2734,6 +2733,10 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   // ce type de document (index de base, formule détaillée, décomptes,
   // total HT/TVA/TTC, cadres de signature).
   async function exportExcelMaroc() {
+    // Chargé seulement ici, au moment de l'export — évite d'alourdir
+    // le chargement initial de l'application pour tout le monde avec
+    // une librairie dont seul le forfait Entreprise au Maroc a besoin.
+    const { default: ExcelJS } = await import("exceljs");
     const up = (v) => String(v ?? "").toUpperCase();
     // Palette de couleurs claires uniquement (jamais foncées), sauf la
     // ligne "vide" qui doit être noire — demandé explicitement.
