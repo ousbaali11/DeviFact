@@ -65,6 +65,7 @@ function docTypeIcon(type) {
   if (type === "acompte") return Wallet;
   if (type === "commande") return ShoppingCart;
   if (type === "livraison") return Truck;
+  if (type === "situation") return BarChart3;
   return Receipt;
 }
 function docTypeColor(type) {
@@ -75,6 +76,7 @@ function docTypeColor(type) {
   if (type === "acompte") return colors.brassDark;
   if (type === "commande") return colors.slate;
   if (type === "livraison") return colors.moss;
+  if (type === "situation") return colors.brassDark;
   return colors.brassDark;
 }
 function docTypeLabel(type) {
@@ -85,6 +87,7 @@ function docTypeLabel(type) {
   if (type === "acompte") return "Facture d'acompte";
   if (type === "commande") return "Bon de commande";
   if (type === "livraison") return "Bon de livraison";
+  if (type === "situation") return "Situation de travaux";
   return "Facture";
 }
 
@@ -101,7 +104,7 @@ const SERVICES = [
   { id: "avoir", label: "Avoir", icon: RotateCcw, description: "Note de crédit pour annuler ou corriger une facture", implemented: true },
   { id: "commande", label: "Bon de commande", icon: ShoppingCart, description: "Commande de matériel auprès d'un fournisseur", implemented: true },
   { id: "livraison", label: "Bon de livraison", icon: Truck, description: "Accusé de réception de matériel ou de travaux", implemented: true },
-  { id: "situation", label: "Situation de travaux", icon: BarChart3, description: "Facturation par tranches selon l'avancement du chantier", implemented: false },
+  { id: "situation", label: "Situation de travaux", icon: BarChart3, description: "Facturation par tranches selon l'avancement du chantier", implemented: true },
   { id: "pv_reception", label: "PV de réception", icon: ClipboardCheck, description: "Validation de fin de chantier signée par le client", implemented: false },
   { id: "bpu", label: "Bordereau de prix unitaires", icon: List, description: "Liste de prix détaillée par unité", implemented: false },
   { id: "rapport", label: "Rapport d'intervention", icon: Wrench, description: "Fiche de visite pour dépannage ou service", implemented: false },
@@ -225,7 +228,7 @@ function emptyPrestation() {
 }
 
 function nextNumber(documents, type) {
-  const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL" };
+  const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", situation: "SIT" };
   const prefix = prefixes[type] || "FAC";
   const nums = documents.filter((d) => d.type === type).map((d) => parseInt((d.docNumber.match(/(\d+)$/) || [])[1] || "0", 10));
   const next = (nums.length ? Math.max(...nums) : 0) + 1;
@@ -544,6 +547,103 @@ function computeRevisionLine(line) {
 // Total combiné de tous les secteurs d'un document — c'est cette
 // fonction que le tableau de bord et l'export comptable utilisent
 // déjà (via computeRevision), donc rien à changer de leur côté.
+// ===================== Situation de travaux =====================
+// Facturation par tranches selon l'avancement du chantier. Chaque
+// ligne garde son propre pourcentage d'avancement CUMULÉ (pas juste
+// celui de cette situation), et le montant "déjà facturé" jusqu'à la
+// situation précédente — ce qui permet de calculer automatiquement
+// ce qui doit être facturé MAINTENANT (la différence), exactement
+// comme une vraie situation de travaux de chantier.
+function emptySituationLine() {
+  return {
+    id: nextId("sl"), type: "line",
+    designation: "", unit: "forfait", qty: 1, unitPrice: 0, tva: 20,
+    avancementPct: 0, montantCumulePrecedent: 0,
+  };
+}
+
+function newSituationDocument(documents) {
+  return {
+    id: nextId("doc"),
+    type: "situation",
+    docNumber: nextNumber(documents, "situation"),
+    issueDate: new Date().toISOString().slice(0, 10),
+    currency: "EUR",
+    numeroSituation: 1,
+    previousSituationId: null,
+    marcheNumero: "",
+    objet: "",
+    dateDebut: "",
+    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
+    clientId: null,
+    items: [emptySituationLine()],
+    retenueGarantiePct: 5,
+    acompteVerse: 0,
+    notes: "",
+    status: "brouillon",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function computeSituationLine(line) {
+  const montantMarche = (Number(line.qty) || 0) * (Number(line.unitPrice) || 0);
+  const montantCumuleActuel = (montantMarche * (Number(line.avancementPct) || 0)) / 100;
+  const montantCumulePrecedent = Number(line.montantCumulePrecedent) || 0;
+  const montantCetteSituation = montantCumuleActuel - montantCumulePrecedent;
+  return { montantMarche, montantCumuleActuel, montantCumulePrecedent, montantCetteSituation };
+}
+
+function computeSituation(doc) {
+  const lines = (doc.items || []).filter((l) => l.type === "line").map((l) => ({ ...l, ...computeSituationLine(l) }));
+  const subtotalHT = lines.reduce((s, l) => s + l.montantCetteSituation, 0);
+  const tvaGroups = {};
+  lines.forEach((l) => {
+    const rate = Number(l.tva) || 0;
+    tvaGroups[rate] = (tvaGroups[rate] || 0) + (l.montantCetteSituation * rate) / 100;
+  });
+  const totalTVA = Object.values(tvaGroups).reduce((a, b) => a + b, 0);
+  const totalTTCBrut = subtotalHT + totalTVA;
+  const retenueGarantie = totalTTCBrut * ((Number(doc.retenueGarantiePct) || 0) / 100);
+  const acompteVerse = Number(doc.acompteVerse) || 0;
+  const netAPayer = totalTTCBrut - retenueGarantie - acompteVerse;
+  const montantMarcheTotal = lines.reduce((s, l) => s + l.montantMarche, 0);
+  const montantCumuleTotal = lines.reduce((s, l) => s + l.montantCumuleActuel, 0);
+  const avancementGlobalPct = montantMarcheTotal ? (montantCumuleTotal / montantMarcheTotal) * 100 : 0;
+  return { lines, subtotalHT, tvaGroups, totalTVA, totalTTCBrut, retenueGarantie, acompteVerse, netAPayer, montantMarcheTotal, montantCumuleTotal, avancementGlobalPct };
+}
+
+// Crée la situation suivante à partir d'une situation existante : le
+// "déjà facturé" de chaque ligne devient automatiquement le cumul
+// atteint par la situation précédente — c'est ce qui permet à la
+// chaîne de situations de rester cohérente, sans jamais refacturer
+// deux fois le même avancement.
+function createNextSituation(sourceDoc, documents) {
+  const computed = computeSituation(sourceDoc);
+  const newItems = computed.lines.map((l) => ({
+    id: nextId("sl"), type: "line",
+    designation: l.designation, unit: l.unit, qty: l.qty, unitPrice: l.unitPrice, tva: l.tva,
+    avancementPct: l.avancementPct,
+    montantCumulePrecedent: Number(l.montantCumuleActuel.toFixed(2)),
+  }));
+  return {
+    ...newSituationDocument(documents),
+    numeroSituation: (sourceDoc.numeroSituation || 1) + 1,
+    previousSituationId: sourceDoc.id,
+    marcheNumero: sourceDoc.marcheNumero,
+    objet: sourceDoc.objet,
+    dateDebut: sourceDoc.dateDebut,
+    company: sourceDoc.company,
+    client: sourceDoc.client,
+    clientId: sourceDoc.clientId,
+    items: newItems,
+    retenueGarantiePct: sourceDoc.retenueGarantiePct,
+    currency: sourceDoc.currency,
+  };
+}
+// ================= fin Situation de travaux =================
+
 function computeRevision(doc) {
   const sectors = getRevisionSectors(doc);
   const lines = sectors.map(computeRevisionLine);
@@ -755,7 +855,7 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
 }
 
 function newDocument(type, documents) {
-  return {
+  const base = {
     id: nextId("doc"),
     type,
     docNumber: nextNumber(documents, type),
@@ -777,6 +877,30 @@ function newDocument(type, documents) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
+  // Facture d'acompte : doit référencer le devis/marché d'origine et
+  // savoir combien reste à facturer après cet acompte — sans ça, ce
+  // n'est qu'une facture ordinaire mal nommée.
+  if (type === "acompte") {
+    return { ...base, sourceDevisRef: "", montantMarcheHT: "", acompteMode: "pourcentage", acomptePourcentage: 30, acompteMontantFixe: "", notes: "" };
+  }
+  // Avoir : la référence à la facture d'origine et le motif sont
+  // obligatoires pour qu'un avoir soit valide (article 289 du CGI).
+  if (type === "avoir") {
+    return { ...base, factureOrigineRef: "", motifAvoir: "", notes: "" };
+  }
+  // Bon de commande : s'adresse à un FOURNISSEUR, pas à un client —
+  // le champ "client" est réutilisé (même structure nom/adresse) mais
+  // affiché comme "Fournisseur" partout dans l'interface et le PDF.
+  if (type === "commande") {
+    return { ...base, dateLivraisonSouhaitee: "", adresseLivraison: "", conditionsPaiement: "", notes: "" };
+  }
+  // Bon de livraison : pas de prix par défaut (juste des quantités),
+  // une référence à la commande/au devis d'origine, un état de
+  // livraison, et la personne qui réceptionne (avec signature).
+  if (type === "livraison") {
+    return { ...base, commandeRef: "", etatLivraison: "conforme", reservesLivraison: "", showPrices: false, notes: "" };
+  }
+  return base;
 }
 
 function computeTotals(doc) {
@@ -842,6 +966,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const mono = { fontFamily: "'IBM Plex Mono', monospace" };
   const isFreeWatermark = watermarkEnabled; // contrôlé par l'Admin, forfait par forfait
+  const hidePrices = doc.type === "livraison" && !doc.showPrices;
   const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
@@ -900,6 +1025,46 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
         </div>
       </div>
 
+      {doc.type === "acompte" && (doc.sourceDevisRef || Number(doc.montantMarcheHT) > 0) && (() => {
+        const montantMarche = Number(doc.montantMarcheHT) || 0;
+        const montantAcompte = (doc.acompteMode || "pourcentage") === "pourcentage" ? (montantMarche * (Number(doc.acomptePourcentage) || 0)) / 100 : (Number(doc.acompteMontantFixe) || 0);
+        const reste = montantMarche - montantAcompte;
+        return (
+          <div style={{ marginBottom: "18px", padding: "10px 14px", borderRadius: "4px", background: box, fontSize: "9.5pt", position: "relative", zIndex: 1 }}>
+            {doc.sourceDevisRef && <div>Facture d'acompte sur devis / marché <strong>{doc.sourceDevisRef}</strong></div>}
+            {montantMarche > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "4px", color: inkSoft }}>
+                <span>Montant total du marché HT : {formatMoney(montantMarche, doc.currency)}</span>
+                <span>Reste à facturer après cet acompte : <strong style={{ color: ink }}>{formatMoney(reste, doc.currency)}</strong></span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {doc.type === "avoir" && (doc.factureOrigineRef || doc.motifAvoir) && (
+        <div style={{ marginBottom: "18px", padding: "10px 14px", borderRadius: "4px", background: "#F9E3E0", color: "#8A2E1F", fontSize: "9.5pt", position: "relative", zIndex: 1 }}>
+          {doc.factureOrigineRef && <div><strong>AVOIR sur la facture N° {doc.factureOrigineRef}</strong></div>}
+          {doc.motifAvoir && <div style={{ marginTop: "2px" }}>Motif : {doc.motifAvoir}</div>}
+        </div>
+      )}
+
+      {doc.type === "commande" && (doc.dateLivraisonSouhaitee || doc.conditionsPaiement || doc.adresseLivraison) && (
+        <div style={{ marginBottom: "18px", padding: "10px 14px", borderRadius: "4px", background: box, fontSize: "9.5pt", position: "relative", zIndex: 1 }}>
+          {doc.dateLivraisonSouhaitee && <div>Livraison souhaitée le : <strong>{frLong(doc.dateLivraisonSouhaitee)}</strong></div>}
+          {doc.adresseLivraison && <div style={{ marginTop: "2px" }}>Adresse de livraison : {doc.adresseLivraison}</div>}
+          {doc.conditionsPaiement && <div style={{ marginTop: "2px" }}>Conditions de paiement : {doc.conditionsPaiement}</div>}
+        </div>
+      )}
+
+      {doc.type === "livraison" && (doc.commandeRef || doc.etatLivraison) && (
+        <div style={{ marginBottom: "18px", padding: "10px 14px", borderRadius: "4px", background: doc.etatLivraison === "conforme" ? box : "#F9E3E0", fontSize: "9.5pt", position: "relative", zIndex: 1 }}>
+          {doc.commandeRef && <div>Référence commande / devis : <strong>{doc.commandeRef}</strong></div>}
+          <div style={{ marginTop: "2px" }}>État de la livraison : <strong>{doc.etatLivraison === "conforme" ? "Conforme" : doc.etatLivraison === "reserves" ? "Livré avec réserves" : "Livraison incomplète"}</strong></div>
+          {doc.reservesLivraison && doc.etatLivraison !== "conforme" && <div style={{ marginTop: "2px" }}>{doc.reservesLivraison}</div>}
+        </div>
+      )}
+
       {doc.type === "proforma" && doc.proforma && (() => {
         const pf = doc.proforma;
         const rows = [
@@ -934,17 +1099,17 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
             <th style={{ textAlign: "left", padding: "6px 6px", fontSize: "8pt", textTransform: "uppercase", letterSpacing: "0.04em" }}>Désignation</th>
             <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Qté</th>
             <th style={{ textAlign: "left", padding: "6px 6px", fontSize: "8pt" }}>Unité</th>
-            <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>PU HT</th>
-            <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>% TVA</th>
-            <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Total TVA</th>
-            <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Total HT</th>
+            {!hidePrices && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>PU HT</th>}
+            {!hidePrices && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>% TVA</th>}
+            {!hidePrices && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Total TVA</th>}
+            {!hidePrices && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Total HT</th>}
           </tr>
         </thead>
         <tbody>
           {lineItems.map((it, idx) => it.type === "section" ? (
             (it.title || it.subtitle) && (
               <tr key={it.id} style={{ pageBreakInside: "avoid" }}>
-                <td colSpan={7} style={{ paddingTop: "10px", paddingBottom: "2px", borderBottom: `1.5px solid ${brass}` }}>
+                <td colSpan={hidePrices ? 3 : 7} style={{ paddingTop: "10px", paddingBottom: "2px", borderBottom: `1.5px solid ${brass}` }}>
                   <div style={{ fontWeight: 700 }}>{it.title}</div>
                   {it.subtitle && <div style={{ fontSize: "8.5pt", color: inkSoft }}>{it.subtitle}</div>}
                 </td>
@@ -968,7 +1133,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
                 </td>
                 <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{it.qty}</td>
                 <td style={{ padding: "6px 6px", verticalAlign: "top" }}>{it.unit}</td>
-                {isMargin ? (
+                {!hidePrices && (isMargin ? (
                   <>
                     <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(Number(it.salePriceTTC) || 0, doc.currency)}</td>
                     <td colSpan={2} style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", fontSize: "8pt", fontStyle: "italic", color: inkSoft }}>Régime de la marge*</td>
@@ -981,7 +1146,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
                     <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(lineTVA, doc.currency)}</td>
                     <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono, fontWeight: 600 }}>{formatMoney(lineHT, doc.currency)}</td>
                   </>
-                )}
+                ))}
               </tr>
             );
           })())}
@@ -1007,27 +1172,29 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
           )}
         </div>
 
-        <div style={{ width: "230px", fontSize: "10pt" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "7px 10px", fontWeight: 700 }}>
-            <span>Total HT</span><span style={mono}>{formatMoney(subtotalHT, doc.currency)}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, padding: "7px 10px", fontWeight: 600 }}>
-            <span>Total TVA</span><span style={mono}>{formatMoney(totalTVA, doc.currency)}</span>
-          </div>
-          {Object.keys(tvaGroups).length > 1 && Object.entries(tvaGroups).map(([rate, amount]) => (
-            <div key={rate} style={{ display: "flex", justifyContent: "space-between", padding: "2px 10px", fontSize: "8.5pt", color: inkSoft }}>
-              <span>dont TVA {rate}%</span><span style={mono}>{formatMoney(amount, doc.currency)}</span>
+        {!hidePrices && (
+          <div style={{ width: "230px", fontSize: "10pt" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "7px 10px", fontWeight: 700 }}>
+              <span>Total HT</span><span style={mono}>{formatMoney(subtotalHT, doc.currency)}</span>
             </div>
-          ))}
-          <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
-            <span>Net à payer</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
-          </div>
-          {Number(doc.acompte) > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontWeight: 700, color: brassDark }}>
-              <span>Reste à payer</span><span style={mono}>{formatMoney(resteAPayer, doc.currency)}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, padding: "7px 10px", fontWeight: 600 }}>
+              <span>Total TVA</span><span style={mono}>{formatMoney(totalTVA, doc.currency)}</span>
             </div>
-          )}
-        </div>
+            {Object.keys(tvaGroups).length > 1 && Object.entries(tvaGroups).map(([rate, amount]) => (
+              <div key={rate} style={{ display: "flex", justifyContent: "space-between", padding: "2px 10px", fontSize: "8.5pt", color: inkSoft }}>
+                <span>dont TVA {rate}%</span><span style={mono}>{formatMoney(amount, doc.currency)}</span>
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
+              <span>Net à payer</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
+            </div>
+            {Number(doc.acompte) > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontWeight: 700, color: brassDark }}>
+                <span>Reste à payer</span><span style={mono}>{formatMoney(resteAPayer, doc.currency)}</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Signature — bas à droite, uniquement si une signature existe */}
@@ -1432,11 +1599,23 @@ export default function DeviFactApp() {
       setView("pricing");
       return;
     }
-    const doc = newDocument(type, documents);
+    const doc = type === "situation" ? newSituationDocument(documents) : newDocument(type, documents);
     if (companyProfile.name) doc.company = { ...companyProfile };
     persist([doc, ...documents]);
     setActiveId(doc.id);
-    setView("editor");
+    setView(type === "situation" ? "situation-editor" : "editor");
+  }
+  function createNextSituationDoc(sourceDoc) {
+    const plan = plans.find((p) => p.id === (account?.plan || "gratuit")) || PLANS[0];
+    if (documents.length >= plan.limit) {
+      setLimitNotice(true);
+      setView("pricing");
+      return;
+    }
+    const doc = createNextSituation(sourceDoc, documents);
+    persist([doc, ...documents]);
+    setActiveId(doc.id);
+    setView("situation-editor");
   }
   function openNewRevision(sector, country) {
     const plan = plans.find((p) => p.id === (account?.plan || "gratuit")) || PLANS[0];
@@ -1454,7 +1633,7 @@ export default function DeviFactApp() {
   function openDoc(id) {
     const target = documents.find((d) => d.id === id);
     setActiveId(id);
-    setView(target?.type === "revision" ? "revision-editor" : "editor");
+    setView(target?.type === "revision" ? "revision-editor" : target?.type === "situation" ? "situation-editor" : "editor");
   }
   function backToDashboard() {
     setView("dashboard");
@@ -1689,6 +1868,11 @@ export default function DeviFactApp() {
           rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number((r.montantInitialTotal || 0).toFixed(2)), Number(r.ecartMontant.toFixed(2)), Number(r.montantRevise.toFixed(2))]);
           return;
         }
+        if (d.type === "situation") {
+          const s = computeSituation(d);
+          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number(s.subtotalHT.toFixed(2)), Number(s.totalTVA.toFixed(2)), Number(s.totalTTCBrut.toFixed(2))]);
+          return;
+        }
         const t = computeTotals(d);
         rows.push([
           docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "",
@@ -1781,6 +1965,25 @@ export default function DeviFactApp() {
     );
   }
 
+  if (view === "situation-editor" && activeDoc) {
+    return (
+      <SituationEditor
+        doc={activeDoc}
+        documents={documents}
+        saving={saving}
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onBack={backToDashboard}
+        onCreateNext={createNextSituationDoc}
+        onGoToPricing={() => setView("pricing")}
+      />
+    );
+  }
+
   const visibleServices = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
   function openNewService(serviceId) {
     const svc = getService(serviceId);
@@ -1790,7 +1993,7 @@ export default function DeviFactApp() {
       return;
     }
     if (serviceId === "revision") { setView("revision-sector"); return; }
-    if (serviceId === "devis" || serviceId === "facture" || serviceId === "proforma" || serviceId === "acompte" || serviceId === "avoir" || serviceId === "commande" || serviceId === "livraison") {
+    if (serviceId === "devis" || serviceId === "facture" || serviceId === "proforma" || serviceId === "acompte" || serviceId === "avoir" || serviceId === "commande" || serviceId === "livraison" || serviceId === "situation") {
       openNew(serviceId);
       return;
     }
@@ -2093,7 +2296,8 @@ export default function DeviFactApp() {
             </p>
             {filtered.map((d, idx) => {
               const isRevision = d.type === "revision";
-              const totalTTC = isRevision ? computeRevision(d).montantRevise : computeTotals(d).totalTTC;
+              const isSituation = d.type === "situation";
+              const totalTTC = isRevision ? computeRevision(d).montantRevise : isSituation ? computeSituation(d).netAPayer : computeTotals(d).totalTTC;
               const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
               const TypeIconComp = docTypeIcon(d.type);
               return (
@@ -3509,6 +3713,305 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   );
 }
 
+const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, watermarkEnabled = true }, ref) {
+  const s = computeSituation(doc);
+  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const inkSoft = "#4A5B63", line = "#DAE1DC";
+  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
+  const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
+  const mono = { fontFamily: "'IBM Plex Mono', monospace" };
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
+  const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
+  const pStyle = {
+    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.4,
+    background: pageBg, width: "210mm", minHeight: "294mm", boxSizing: "border-box",
+    padding: "24px 28px", position: "relative", overflow: "hidden",
+  };
+  return (
+    <div ref={ref} className="print-doc" style={pStyle}>
+      {watermarkEnabled && (
+        <div style={{ position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-32deg)", fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.08)", whiteSpace: "nowrap", pointerEvents: "none" }}>{watermarkText}</div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "14pt" }}>SITUATION DE TRAVAUX N° {doc.numeroSituation || 1}</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          {doc.marcheNumero && <div style={{ color: inkSoft }}>Marché N° : {doc.marcheNumero}</div>}
+        </div>
+        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
+      </div>
+      {doc.objet && <div style={{ marginTop: "10px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>{doc.objet}</div>}
+      <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
+          {doc.company.address && <div>{doc.company.address}</div>}
+        </div>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          {doc.client.name && <div style={{ fontWeight: 600 }}>{doc.client.name}</div>}
+          {doc.client.address && <div>{doc.client.address}</div>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: "14px", padding: "8px 14px", borderRadius: "4px", background: ink, color: "white", display: "flex", justifyContent: "space-between", position: "relative", zIndex: 1 }}>
+        <span>Avancement global du chantier</span>
+        <span style={{ fontWeight: 700, ...mono }}>{s.avancementGlobalPct.toFixed(1)}%</span>
+      </div>
+
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt", marginTop: "16px", position: "relative", zIndex: 1 }}>
+        <thead>
+          <tr style={{ borderBottom: `2px solid ${ink}` }}>
+            <th style={{ padding: "5px 4px", textAlign: "left" }}>Désignation</th>
+            <th style={{ padding: "5px 4px", textAlign: "right" }}>Montant marché</th>
+            <th style={{ padding: "5px 4px", textAlign: "right" }}>% cumulé</th>
+            <th style={{ padding: "5px 4px", textAlign: "right" }}>Cumul atteint</th>
+            <th style={{ padding: "5px 4px", textAlign: "right" }}>Déjà facturé</th>
+            <th style={{ padding: "5px 4px", textAlign: "right" }}>Cette situation</th>
+          </tr>
+        </thead>
+        <tbody>
+          {s.lines.map((l) => (
+            <tr key={l.id} style={{ borderBottom: `1px solid ${line}` }}>
+              <td style={{ padding: "5px 4px" }}>{l.designation}</td>
+              <td style={{ padding: "5px 4px", textAlign: "right", ...mono }}>{formatMoney(l.montantMarche, doc.currency)}</td>
+              <td style={{ padding: "5px 4px", textAlign: "right", ...mono }}>{Number(l.avancementPct || 0).toFixed(1)}%</td>
+              <td style={{ padding: "5px 4px", textAlign: "right", ...mono }}>{formatMoney(l.montantCumuleActuel, doc.currency)}</td>
+              <td style={{ padding: "5px 4px", textAlign: "right", ...mono }}>{formatMoney(l.montantCumulePrecedent, doc.currency)}</td>
+              <td style={{ padding: "5px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{formatMoney(l.montantCetteSituation, doc.currency)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px", position: "relative", zIndex: 1 }}>
+        <div style={{ width: "280px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px" }}><span>Total HT (cette situation)</span><span style={mono}>{formatMoney(s.subtotalHT, doc.currency)}</span></div>
+          {Object.entries(s.tvaGroups).map(([rate, amt]) => (
+            <div key={rate} style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>TVA {rate}%</span><span style={mono}>{formatMoney(amt, doc.currency)}</span></div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", fontWeight: 600 }}><span>Total TTC</span><span style={mono}>{formatMoney(s.totalTTCBrut, doc.currency)}</span></div>
+          {s.retenueGarantie > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Retenue de garantie ({doc.retenueGarantiePct}%)</span><span style={mono}>-{formatMoney(s.retenueGarantie, doc.currency)}</span></div>}
+          {s.acompteVerse > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Acompte déjà versé</span><span style={mono}>-{formatMoney(s.acompteVerse, doc.currency)}</span></div>}
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: ink, color: "white", fontWeight: 700, borderRadius: "4px", marginTop: "4px" }}><span>Net à payer</span><span style={mono}>{formatMoney(s.netAPayer, doc.currency)}</span></div>
+        </div>
+      </div>
+
+      {doc.notes && <div style={{ marginTop: "20px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
+    </div>
+  );
+});
+
+function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onCreateNext, onGoToPricing }) {
+  const [localDoc, setLocalDoc] = useState(doc);
+  const saveTimer = useRef(null);
+  useEffect(() => setLocalDoc(doc), [doc.id]);
+
+  function patch(p) {
+    const next = { ...localDoc, ...p };
+    setLocalDoc(next);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => onChange(p), 400);
+  }
+  function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
+  function patchLine(id, p) { patch({ items: localDoc.items.map((l) => (l.id === id ? { ...l, ...p } : l)) }); }
+  function addLine() { patch({ items: [...localDoc.items, emptySituationLine()] }); }
+  function removeLine(id) { if (localDoc.items.length <= 1) return; patch({ items: localDoc.items.filter((l) => l.id !== id) }); }
+
+  const s = computeSituation(localDoc);
+  const currentPlanData = (plans || []).find((p) => p.id === (account?.plan || "gratuit"));
+  const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
+  const printRef = useRef(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const hasNextSituation = (documents || []).some((d) => d.type === "situation" && d.previousSituationId === localDoc.id);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el || pdfGenerating) return;
+    setPdfGenerating(true);
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let heightLeft = imgHeight, position = 0;
+      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 3) { position -= pageHeight; pdf.addPage(); pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight); heightLeft -= pageHeight; }
+      pdf.save(`${(localDoc.docNumber || "situation").replace(/[\\/:*?"<>|]/g, "-")}.pdf`);
+    } catch (err) {
+      console.error("Erreur de génération du PDF", err);
+      alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      setPdfGenerating(false);
+    }
+  }
+
+  function exportExcel() {
+    const rows = [];
+    rows.push(["SITUATION DE TRAVAUX", `N° ${localDoc.numeroSituation || 1}`]);
+    rows.push(["Référence", localDoc.docNumber]);
+    rows.push(["Marché N°", localDoc.marcheNumero || ""]);
+    rows.push(["Objet", localDoc.objet || ""]);
+    rows.push(["Avancement global", `${s.avancementGlobalPct.toFixed(1)}%`]);
+    rows.push([]);
+    rows.push(["Désignation", "Qté", "PU", "Montant marché", "% cumulé", "Cumul atteint", "Déjà facturé", "Cette situation"]);
+    s.lines.forEach((l) => {
+      rows.push([l.designation, Number(l.qty) || 0, Number(l.unitPrice) || 0, Number(l.montantMarche.toFixed(2)), Number(l.avancementPct) || 0, Number(l.montantCumuleActuel.toFixed(2)), Number(l.montantCumulePrecedent.toFixed(2)), Number(l.montantCetteSituation.toFixed(2))]);
+    });
+    rows.push([]);
+    rows.push(["", "", "", "", "", "", "Total HT", Number(s.subtotalHT.toFixed(2))]);
+    rows.push(["", "", "", "", "", "", "TVA", Number(s.totalTVA.toFixed(2))]);
+    rows.push(["", "", "", "", "", "", "Total TTC", Number(s.totalTTCBrut.toFixed(2))]);
+    if (s.retenueGarantie > 0) rows.push(["", "", "", "", "", "", `Retenue garantie (${localDoc.retenueGarantiePct}%)`, -Number(s.retenueGarantie.toFixed(2))]);
+    if (s.acompteVerse > 0) rows.push(["", "", "", "", "", "", "Acompte versé", -Number(s.acompteVerse.toFixed(2))]);
+    rows.push(["", "", "", "", "", "", "NET À PAYER", Number(s.netAPayer.toFixed(2))]);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 28 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Situation");
+    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  }
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
+        <div className="flex items-center gap-2">
+          {!hasNextSituation && !isLocked && (
+            <button onClick={() => onCreateNext(localDoc)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }} title="Crée la situation suivante, en reprenant automatiquement le cumul de celle-ci">
+              <ArrowRight size={15} /> Situation suivante
+            </button>
+          )}
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
+          </button>
+          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
+            <Download size={15} /> Excel
+          </button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+        {isLocked && (
+          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+              <Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}
+            </span>
+            {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
+          </div>
+        )}
+        <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: colors.line }}>
+            <div>
+              <h1 className="df-display text-xl font-semibold">Situation de travaux N° {localDoc.numeroSituation || 1}</h1>
+              {localDoc.previousSituationId && <span className="text-xs" style={{ color: colors.inkSoft }}>Suite de la situation précédente — cumul repris automatiquement</span>}
+            </div>
+            <div className="text-right">
+              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Réf.</label>
+              <input className="df-input df-mono w-28 rounded-md px-2 py-1 text-right text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Marché N°</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.marcheNumero || ""} onChange={(e) => patch({ marcheNumero: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date de début des travaux</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateDebut || ""} onChange={(e) => patch({ dateDebut: e.target.value })} />
+            </div>
+          </div>
+          <div className="mb-6">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+            </div>
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-3 flex items-center justify-between">
+            <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Postes du marché</label>
+            <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Poste</button>
+          </div>
+          <div className="mb-4 space-y-2">
+            {localDoc.items.map((l) => {
+              const cl = computeSituationLine(l);
+              return (
+                <div key={l.id} className="rounded-lg p-3" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation du poste" value={l.designation} onChange={(e) => patchLine(l.id, { designation: e.target.value })} />
+                    {localDoc.items.length > 1 && <button onClick={() => removeLine(l.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>}
+                  </div>
+                  <div className="mb-2 grid grid-cols-4 gap-2">
+                    <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>Qté</label><input type="number" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.qty} onChange={(e) => patchLine(l.id, { qty: e.target.value })} /></div>
+                    <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>PU HT</label><input type="number" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.unitPrice} onChange={(e) => patchLine(l.id, { unitPrice: e.target.value })} /></div>
+                    <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>TVA %</label><input type="number" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.tva} onChange={(e) => patchLine(l.id, { tva: e.target.value })} /></div>
+                    <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>Montant marché</label><div className="df-mono rounded-md px-2 py-1 text-xs" style={{ background: colors.surface }}>{formatMoney(cl.montantMarche, localDoc.currency)}</div></div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>% avancement cumulé</label>
+                      <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.avancementPct} onChange={(e) => patchLine(l.id, { avancementPct: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>Déjà facturé</label>
+                      <input type="number" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}`, background: localDoc.previousSituationId ? colors.surface : "white" }} value={l.montantCumulePrecedent} onChange={(e) => patchLine(l.id, { montantCumulePrecedent: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>Cette situation</label>
+                      <div className="df-mono rounded-md px-2 py-1 text-xs font-semibold" style={{ background: `${colors.moss}18`, color: colors.moss }}>{formatMoney(cl.montantCetteSituation, localDoc.currency)}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mb-6 grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Retenue de garantie (%)</label>
+              <input type="number" step="0.5" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.retenueGarantiePct} onChange={(e) => patch({ retenueGarantiePct: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Acompte déjà versé</label>
+              <input type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.acompteVerse} onChange={(e) => patch({ acompteVerse: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 rounded-xl p-4" style={{ background: `${colors.ink}` }}>
+            <div className="flex items-center justify-between text-sm" style={{ color: "rgba(255,255,255,0.75)" }}>
+              <span>Avancement global du chantier</span>
+              <span className="df-mono font-semibold text-white">{s.avancementGlobalPct.toFixed(1)}%</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between text-lg font-semibold text-white">
+              <span>Net à payer (cette situation)</span>
+              <span className="df-mono">{formatMoney(s.netAPayer, localDoc.currency)}</span>
+            </div>
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
+          <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+        </div>
+      </div>
+
+      <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+    </div>
+  );
+}
+
 function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
@@ -4571,7 +5074,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
 function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
-  const totalTTC = documents.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
+  const totalTTC = documents.reduce((s, d) => s + (d.type === "revision" ? computeRevision(d).montantRevise : d.type === "situation" ? computeSituation(d).netAPayer : computeTotals(d).totalTTC), 0);
   const paid = account?.paymentStatus === "payé";
 
   const TABS = [
@@ -5337,16 +5840,18 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
             </div>
             <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
               <div className="mb-2 flex items-center justify-between">
-                <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Client</div>
+                <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>{localDoc.type === "commande" ? "Fournisseur" : "Client"}</div>
                 <div className="no-print flex gap-1 rounded-md p-0.5" style={{ background: colors.paper }}>
                   <button onClick={() => patchDeep("client", { type: "entreprise" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: (localDoc.client.type || "entreprise") === "entreprise" ? colors.ink : "transparent", color: (localDoc.client.type || "entreprise") === "entreprise" ? "white" : colors.inkSoft }}>Entreprise</button>
                   <button onClick={() => patchDeep("client", { type: "particulier" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: localDoc.client.type === "particulier" ? colors.ink : "transparent", color: localDoc.client.type === "particulier" ? "white" : colors.inkSoft }}>Particulier</button>
                 </div>
               </div>
-              <div className="mb-2 flex items-center justify-end">
-                <button onClick={saveCurrentClient} className="no-print text-xs font-medium" style={{ color: colors.slate }}>Enregistrer comme client</button>
-              </div>
-              {clients.length > 0 && (
+              {localDoc.type !== "commande" && (
+                <div className="mb-2 flex items-center justify-end">
+                  <button onClick={saveCurrentClient} className="no-print text-xs font-medium" style={{ color: colors.slate }}>Enregistrer comme client</button>
+                </div>
+              )}
+              {localDoc.type !== "commande" && clients.length > 0 && (
                 <div className="no-print relative mb-2">
                   <input
                     className="df-input w-full rounded-md px-2 py-1.5 text-sm"
@@ -5367,7 +5872,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                   )}
                 </div>
               )}
-              <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm font-medium" style={inputStyle} placeholder={localDoc.client.type === "particulier" ? "Nom et prénom" : "Raison sociale"} value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm font-medium" style={inputStyle} placeholder={localDoc.type === "commande" ? "Nom du fournisseur" : localDoc.client.type === "particulier" ? "Nom et prénom" : "Raison sociale"} value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
               <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
               <div className="flex gap-2">
                 <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Email" value={localDoc.client.email} onChange={(e) => patchDeep("client", { email: e.target.value })} />
@@ -5463,6 +5968,133 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
               </div>
             );
           })()}
+
+          {localDoc.type === "acompte" && (
+            <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
+              <div className="df-display mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>
+                <Wallet size={13} /> Informations sur l'acompte
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Devis / marché d'origine (référence)
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : DEV-014" value={localDoc.sourceDevisRef || ""} onChange={(e) => patch({ sourceDevisRef: e.target.value })} />
+                </label>
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Montant total du marché HT
+                  <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.montantMarcheHT || ""} onChange={(e) => patch({ montantMarcheHT: e.target.value })} />
+                </label>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <button onClick={() => patch({ acompteMode: "pourcentage" })} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: (localDoc.acompteMode || "pourcentage") === "pourcentage" ? colors.ink : colors.paper, color: (localDoc.acompteMode || "pourcentage") === "pourcentage" ? "white" : colors.inkSoft }}>% du marché</button>
+                <button onClick={() => patch({ acompteMode: "montant_fixe" })} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: localDoc.acompteMode === "montant_fixe" ? colors.ink : colors.paper, color: localDoc.acompteMode === "montant_fixe" ? "white" : colors.inkSoft }}>Montant fixe</button>
+              </div>
+              {(localDoc.acompteMode || "pourcentage") === "pourcentage" ? (
+                <label className="mt-3 block w-40 text-xs" style={{ color: colors.inkSoft }}>
+                  Pourcentage d'acompte
+                  <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.acomptePourcentage ?? 30} onChange={(e) => patch({ acomptePourcentage: e.target.value })} />
+                </label>
+              ) : (
+                <label className="mt-3 block w-40 text-xs" style={{ color: colors.inkSoft }}>
+                  Montant fixe HT
+                  <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.acompteMontantFixe || ""} onChange={(e) => patch({ acompteMontantFixe: e.target.value })} />
+                </label>
+              )}
+              {(() => {
+                const montantMarche = Number(localDoc.montantMarcheHT) || 0;
+                const montantAcompte = (localDoc.acompteMode || "pourcentage") === "pourcentage" ? (montantMarche * (Number(localDoc.acomptePourcentage) || 0)) / 100 : (Number(localDoc.acompteMontantFixe) || 0);
+                const reste = montantMarche - montantAcompte;
+                return montantMarche > 0 && (
+                  <div className="mt-3 rounded-lg p-3 text-xs" style={{ background: colors.paper }}>
+                    <div className="flex justify-between"><span>Montant de cet acompte HT</span><span className="df-mono font-semibold">{formatMoney(montantAcompte, localDoc.currency)}</span></div>
+                    <div className="mt-1 flex justify-between" style={{ color: colors.inkSoft }}><span>Reste à facturer après cet acompte</span><span className="df-mono">{formatMoney(reste, localDoc.currency)}</span></div>
+                  </div>
+                );
+              })()}
+              <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Astuce : ajoute une ligne "Acompte sur devis N°..." dans les prestations ci-dessous, avec le montant calculé ci-dessus, pour qu'il apparaisse clairement sur le PDF.</p>
+            </div>
+          )}
+
+          {localDoc.type === "avoir" && (
+            <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.brick}40`, background: `${colors.brick}08` }}>
+              <div className="df-display mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brick }}>
+                <RotateCcw size={13} /> Référence obligatoire
+              </div>
+              <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Un avoir doit obligatoirement référencer la facture qu'il corrige, et préciser le motif — sans ça, il n'est pas valide.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Facture d'origine (numéro)
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : FAC-014" value={localDoc.factureOrigineRef || ""} onChange={(e) => patch({ factureOrigineRef: e.target.value })} />
+                </label>
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Motif de l'avoir
+                  <select className="df-select mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.motifAvoir || ""} onChange={(e) => patch({ motifAvoir: e.target.value })}>
+                    <option value="">— Choisir —</option>
+                    <option value="Erreur de facturation">Erreur de facturation</option>
+                    <option value="Retour de marchandise">Retour de marchandise</option>
+                    <option value="Geste commercial">Geste commercial</option>
+                    <option value="Résiliation / annulation">Résiliation / annulation</option>
+                    <option value="Remise accordée a posteriori">Remise accordée a posteriori</option>
+                    <option value="Autre">Autre</option>
+                  </select>
+                </label>
+              </div>
+              <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Astuce : entre les montants à déduire normalement (en positif) dans les prestations ci-dessous — ils s'afficheront comme un avoir sur le PDF.</p>
+            </div>
+          )}
+
+          {localDoc.type === "commande" && (
+            <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
+              <div className="df-display mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
+                <ShoppingCart size={13} /> Conditions de la commande
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Date de livraison souhaitée
+                  <input type="date" className="df-input df-mono mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.dateLivraisonSouhaitee || ""} onChange={(e) => patch({ dateLivraisonSouhaitee: e.target.value })} />
+                </label>
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Conditions de paiement convenues
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : 30 jours fin de mois" value={localDoc.conditionsPaiement || ""} onChange={(e) => patch({ conditionsPaiement: e.target.value })} />
+                </label>
+              </div>
+              <label className="mt-3 block text-xs" style={{ color: colors.inkSoft }}>
+                Adresse de livraison (si différente de la vôtre)
+                <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : Chantier — 12 rue de la Paix, 75001 Paris" value={localDoc.adresseLivraison || ""} onChange={(e) => patch({ adresseLivraison: e.target.value })} />
+              </label>
+            </div>
+          )}
+
+          {localDoc.type === "livraison" && (
+            <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
+              <div className="df-display mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.moss }}>
+                <Truck size={13} /> Détails de la livraison
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Commande / devis d'origine (référence)
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : CMD-014" value={localDoc.commandeRef || ""} onChange={(e) => patch({ commandeRef: e.target.value })} />
+                </label>
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  État de la livraison
+                  <select className="df-select mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.etatLivraison || "conforme"} onChange={(e) => patch({ etatLivraison: e.target.value })}>
+                    <option value="conforme">Conforme</option>
+                    <option value="reserves">Livré avec réserves</option>
+                    <option value="incomplete">Livraison incomplète</option>
+                  </select>
+                </label>
+              </div>
+              {localDoc.etatLivraison && localDoc.etatLivraison !== "conforme" && (
+                <label className="mt-3 block text-xs" style={{ color: colors.inkSoft }}>
+                  Détail des réserves
+                  <textarea className="df-textarea mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={{ ...inputStyle, minHeight: "3rem" }} value={localDoc.reservesLivraison || ""} onChange={(e) => patch({ reservesLivraison: e.target.value })} />
+                </label>
+              )}
+              <label className="mt-3 flex items-center gap-2 text-xs" style={{ color: colors.inkSoft }}>
+                <input type="checkbox" checked={!!localDoc.showPrices} onChange={(e) => patch({ showPrices: e.target.checked })} />
+                Afficher les prix sur ce bon de livraison (généralement masqués)
+              </label>
+            </div>
+          )}
 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Prestations</div>
