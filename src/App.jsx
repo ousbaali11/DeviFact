@@ -2956,22 +2956,25 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   }
   function patchTerm(sectorId, termId, p) {
     const sec = sectorLines.find((l) => l.id === sectorId);
-    const terms = (sec?.terms || []).map((t) => (t.id === termId ? { ...t, ...p } : t));
-    // Si la valeur de base du terme vient d'être saisie, elle sert
-    // aussi de valeur par défaut pour tous les mois qui n'ont encore
-    // rien pour ce terme — évite de la retaper pour chaque mois.
-    let decomptes = sec?.decomptes || [];
-    if ("indexBase" in p && p.indexBase !== "" && p.indexBase !== undefined) {
-      decomptes = decomptes.map((d) => ({
-        ...d,
-        mois: (d.mois || []).map((m) => {
-          const dejaRempli = m.valeurs?.[termId] !== undefined && m.valeurs?.[termId] !== "";
-          if (dejaRempli) return m;
-          return { ...m, valeurs: { ...(m.valeurs || {}), [termId]: p.indexBase } };
-        }),
-      }));
-    }
-    patchSector(sectorId, { terms, decomptes });
+    patchSector(sectorId, { terms: (sec?.terms || []).map((t) => (t.id === termId ? { ...t, ...p } : t)) });
+  }
+  // Propage la valeur de base d'un terme vers les mois qui n'ont encore
+  // rien pour lui — appelée seulement quand on quitte le champ (pas à
+  // chaque frappe), sinon un nombre à plusieurs chiffres se retrouve
+  // tronqué au premier chiffre tapé.
+  function propagateTermBaseValue(sectorId, termId) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    const term = (sec?.terms || []).find((t) => t.id === termId);
+    if (!term || term.indexBase === "" || term.indexBase === undefined) return;
+    const decomptes = (sec?.decomptes || []).map((d) => ({
+      ...d,
+      mois: (d.mois || []).map((m) => {
+        const dejaRempli = m.valeurs?.[termId] !== undefined && m.valeurs?.[termId] !== "";
+        if (dejaRempli) return m;
+        return { ...m, valeurs: { ...(m.valeurs || {}), [termId]: term.indexBase } };
+      }),
+    }));
+    patchSector(sectorId, { decomptes });
   }
   function removeTerm(sectorId, termId) {
     const sec = sectorLines.find((l) => l.id === sectorId);
@@ -3250,7 +3253,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                             </div>
                             <div>
                               <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Valeur de base</label>
-                              <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.indexBase} onChange={(e) => patchTerm(sec.id, t.id, { indexBase: e.target.value })} />
+                              <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.indexBase} onChange={(e) => patchTerm(sec.id, t.id, { indexBase: e.target.value })} onBlur={() => propagateTermBaseValue(sec.id, t.id)} />
                             </div>
                           </div>
                           {!sec.useDecomptes && (
