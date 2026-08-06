@@ -2915,6 +2915,13 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   // les nouveaux mois avec ce qui ne change probablement pas.
   function getLastKnownValeurs(sec) {
     const result = {};
+    // D'abord la valeur de base de chaque terme — c'est le point de
+    // départ le plus probable pour un premier mois.
+    (sec?.terms || []).forEach((t) => {
+      if (t.indexBase !== "" && t.indexBase !== undefined && t.indexBase !== null) result[t.id] = t.indexBase;
+    });
+    // Puis la dernière valeur réellement saisie quelque part, qui
+    // prend le dessus si elle existe (plus à jour que la base).
     (sec?.decomptes || []).forEach((d) => {
       (d.mois || []).forEach((m) => {
         Object.entries(m.valeurs || {}).forEach(([termId, val]) => {
@@ -2949,7 +2956,22 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   }
   function patchTerm(sectorId, termId, p) {
     const sec = sectorLines.find((l) => l.id === sectorId);
-    patchSector(sectorId, { terms: (sec?.terms || []).map((t) => (t.id === termId ? { ...t, ...p } : t)) });
+    const terms = (sec?.terms || []).map((t) => (t.id === termId ? { ...t, ...p } : t));
+    // Si la valeur de base du terme vient d'être saisie, elle sert
+    // aussi de valeur par défaut pour tous les mois qui n'ont encore
+    // rien pour ce terme — évite de la retaper pour chaque mois.
+    let decomptes = sec?.decomptes || [];
+    if ("indexBase" in p && p.indexBase !== "" && p.indexBase !== undefined) {
+      decomptes = decomptes.map((d) => ({
+        ...d,
+        mois: (d.mois || []).map((m) => {
+          const dejaRempli = m.valeurs?.[termId] !== undefined && m.valeurs?.[termId] !== "";
+          if (dejaRempli) return m;
+          return { ...m, valeurs: { ...(m.valeurs || {}), [termId]: p.indexBase } };
+        }),
+      }));
+    }
+    patchSector(sectorId, { terms, decomptes });
   }
   function removeTerm(sectorId, termId) {
     const sec = sectorLines.find((l) => l.id === sectorId);
@@ -2971,7 +2993,8 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     const sec = sectorLines.find((l) => l.id === sectorId);
     const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
     // Pré-remplit le nouveau mois avec les dernières valeurs connues
-    // de chaque terme — modifiable ensuite si ce mois est un cas particulier.
+    // de chaque terme (ou sa valeur de base si jamais saisie ailleurs)
+    // — modifiable ensuite si ce mois est un cas particulier.
     const known = getLastKnownValeurs(sec);
     patchDecompte(sectorId, decompteId, { mois: [...(d?.mois || []), { ...emptyMois(), valeurs: known }] });
   }
