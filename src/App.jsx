@@ -66,6 +66,12 @@ function docTypeIcon(type) {
   if (type === "commande") return ShoppingCart;
   if (type === "livraison") return Truck;
   if (type === "situation") return BarChart3;
+  if (type === "pv_reception") return ClipboardCheck;
+  if (type === "bpu") return List;
+  if (type === "rapport") return Wrench;
+  if (type === "contrat") return FileSignature;
+  if (type === "relance") return AlertTriangle;
+  if (type === "planning") return Calendar;
   return Receipt;
 }
 function docTypeColor(type) {
@@ -77,6 +83,12 @@ function docTypeColor(type) {
   if (type === "commande") return colors.slate;
   if (type === "livraison") return colors.moss;
   if (type === "situation") return colors.brassDark;
+  if (type === "pv_reception") return colors.moss;
+  if (type === "bpu") return colors.slate;
+  if (type === "rapport") return colors.brassDark;
+  if (type === "contrat") return colors.slate;
+  if (type === "relance") return colors.brick;
+  if (type === "planning") return colors.moss;
   return colors.brassDark;
 }
 function docTypeLabel(type) {
@@ -88,6 +100,12 @@ function docTypeLabel(type) {
   if (type === "commande") return "Bon de commande";
   if (type === "livraison") return "Bon de livraison";
   if (type === "situation") return "Situation de travaux";
+  if (type === "pv_reception") return "PV de réception";
+  if (type === "bpu") return "Bordereau de prix unitaires";
+  if (type === "rapport") return "Rapport d'intervention";
+  if (type === "contrat") return "Contrat de chantier";
+  if (type === "relance") return "Mise en demeure";
+  if (type === "planning") return "Planning de chantier";
   return "Facture";
 }
 
@@ -105,12 +123,12 @@ const SERVICES = [
   { id: "commande", label: "Bon de commande", icon: ShoppingCart, description: "Commande de matériel auprès d'un fournisseur", implemented: true },
   { id: "livraison", label: "Bon de livraison", icon: Truck, description: "Accusé de réception de matériel ou de travaux", implemented: true },
   { id: "situation", label: "Situation de travaux", icon: BarChart3, description: "Facturation par tranches selon l'avancement du chantier", implemented: true },
-  { id: "pv_reception", label: "PV de réception", icon: ClipboardCheck, description: "Validation de fin de chantier signée par le client", implemented: false },
-  { id: "bpu", label: "Bordereau de prix unitaires", icon: List, description: "Liste de prix détaillée par unité", implemented: false },
-  { id: "rapport", label: "Rapport d'intervention", icon: Wrench, description: "Fiche de visite pour dépannage ou service", implemented: false },
-  { id: "contrat", label: "Contrat de chantier", icon: FileSignature, description: "Contrat signé, distinct du simple devis", implemented: false },
-  { id: "relance", label: "Relance formelle", icon: AlertTriangle, description: "Mise en demeure pour impayé", implemented: false },
-  { id: "planning", label: "Planning de chantier", icon: Calendar, description: "Planification des travaux", implemented: false },
+  { id: "pv_reception", label: "PV de réception", icon: ClipboardCheck, description: "Validation de fin de chantier signée par le client", implemented: true },
+  { id: "bpu", label: "Bordereau de prix unitaires", icon: List, description: "Liste de prix détaillée par unité", implemented: true },
+  { id: "rapport", label: "Rapport d'intervention", icon: Wrench, description: "Fiche de visite pour dépannage ou service", implemented: true },
+  { id: "contrat", label: "Contrat de chantier", icon: FileSignature, description: "Contrat signé, distinct du simple devis", implemented: true },
+  { id: "relance", label: "Relance formelle", icon: AlertTriangle, description: "Mise en demeure pour impayé", implemented: true },
+  { id: "planning", label: "Planning de chantier", icon: Calendar, description: "Planification des travaux", implemented: true },
 ];
 function getService(id) {
   return SERVICES.find((s) => s.id === id);
@@ -228,7 +246,7 @@ function emptyPrestation() {
 }
 
 function nextNumber(documents, type) {
-  const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", situation: "SIT" };
+  const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", situation: "SIT", pv_reception: "PV", bpu: "BPU", rapport: "RI", contrat: "CTR", relance: "MED", planning: "PLN" };
   const prefix = prefixes[type] || "FAC";
   const nums = documents.filter((d) => d.type === type).map((d) => parseInt((d.docNumber.match(/(\d+)$/) || [])[1] || "0", 10));
   const next = (nums.length ? Math.max(...nums) : 0) + 1;
@@ -644,6 +662,248 @@ function createNextSituation(sourceDoc, documents) {
 }
 // ================= fin Situation de travaux =================
 
+// ===================== PV de réception =====================
+// Acte juridique bilatéral (signé par le client ET l'entreprise), pas
+// une facture — structure volontairement différente : réserves
+// éventuelles, et calcul automatique des dates de garantie légales
+// françaises à partir de la date de réception effective.
+function emptyReserve() {
+  return { id: nextId("rv"), description: "", localisation: "", delaiJours: 30, levee: false };
+}
+
+function newPvReceptionDocument(documents) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    id: nextId("doc"),
+    type: "pv_reception",
+    docNumber: nextNumber(documents, "pv_reception"),
+    issueDate: today,
+    marcheNumero: "",
+    objet: "",
+    dateDebutTravaux: "",
+    dateReceptionEffective: today,
+    typeReception: "sans_reserves", // sans_reserves | avec_reserves | refusee
+    reserves: [],
+    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
+    clientId: null,
+    signatureClient: { name: "", date: today },
+    signatureEntreprise: { name: "", date: today },
+    notes: "",
+    status: "brouillon",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+// Les garanties légales françaises du bâtiment démarrent toutes à la
+// date de réception — les calculer automatiquement évite une erreur
+// facile à faire à la main (et souvent oubliée).
+function computePvGaranties(doc) {
+  if (!doc.dateReceptionEffective) return null;
+  const base = new Date(doc.dateReceptionEffective);
+  if (isNaN(base.getTime())) return null;
+  const addTime = (months) => { const d = new Date(base); d.setMonth(d.getMonth() + months); return d; };
+  return {
+    parfaitAchevement: addTime(12),
+    biennale: addTime(24),
+    decennale: addTime(120),
+  };
+}
+// ================= fin PV de réception =================
+
+// ===================== Rapport d'intervention =====================
+// Pour les artisans du dépannage/SAV (plombier, électricien...) — un
+// diagnostic et un compte-rendu de visite, pas une facture. La durée
+// se calcule automatiquement à partir des heures d'arrivée/départ.
+function emptyMaterielUtilise() {
+  return { id: nextId("mu"), designation: "", quantite: 1 };
+}
+
+function newRapportInterventionDocument(documents) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    id: nextId("doc"),
+    type: "rapport",
+    docNumber: nextNumber(documents, "rapport"),
+    issueDate: today,
+    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
+    clientId: null,
+    adresseIntervention: "",
+    typeIntervention: "depannage", // depannage | entretien | sav | diagnostic
+    technicien: "",
+    heureArrivee: "", heureDepart: "",
+    motifAppel: "",
+    diagnostic: "",
+    travauxRealises: "",
+    materielsUtilises: [],
+    statutResolution: "resolu", // resolu | partiel | nouvelle_intervention
+    recommandations: "",
+    prochaineInterventionDate: "",
+    signatureClient: { name: "", date: today },
+    notes: "",
+    status: "brouillon",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function computeInterventionDuree(doc) {
+  if (!doc.heureArrivee || !doc.heureDepart) return null;
+  const [h1, m1] = doc.heureArrivee.split(":").map(Number);
+  const [h2, m2] = doc.heureDepart.split(":").map(Number);
+  if ([h1, m1, h2, m2].some((n) => Number.isNaN(n))) return null;
+  const minutes = (h2 * 60 + m2) - (h1 * 60 + m1);
+  if (minutes < 0) return null;
+  return { heures: Math.floor(minutes / 60), minutes: minutes % 60, totalMinutes: minutes };
+}
+// ================= fin Rapport d'intervention =================
+
+// ===================== Contrat de chantier =====================
+// IMPORTANT : ce document fournit une STRUCTURE et des clauses de
+// départ courantes, pas un avis juridique. Le texte pré-rempli est
+// générique et doit être adapté (ou relu par un professionnel du
+// droit) avant signature — c'est rappelé dans le formulaire et sur
+// le PDF lui-même.
+function newContratChantierDocument(documents) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    id: nextId("doc"),
+    type: "contrat",
+    docNumber: nextNumber(documents, "contrat"),
+    issueDate: today,
+    objetTravaux: "",
+    montantTotalHT: "",
+    tva: 20,
+    dateDebutTravaux: "",
+    dureeTravauxJours: "",
+    modalitesPaiement: "30 % à la signature du contrat, 40 % à mi-chantier, 30 % à la réception des travaux.",
+    penalitesRetard: "En cas de retard imputable à l'entreprise et non justifié par un cas de force majeure, une pénalité pourra être appliquée, dans les conditions à préciser entre les parties.",
+    assurances: "L'entreprise déclare être couverte par une assurance responsabilité civile professionnelle et une assurance décennale pour les travaux concernés, dont elle remettra les attestations au maître d'ouvrage.",
+    clauseResiliation: "Le contrat peut être résilié par écrit par l'une ou l'autre des parties en cas de manquement grave de l'autre partie à ses obligations, après mise en demeure restée sans effet.",
+    clauseLitiges: "En cas de litige, les parties s'efforceront de trouver une solution amiable avant tout recours judiciaire.",
+    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
+    clientId: null,
+    signatureClient: { name: "", date: today },
+    signatureEntreprise: { name: "", date: today },
+    notes: "",
+    status: "brouillon",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+// ================= fin Contrat de chantier =================
+
+// ===================== Relance formelle (mise en demeure) =====================
+// Version légale de la relance, au-delà du simple email déjà existant
+// (bouton "Relancer par email" sur le tableau de bord). L'indemnité
+// forfaitaire de 40 € est une obligation légale française entre
+// professionnels (Code de commerce) — proposée par défaut, éditable.
+function newRelanceFormelleDocument(documents) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    id: nextId("doc"),
+    type: "relance",
+    docNumber: nextNumber(documents, "relance"),
+    issueDate: today,
+    factureRef: "",
+    factureDate: "",
+    montantDu: "",
+    dateEcheanceOrigine: "",
+    delaiPaiementJours: 15,
+    tauxInteretRetard: "3 fois le taux d'intérêt légal",
+    indemniteForfaitaire: 40,
+    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
+    clientId: null,
+    notes: "",
+    status: "brouillon",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function computeRelanceDateLimite(doc) {
+  if (!doc.issueDate || !doc.delaiPaiementJours) return null;
+  const d = new Date(doc.issueDate);
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + (Number(doc.delaiPaiementJours) || 0));
+  return d;
+}
+// ================= fin Relance formelle =================
+
+// ===================== Planning de chantier =====================
+// Le seul des 7 nouveaux services qui n'est pas vraiment un
+// "document" — plutôt une frise chronologique visuelle des tâches du
+// chantier. Le statut affiché tient compte de la date du jour même si
+// personne ne l'a mis à jour manuellement (sauf "terminé", qui reste
+// définitif une fois coché).
+const PLANNING_COULEURS = ["#8AA6C7", "#B8763E", "#7A9E7E", "#B06A6A", "#9B87B0", "#C7A96B"];
+
+function emptyTachePlanning(index = 0) {
+  return { id: nextId("tc"), designation: "", dateDebut: "", dateFin: "", corpsMetier: "", statut: "a_venir", couleur: PLANNING_COULEURS[index % PLANNING_COULEURS.length] };
+}
+
+function newPlanningChantierDocument(documents) {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    id: nextId("doc"),
+    type: "planning",
+    docNumber: nextNumber(documents, "planning"),
+    issueDate: today,
+    marcheNumero: "",
+    objet: "",
+    taches: [emptyTachePlanning(0)],
+    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
+    clientId: null,
+    notes: "",
+    status: "brouillon",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+// "Terminé" reste tel quel une fois coché ; sinon le statut se déduit
+// de la date du jour comparée aux dates de la tâche.
+function computeTacheStatutEffectif(tache) {
+  if (tache.statut === "termine") return "termine";
+  if (!tache.dateDebut && !tache.dateFin) return "a_venir";
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const debut = tache.dateDebut ? new Date(tache.dateDebut) : null;
+  const fin = tache.dateFin ? new Date(tache.dateFin) : null;
+  if (fin && today > fin) return "retard";
+  if (debut && today >= debut) return "en_cours";
+  return "a_venir";
+}
+
+// Plage de dates globale du planning (première date de début à
+// dernière date de fin) — sert à positionner chaque tâche
+// proportionnellement sur la frise chronologique.
+function computePlanningRange(doc) {
+  const dates = [];
+  (doc.taches || []).forEach((t) => {
+    if (t.dateDebut) dates.push(new Date(t.dateDebut));
+    if (t.dateFin) dates.push(new Date(t.dateFin));
+  });
+  if (!dates.length) return null;
+  const min = new Date(Math.min(...dates));
+  const max = new Date(Math.max(...dates));
+  const totalDays = Math.max(1, Math.round((max - min) / 86400000));
+  return { min, max, totalDays };
+}
+
+function computeTachePosition(tache, range) {
+  if (!range || !tache.dateDebut || !tache.dateFin) return null;
+  const debut = new Date(tache.dateDebut), fin = new Date(tache.dateFin);
+  const offsetDays = Math.max(0, Math.round((debut - range.min) / 86400000));
+  const durationDays = Math.max(1, Math.round((fin - debut) / 86400000) + 1);
+  return { leftPct: (offsetDays / range.totalDays) * 100, widthPct: (durationDays / range.totalDays) * 100 };
+}
+// ================= fin Planning de chantier =================
+
 function computeRevision(doc) {
   const sectors = getRevisionSectors(doc);
   const lines = sectors.map(computeRevisionLine);
@@ -900,6 +1160,12 @@ function newDocument(type, documents) {
   if (type === "livraison") {
     return { ...base, commandeRef: "", etatLivraison: "conforme", reservesLivraison: "", showPrices: false, notes: "" };
   }
+  // Bordereau de prix unitaires : liste de prix de référence, pas une
+  // facturation — les quantités sont estimatives (pas engageantes), et
+  // le bordereau a une durée de validité, avec révision possible.
+  if (type === "bpu") {
+    return { ...base, dureeValidite: "", referenceRevision: "", notes: "" };
+  }
   return base;
 }
 
@@ -1065,6 +1331,14 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
         </div>
       )}
 
+      {doc.type === "bpu" && (
+        <div style={{ marginBottom: "18px", padding: "10px 14px", borderRadius: "4px", background: box, fontSize: "9.5pt", position: "relative", zIndex: 1 }}>
+          <div style={{ fontStyle: "italic", color: inkSoft }}>Bordereau de prix de référence — les quantités indiquées sont estimatives, non engageantes.</div>
+          {doc.dureeValidite && <div style={{ marginTop: "2px" }}>Durée de validité des prix : <strong>{doc.dureeValidite}</strong></div>}
+          {doc.referenceRevision && <div style={{ marginTop: "2px" }}>Révision des prix : {doc.referenceRevision}</div>}
+        </div>
+      )}
+
       {doc.type === "proforma" && doc.proforma && (() => {
         const pf = doc.proforma;
         const rows = [
@@ -1097,7 +1371,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
         <thead>
           <tr style={{ background: ink, color: "white" }}>
             <th style={{ textAlign: "left", padding: "6px 6px", fontSize: "8pt", textTransform: "uppercase", letterSpacing: "0.04em" }}>Désignation</th>
-            <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Qté</th>
+            <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>{doc.type === "bpu" ? "Qté estim." : "Qté"}</th>
             <th style={{ textAlign: "left", padding: "6px 6px", fontSize: "8pt" }}>Unité</th>
             {!hidePrices && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>PU HT</th>}
             {!hidePrices && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>% TVA</th>}
@@ -1186,7 +1460,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
               </div>
             ))}
             <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
-              <span>Net à payer</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
+              <span>{doc.type === "bpu" ? "Montant total estimatif" : "Net à payer"}</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
             </div>
             {Number(doc.acompte) > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontWeight: 700, color: brassDark }}>
@@ -1599,11 +1873,11 @@ export default function DeviFactApp() {
       setView("pricing");
       return;
     }
-    const doc = type === "situation" ? newSituationDocument(documents) : newDocument(type, documents);
+    const doc = type === "situation" ? newSituationDocument(documents) : type === "pv_reception" ? newPvReceptionDocument(documents) : type === "rapport" ? newRapportInterventionDocument(documents) : type === "contrat" ? newContratChantierDocument(documents) : type === "relance" ? newRelanceFormelleDocument(documents) : type === "planning" ? newPlanningChantierDocument(documents) : newDocument(type, documents);
     if (companyProfile.name) doc.company = { ...companyProfile };
     persist([doc, ...documents]);
     setActiveId(doc.id);
-    setView(type === "situation" ? "situation-editor" : "editor");
+    setView(type === "situation" ? "situation-editor" : type === "pv_reception" ? "pv-editor" : type === "rapport" ? "rapport-editor" : type === "contrat" ? "contrat-editor" : type === "relance" ? "relance-editor" : type === "planning" ? "planning-editor" : "editor");
   }
   function createNextSituationDoc(sourceDoc) {
     const plan = plans.find((p) => p.id === (account?.plan || "gratuit")) || PLANS[0];
@@ -1633,7 +1907,7 @@ export default function DeviFactApp() {
   function openDoc(id) {
     const target = documents.find((d) => d.id === id);
     setActiveId(id);
-    setView(target?.type === "revision" ? "revision-editor" : target?.type === "situation" ? "situation-editor" : "editor");
+    setView(target?.type === "revision" ? "revision-editor" : target?.type === "situation" ? "situation-editor" : target?.type === "pv_reception" ? "pv-editor" : target?.type === "rapport" ? "rapport-editor" : target?.type === "contrat" ? "contrat-editor" : target?.type === "relance" ? "relance-editor" : target?.type === "planning" ? "planning-editor" : "editor");
   }
   function backToDashboard() {
     setView("dashboard");
@@ -1722,6 +1996,92 @@ export default function DeviFactApp() {
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       downloadBlob(blob, "Revisions-groupees.xlsx");
+      return;
+    }
+    if (type === "situation") {
+      const wb = XLSX.utils.book_new();
+      docs.forEach((doc) => {
+        const s = computeSituation(doc);
+        const rows = [];
+        rows.push(["SITUATION DE TRAVAUX", `N° ${doc.numeroSituation || 1}`]);
+        rows.push(["Référence", doc.docNumber]);
+        rows.push(["Marché N°", doc.marcheNumero || ""]);
+        rows.push(["Avancement global", `${s.avancementGlobalPct.toFixed(1)}%`]);
+        rows.push([]);
+        rows.push(["Désignation", "Montant marché", "% cumulé", "Cumul atteint", "Déjà facturé", "Cette situation"]);
+        s.lines.forEach((l) => {
+          rows.push([l.designation, Number(l.montantMarche.toFixed(2)), Number(l.avancementPct) || 0, Number(l.montantCumuleActuel.toFixed(2)), Number(l.montantCumulePrecedent.toFixed(2)), Number(l.montantCetteSituation.toFixed(2))]);
+        });
+        rows.push([]);
+        rows.push(["", "", "", "", "Net à payer", Number(s.netAPayer.toFixed(2))]);
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        let sheetName = doc.docNumber.replace(/[\\/*?:[\]]/g, "").slice(0, 31);
+        let n = 2;
+        while (wb.SheetNames.includes(sheetName)) { sheetName = `${doc.docNumber.slice(0, 28)} (${n})`; n++; }
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      });
+      XLSX.writeFile(wb, "Situations-groupees.xlsx");
+      return;
+    }
+    if (type === "pv_reception" || type === "rapport" || type === "contrat" || type === "relance" || type === "planning") {
+      // Pas de structure en lignes de prix pour ces types — une
+      // feuille "fiche" avec les champs clés plutôt qu'un tableau.
+      const wb = XLSX.utils.book_new();
+      docs.forEach((doc) => {
+        const rows = [];
+        if (type === "pv_reception") {
+          rows.push(["PV DE RÉCEPTION", doc.docNumber]);
+          rows.push(["Date de réception", doc.dateReceptionEffective ? fr(doc.dateReceptionEffective) : ""]);
+          rows.push(["Marché N°", doc.marcheNumero || ""]);
+          rows.push(["Client", doc.client?.name || ""]);
+          rows.push(["Type de réception", (PV_TYPES[doc.typeReception] || {}).label || ""]);
+          rows.push([]);
+          rows.push(["Réserves", "Localisation", "Délai (jours)", "Levée"]);
+          (doc.reserves || []).forEach((r) => rows.push([r.description, r.localisation, r.delaiJours, r.levee ? "Oui" : "Non"]));
+        } else if (type === "rapport") {
+          rows.push(["RAPPORT D'INTERVENTION", doc.docNumber]);
+          rows.push(["Date", fr(doc.issueDate)]);
+          rows.push(["Client", doc.client?.name || ""]);
+          rows.push(["Technicien", doc.technicien || ""]);
+          rows.push(["Motif de l'appel", doc.motifAppel || ""]);
+          rows.push(["Diagnostic", doc.diagnostic || ""]);
+          rows.push(["Travaux réalisés", doc.travauxRealises || ""]);
+          rows.push(["Statut", (STATUTS_RESOLUTION[doc.statutResolution] || {}).label || ""]);
+        } else if (type === "contrat") {
+          rows.push(["CONTRAT DE CHANTIER", doc.docNumber]);
+          rows.push(["Date", fr(doc.issueDate)]);
+          rows.push(["Entreprise", doc.company?.name || ""]);
+          rows.push(["Maître d'ouvrage", doc.client?.name || ""]);
+          rows.push(["Objet des travaux", doc.objetTravaux || ""]);
+          rows.push(["Montant total HT", Number(doc.montantTotalHT) || 0]);
+          rows.push(["TVA %", Number(doc.tva) || 0]);
+          rows.push(["Modalités de paiement", doc.modalitesPaiement || ""]);
+          rows.push(["Début des travaux", doc.dateDebutTravaux ? fr(doc.dateDebutTravaux) : ""]);
+        } else if (type === "relance") {
+          const dateLimite = computeRelanceDateLimite(doc);
+          rows.push(["MISE EN DEMEURE", doc.docNumber]);
+          rows.push(["Date d'émission", fr(doc.issueDate)]);
+          rows.push(["Client débiteur", doc.client?.name || ""]);
+          rows.push(["Facture concernée", doc.factureRef || ""]);
+          rows.push(["Montant dû", Number(doc.montantDu) || 0]);
+          rows.push(["Délai accordé (jours)", doc.delaiPaiementJours || ""]);
+          rows.push(["Date limite de paiement", dateLimite ? dateLimite.toLocaleDateString("fr-FR") : ""]);
+        } else if (type === "planning") {
+          rows.push(["PLANNING DE CHANTIER", doc.docNumber]);
+          rows.push(["Date", fr(doc.issueDate)]);
+          rows.push(["Marché N°", doc.marcheNumero || ""]);
+          rows.push(["Objet", doc.objet || ""]);
+          rows.push([]);
+          rows.push(["Tâche", "Corps de métier", "Début", "Fin", "Statut"]);
+          (doc.taches || []).forEach((t) => rows.push([t.designation, t.corpsMetier, t.dateDebut ? fr(t.dateDebut) : "", t.dateFin ? fr(t.dateFin) : "", (STATUTS_TACHE[computeTacheStatutEffectif(t)] || {}).label || ""]));
+        }
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        let sheetName = doc.docNumber.replace(/[\\/*?:[\]]/g, "").slice(0, 31);
+        let n = 2;
+        while (wb.SheetNames.includes(sheetName)) { sheetName = `${doc.docNumber.slice(0, 28)} (${n})`; n++; }
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      });
+      XLSX.writeFile(wb, `${docTypeLabel(type)}s-groupes.xlsx`);
       return;
     }
     const wb = XLSX.utils.book_new();
@@ -1873,6 +2233,16 @@ export default function DeviFactApp() {
           rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number(s.subtotalHT.toFixed(2)), Number(s.totalTVA.toFixed(2)), Number(s.totalTTCBrut.toFixed(2))]);
           return;
         }
+        if (d.type === "contrat") {
+          const ht = Number(d.montantTotalHT) || 0;
+          const tva = ht * (Number(d.tva) || 0) / 100;
+          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number(ht.toFixed(2)), Number(tva.toFixed(2)), Number((ht + tva).toFixed(2))]);
+          return;
+        }
+        if (d.type === "relance") {
+          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, "", "", Number((Number(d.montantDu) || 0).toFixed(2))]);
+          return;
+        }
         const t = computeTotals(d);
         rows.push([
           docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "",
@@ -1984,6 +2354,91 @@ export default function DeviFactApp() {
     );
   }
 
+  if (view === "pv-editor" && activeDoc) {
+    return (
+      <PvReceptionEditor
+        doc={activeDoc}
+        saving={saving}
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onBack={backToDashboard}
+        onGoToPricing={() => setView("pricing")}
+      />
+    );
+  }
+
+  if (view === "rapport-editor" && activeDoc) {
+    return (
+      <RapportInterventionEditor
+        doc={activeDoc}
+        saving={saving}
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onBack={backToDashboard}
+        onGoToPricing={() => setView("pricing")}
+      />
+    );
+  }
+
+  if (view === "contrat-editor" && activeDoc) {
+    return (
+      <ContratChantierEditor
+        doc={activeDoc}
+        saving={saving}
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onBack={backToDashboard}
+        onGoToPricing={() => setView("pricing")}
+      />
+    );
+  }
+
+  if (view === "relance-editor" && activeDoc) {
+    return (
+      <RelanceFormelleEditor
+        doc={activeDoc}
+        saving={saving}
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onBack={backToDashboard}
+        onGoToPricing={() => setView("pricing")}
+      />
+    );
+  }
+
+  if (view === "planning-editor" && activeDoc) {
+    return (
+      <PlanningChantierEditor
+        doc={activeDoc}
+        saving={saving}
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onBack={backToDashboard}
+        onGoToPricing={() => setView("pricing")}
+      />
+    );
+  }
+
   const visibleServices = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
   function openNewService(serviceId) {
     const svc = getService(serviceId);
@@ -1993,7 +2448,7 @@ export default function DeviFactApp() {
       return;
     }
     if (serviceId === "revision") { setView("revision-sector"); return; }
-    if (serviceId === "devis" || serviceId === "facture" || serviceId === "proforma" || serviceId === "acompte" || serviceId === "avoir" || serviceId === "commande" || serviceId === "livraison" || serviceId === "situation") {
+    if (serviceId === "devis" || serviceId === "facture" || serviceId === "proforma" || serviceId === "acompte" || serviceId === "avoir" || serviceId === "commande" || serviceId === "livraison" || serviceId === "situation" || serviceId === "pv_reception" || serviceId === "bpu" || serviceId === "rapport" || serviceId === "contrat" || serviceId === "relance" || serviceId === "planning") {
       openNew(serviceId);
       return;
     }
@@ -2012,15 +2467,15 @@ export default function DeviFactApp() {
           <p className="mb-6 text-sm" style={{ color: colors.inkSoft }}>Choisis le pays, puis le secteur concerné.</p>
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Pays</label>
-          <select
-            value={revisionCountry}
-            onChange={(e) => setRevisionCountry(e.target.value)}
-            className="df-select mb-2 w-full max-w-sm rounded-md px-3 py-2 text-sm"
-            style={{ border: `1px solid ${colors.line}` }}
-          >
-            {COUNTRIES.filter((c) => c !== "Autre").map((c) => <option key={c} value={c}>{c}</option>)}
-            <option value="Autre">Autre pays</option>
-          </select>
+          <div className="mb-2 max-w-sm">
+            <CountrySelect
+              value={revisionCountry}
+              onChange={setRevisionCountry}
+              options={COUNTRIES.filter((c) => c !== "Autre")}
+              allowOther
+              showEmpty={false}
+            />
+          </div>
           <div className="mb-6 flex items-start gap-2 rounded-lg p-3 text-xs" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}>
             <Info size={14} className="mt-0.5 shrink-0" />
             {countryInfo.currency ? (
@@ -2297,7 +2752,11 @@ export default function DeviFactApp() {
             {filtered.map((d, idx) => {
               const isRevision = d.type === "revision";
               const isSituation = d.type === "situation";
-              const totalTTC = isRevision ? computeRevision(d).montantRevise : isSituation ? computeSituation(d).netAPayer : computeTotals(d).totalTTC;
+              const totalTTC = isRevision ? computeRevision(d).montantRevise
+                : isSituation ? computeSituation(d).netAPayer
+                : d.type === "contrat" ? (Number(d.montantTotalHT) || 0) * (1 + (Number(d.tva) || 0) / 100)
+                : d.type === "relance" ? (Number(d.montantDu) || 0)
+                : computeTotals(d).totalTTC;
               const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
               const TypeIconComp = docTypeIcon(d.type);
               return (
@@ -2331,13 +2790,17 @@ export default function DeviFactApp() {
       </div>
 
       <div style={{ position: "fixed", top: 0, left: "-9999px", zIndex: -1 }}>
-        {batchExportDoc && (
-          batchExportDoc.type === "revision" ? (
-            <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={(plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false} />
-          ) : (
-            <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={(plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false} />
-          )
-        )}
+        {batchExportDoc && (() => {
+          const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
+          if (batchExportDoc.type === "revision") return <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+        })()}
       </div>
     </div>
   );
@@ -3827,6 +4290,12 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
     const el = printRef.current;
     if (!el || pdfGenerating) return;
     setPdfGenerating(true);
+    const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
+    el.style.display = "block";
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    el.style.top = "0";
+    el.style.zIndex = "-1";
     try {
       const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
       const imgData = canvas.toDataURL("image/jpeg", 0.95);
@@ -3843,6 +4312,11 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
       console.error("Erreur de génération du PDF", err);
       alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
     } finally {
+      el.style.display = prevStyle.display;
+      el.style.position = prevStyle.position;
+      el.style.left = prevStyle.left;
+      el.style.top = prevStyle.top;
+      el.style.zIndex = prevStyle.zIndex;
       setPdfGenerating(false);
     }
   }
@@ -4008,6 +4482,1532 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
       </div>
 
       <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+    </div>
+  );
+}
+
+const PV_TYPES = {
+  sans_reserves: { label: "Réception sans réserves", color: "#2F6B4F" },
+  avec_reserves: { label: "Réception avec réserves", color: "#B8763E" },
+  refusee: { label: "Réception refusée", color: "#A33B2A" },
+};
+
+const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSettings, watermarkEnabled = true }, ref) {
+  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const inkSoft = "#4A5B63", line = "#DAE1DC";
+  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
+  const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
+  const garanties = computePvGaranties(doc);
+  const typeInfo = PV_TYPES[doc.typeReception] || PV_TYPES.sans_reserves;
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
+  const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
+  const pStyle = {
+    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.4,
+    background: pageBg, width: "210mm", minHeight: "294mm", boxSizing: "border-box",
+    padding: "24px 28px", position: "relative", overflow: "hidden",
+  };
+  return (
+    <div ref={ref} className="print-doc" style={pStyle}>
+      {watermarkEnabled && (
+        <div style={{ position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-32deg)", fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.08)", whiteSpace: "nowrap", pointerEvents: "none" }}>{watermarkText}</div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "14pt" }}>PROCÈS-VERBAL DE RÉCEPTION DE TRAVAUX</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          {doc.marcheNumero && <div style={{ color: inkSoft }}>Marché N° : {doc.marcheNumero}</div>}
+        </div>
+        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
+      </div>
+      {doc.objet && <div style={{ marginTop: "10px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>{doc.objet}</div>}
+
+      <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
+          {doc.company.address && <div>{doc.company.address}</div>}
+        </div>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          {doc.client.name && <div style={{ fontWeight: 600 }}>{doc.client.name}</div>}
+          {doc.client.address && <div>{doc.client.address}</div>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: "16px", display: "flex", gap: "16px", position: "relative", zIndex: 1 }}>
+        {doc.dateDebutTravaux && <div style={{ fontSize: "9pt" }}>Début des travaux : <strong>{new Date(doc.dateDebutTravaux).toLocaleDateString("fr-FR")}</strong></div>}
+        <div style={{ fontSize: "9pt" }}>Date de réception effective : <strong>{doc.dateReceptionEffective ? new Date(doc.dateReceptionEffective).toLocaleDateString("fr-FR") : "—"}</strong></div>
+      </div>
+
+      <div style={{ marginTop: "14px", padding: "10px 14px", borderRadius: "4px", background: typeInfo.color, color: "white", fontWeight: 700, fontSize: "11pt", textAlign: "center", position: "relative", zIndex: 1 }}>
+        {typeInfo.label.toUpperCase()}
+      </div>
+
+      {doc.typeReception === "avec_reserves" && (doc.reserves || []).length > 0 && (
+        <div style={{ marginTop: "16px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, marginBottom: "6px", fontSize: "10pt" }}>Liste des réserves</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt" }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${ink}` }}>
+                <th style={{ padding: "5px 4px", textAlign: "left" }}>Description</th>
+                <th style={{ padding: "5px 4px", textAlign: "left" }}>Localisation</th>
+                <th style={{ padding: "5px 4px", textAlign: "right" }}>Délai</th>
+                <th style={{ padding: "5px 4px", textAlign: "center" }}>État</th>
+              </tr>
+            </thead>
+            <tbody>
+              {doc.reserves.map((r) => (
+                <tr key={r.id} style={{ borderBottom: `1px solid ${line}` }}>
+                  <td style={{ padding: "5px 4px" }}>{r.description}</td>
+                  <td style={{ padding: "5px 4px" }}>{r.localisation}</td>
+                  <td style={{ padding: "5px 4px", textAlign: "right" }}>{r.delaiJours} jours</td>
+                  <td style={{ padding: "5px 4px", textAlign: "center" }}>{r.levee ? "Levée" : "Non levée"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {garanties && (
+        <div style={{ marginTop: "18px", padding: "10px 14px", borderRadius: "4px", background: box, position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, marginBottom: "6px", fontSize: "9.5pt" }}>Garanties légales (calculées à partir de la date de réception)</div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5pt", padding: "2px 0" }}><span>Garantie de parfait achèvement (1 an)</span><span>{garanties.parfaitAchevement.toLocaleDateString("fr-FR")}</span></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5pt", padding: "2px 0" }}><span>Garantie biennale — équipements (2 ans)</span><span>{garanties.biennale.toLocaleDateString("fr-FR")}</span></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5pt", padding: "2px 0" }}><span>Garantie décennale — structure (10 ans)</span><span>{garanties.decennale.toLocaleDateString("fr-FR")}</span></div>
+        </div>
+      )}
+
+      {doc.notes && <div style={{ marginTop: "16px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
+
+      <div style={{ display: "flex", gap: "24px", marginTop: "32px", position: "relative", zIndex: 1 }}>
+        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+          <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le client</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
+          {doc.signatureClient?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
+        </div>
+        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+          <div style={{ fontWeight: 700, fontSize: "9pt" }}>L'entreprise</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureEntreprise?.date ? new Date(doc.signatureEntreprise.date).toLocaleDateString("fr-FR") : ""}</div>
+          {doc.signatureEntreprise?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureEntreprise.name}</div>}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+  const [localDoc, setLocalDoc] = useState(doc);
+  const saveTimer = useRef(null);
+  useEffect(() => setLocalDoc(doc), [doc.id]);
+
+  function patch(p) {
+    const next = { ...localDoc, ...p };
+    setLocalDoc(next);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => onChange(p), 400);
+  }
+  function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
+  function addReserve() { patch({ reserves: [...(localDoc.reserves || []), emptyReserve()] }); }
+  function patchReserve(id, p) { patch({ reserves: (localDoc.reserves || []).map((r) => (r.id === id ? { ...r, ...p } : r)) }); }
+  function removeReserve(id) { patch({ reserves: (localDoc.reserves || []).filter((r) => r.id !== id) }); }
+
+  const currentPlanData = (plans || []).find((p) => p.id === (account?.plan || "gratuit"));
+  const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
+  const printRef = useRef(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const garanties = computePvGaranties(localDoc);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el || pdfGenerating) return;
+    setPdfGenerating(true);
+    const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
+    el.style.display = "block";
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    el.style.top = "0";
+    el.style.zIndex = "-1";
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let heightLeft = imgHeight, position = 0;
+      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 3) { position -= pageHeight; pdf.addPage(); pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight); heightLeft -= pageHeight; }
+      pdf.save(`${(localDoc.docNumber || "pv-reception").replace(/[\\/:*?"<>|]/g, "-")}.pdf`);
+    } catch (err) {
+      console.error("Erreur de génération du PDF", err);
+      alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      el.style.display = prevStyle.display;
+      el.style.position = prevStyle.position;
+      el.style.left = prevStyle.left;
+      el.style.top = prevStyle.top;
+      el.style.zIndex = prevStyle.zIndex;
+      setPdfGenerating(false);
+    }
+  }
+
+  function exportExcel() {
+    const rows = [];
+    rows.push(["PV DE RÉCEPTION", localDoc.docNumber]);
+    rows.push(["Date de réception", localDoc.dateReceptionEffective ? fr(localDoc.dateReceptionEffective) : ""]);
+    rows.push(["Marché N°", localDoc.marcheNumero || ""]);
+    rows.push(["Objet", localDoc.objet || ""]);
+    rows.push(["Entreprise", localDoc.company?.name || ""]);
+    rows.push(["Client", localDoc.client?.name || ""]);
+    rows.push(["Type de réception", (PV_TYPES[localDoc.typeReception] || {}).label || ""]);
+    if (garanties) {
+      rows.push([]);
+      rows.push(["Garanties légales"]);
+      rows.push(["Parfait achèvement (1 an)", garanties.parfaitAchevement.toLocaleDateString("fr-FR")]);
+      rows.push(["Biennale (2 ans)", garanties.biennale.toLocaleDateString("fr-FR")]);
+      rows.push(["Décennale (10 ans)", garanties.decennale.toLocaleDateString("fr-FR")]);
+    }
+    if ((localDoc.reserves || []).length) {
+      rows.push([]);
+      rows.push(["Réserves", "Localisation", "Délai (jours)", "Levée"]);
+      localDoc.reserves.forEach((r) => rows.push([r.description, r.localisation, r.delaiJours, r.levee ? "Oui" : "Non"]));
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 32 }, { wch: 20 }, { wch: 14 }, { wch: 10 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "PV réception");
+    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  }
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
+          </button>
+          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
+            <Download size={15} /> Excel
+          </button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        {isLocked && (
+          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+              <Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}
+            </span>
+            {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
+          </div>
+        )}
+        <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Procès-verbal de réception de travaux</h1>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Marché N°</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.marcheNumero || ""} onChange={(e) => patch({ marcheNumero: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date de réception effective</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateReceptionEffective || ""} onChange={(e) => patch({ dateReceptionEffective: e.target.value })} />
+            </div>
+          </div>
+          <div className="mb-6">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+            </div>
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Type de réception</label>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(PV_TYPES).map(([id, info]) => (
+                <button key={id} onClick={() => patch({ typeReception: id })} className="rounded-lg px-3 py-2 text-sm font-medium" style={{ background: localDoc.typeReception === id ? info.color : colors.paper, color: localDoc.typeReception === id ? "white" : colors.inkSoft }}>
+                  {info.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {localDoc.typeReception === "avec_reserves" && (
+            <div className="mb-6">
+              <div className="mb-2 flex items-center justify-between">
+                <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Réserves</label>
+                <button onClick={addReserve} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Réserve</button>
+              </div>
+              <div className="space-y-2">
+                {(localDoc.reserves || []).map((r) => (
+                  <div key={r.id} className="rounded-lg p-3" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+                    <div className="mb-2 flex items-center gap-2">
+                      <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Description de la réserve" value={r.description} onChange={(e) => patchReserve(r.id, { description: e.target.value })} />
+                      <button onClick={() => removeReserve(r.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Localisation" value={r.localisation} onChange={(e) => patchReserve(r.id, { localisation: e.target.value })} />
+                      <input type="number" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Délai (jours)" value={r.delaiJours} onChange={(e) => patchReserve(r.id, { delaiJours: e.target.value })} />
+                      <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}>
+                        <input type="checkbox" checked={r.levee} onChange={(e) => patchReserve(r.id, { levee: e.target.checked })} /> Levée
+                      </label>
+                    </div>
+                  </div>
+                ))}
+                {(localDoc.reserves || []).length === 0 && <p className="text-xs" style={{ color: colors.inkSoft }}>Aucune réserve ajoutée pour l'instant.</p>}
+              </div>
+            </div>
+          )}
+
+          {garanties && (
+            <div className="mb-6 rounded-lg p-3" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}30` }}>
+              <div className="mb-1.5 text-xs font-semibold" style={{ color: colors.moss }}>Garanties légales (calculées automatiquement)</div>
+              <div className="flex justify-between text-xs" style={{ color: colors.ink }}><span>Parfait achèvement (1 an)</span><span className="df-mono">{garanties.parfaitAchevement.toLocaleDateString("fr-FR")}</span></div>
+              <div className="flex justify-between text-xs" style={{ color: colors.ink }}><span>Biennale (2 ans)</span><span className="df-mono">{garanties.biennale.toLocaleDateString("fr-FR")}</span></div>
+              <div className="flex justify-between text-xs" style={{ color: colors.ink }}><span>Décennale (10 ans)</span><span className="df-mono">{garanties.decennale.toLocaleDateString("fr-FR")}</span></div>
+            </div>
+          )}
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Signature — le client</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom (vaut signature)" value={localDoc.signatureClient?.name || ""} onChange={(e) => patchDeep("signatureClient", { name: e.target.value })} />
+              <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.signatureClient?.date || ""} onChange={(e) => patchDeep("signatureClient", { date: e.target.value })} />
+            </div>
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Signature — l'entreprise</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom (vaut signature)" value={localDoc.signatureEntreprise?.name || ""} onChange={(e) => patchDeep("signatureEntreprise", { name: e.target.value })} />
+              <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.signatureEntreprise?.date || ""} onChange={(e) => patchDeep("signatureEntreprise", { date: e.target.value })} />
+            </div>
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
+          <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+        </div>
+      </div>
+
+      <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+    </div>
+  );
+}
+
+const TYPES_INTERVENTION = { depannage: "Dépannage urgent", entretien: "Entretien programmé", sav: "Service après-vente", diagnostic: "Diagnostic" };
+const STATUTS_RESOLUTION = { resolu: { label: "Problème résolu", color: "#2F6B4F" }, partiel: { label: "Partiellement résolu", color: "#B8763E" }, nouvelle_intervention: { label: "Nouvelle intervention nécessaire", color: "#A33B2A" } };
+
+const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ doc, siteSettings, watermarkEnabled = true }, ref) {
+  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const inkSoft = "#4A5B63", line = "#DAE1DC";
+  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
+  const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
+  const duree = computeInterventionDuree(doc);
+  const statut = STATUTS_RESOLUTION[doc.statutResolution] || STATUTS_RESOLUTION.resolu;
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
+  const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
+  const pStyle = {
+    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.4,
+    background: pageBg, width: "210mm", minHeight: "294mm", boxSizing: "border-box",
+    padding: "24px 28px", position: "relative", overflow: "hidden",
+  };
+  return (
+    <div ref={ref} className="print-doc" style={pStyle}>
+      {watermarkEnabled && (
+        <div style={{ position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-32deg)", fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.08)", whiteSpace: "nowrap", pointerEvents: "none" }}>{watermarkText}</div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "14pt" }}>RAPPORT D'INTERVENTION</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          <div style={{ color: inkSoft }}>{TYPES_INTERVENTION[doc.typeIntervention] || ""}{doc.technicien ? ` — Technicien : ${doc.technicien}` : ""}</div>
+        </div>
+        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
+      </div>
+
+      <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
+          {doc.company.phone && <div>Tél. {doc.company.phone}</div>}
+        </div>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          {doc.client.name && <div style={{ fontWeight: 600 }}>{doc.client.name}</div>}
+          <div>{doc.adresseIntervention || doc.client.address}</div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: "16px", display: "flex", gap: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>
+        {doc.heureArrivee && <div>Arrivée : <strong>{doc.heureArrivee}</strong></div>}
+        {doc.heureDepart && <div>Départ : <strong>{doc.heureDepart}</strong></div>}
+        {duree && <div>Durée : <strong>{duree.heures}h{String(duree.minutes).padStart(2, "0")}</strong></div>}
+      </div>
+
+      {doc.motifAppel && (
+        <div style={{ marginTop: "16px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "3px" }}>Motif de l'appel</div>
+          <div style={{ color: inkSoft }}>{doc.motifAppel}</div>
+        </div>
+      )}
+      {doc.diagnostic && (
+        <div style={{ marginTop: "12px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "3px" }}>Diagnostic</div>
+          <div style={{ color: inkSoft }}>{doc.diagnostic}</div>
+        </div>
+      )}
+      {doc.travauxRealises && (
+        <div style={{ marginTop: "12px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "3px" }}>Travaux réalisés</div>
+          <div style={{ color: inkSoft }}>{doc.travauxRealises}</div>
+        </div>
+      )}
+
+      {(doc.materielsUtilises || []).length > 0 && (
+        <div style={{ marginTop: "16px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "4px" }}>Matériel utilisé</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt" }}>
+            <tbody>
+              {doc.materielsUtilises.map((m) => (
+                <tr key={m.id} style={{ borderBottom: `1px solid ${line}` }}>
+                  <td style={{ padding: "4px 4px" }}>{m.designation}</td>
+                  <td style={{ padding: "4px 4px", textAlign: "right", width: "80px" }}>× {m.quantite}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: "16px", padding: "10px 14px", borderRadius: "4px", background: statut.color, color: "white", fontWeight: 700, textAlign: "center", position: "relative", zIndex: 1 }}>
+        {statut.label.toUpperCase()}
+      </div>
+
+      {doc.recommandations && (
+        <div style={{ marginTop: "12px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "3px" }}>Recommandations</div>
+          <div style={{ color: inkSoft }}>{doc.recommandations}</div>
+        </div>
+      )}
+      {doc.prochaineInterventionDate && (
+        <div style={{ marginTop: "8px", fontSize: "9pt", position: "relative", zIndex: 1 }}>Prochaine intervention recommandée : <strong>{new Date(doc.prochaineInterventionDate).toLocaleDateString("fr-FR")}</strong></div>
+      )}
+
+      {doc.notes && <div style={{ marginTop: "16px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
+
+      <div style={{ marginTop: "32px", position: "relative", zIndex: 1, width: "260px" }}>
+        <div style={{ borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+          <div style={{ fontWeight: 700, fontSize: "9pt" }}>Signature du client</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Atteste de la réalisation de cette intervention — {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
+          {doc.signatureClient?.name && <div style={{ marginTop: "16px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+  const [localDoc, setLocalDoc] = useState(doc);
+  const saveTimer = useRef(null);
+  useEffect(() => setLocalDoc(doc), [doc.id]);
+
+  function patch(p) {
+    const next = { ...localDoc, ...p };
+    setLocalDoc(next);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => onChange(p), 400);
+  }
+  function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
+  function addMateriel() { patch({ materielsUtilises: [...(localDoc.materielsUtilises || []), emptyMaterielUtilise()] }); }
+  function patchMateriel(id, p) { patch({ materielsUtilises: (localDoc.materielsUtilises || []).map((m) => (m.id === id ? { ...m, ...p } : m)) }); }
+  function removeMateriel(id) { patch({ materielsUtilises: (localDoc.materielsUtilises || []).filter((m) => m.id !== id) }); }
+
+  const currentPlanData = (plans || []).find((p) => p.id === (account?.plan || "gratuit"));
+  const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
+  const printRef = useRef(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const duree = computeInterventionDuree(localDoc);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el || pdfGenerating) return;
+    setPdfGenerating(true);
+    const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
+    el.style.display = "block";
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    el.style.top = "0";
+    el.style.zIndex = "-1";
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let heightLeft = imgHeight, position = 0;
+      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 3) { position -= pageHeight; pdf.addPage(); pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight); heightLeft -= pageHeight; }
+      pdf.save(`${(localDoc.docNumber || "rapport").replace(/[\\/:*?"<>|]/g, "-")}.pdf`);
+    } catch (err) {
+      console.error("Erreur de génération du PDF", err);
+      alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      el.style.display = prevStyle.display;
+      el.style.position = prevStyle.position;
+      el.style.left = prevStyle.left;
+      el.style.top = prevStyle.top;
+      el.style.zIndex = prevStyle.zIndex;
+      setPdfGenerating(false);
+    }
+  }
+
+  function exportExcel() {
+    const rows = [];
+    rows.push(["RAPPORT D'INTERVENTION", localDoc.docNumber]);
+    rows.push(["Date", fr(localDoc.issueDate)]);
+    rows.push(["Type d'intervention", TYPES_INTERVENTION[localDoc.typeIntervention] || ""]);
+    rows.push(["Technicien", localDoc.technicien || ""]);
+    rows.push(["Client", localDoc.client?.name || ""]);
+    rows.push(["Adresse d'intervention", localDoc.adresseIntervention || ""]);
+    rows.push(["Heure d'arrivée", localDoc.heureArrivee || ""]);
+    rows.push(["Heure de départ", localDoc.heureDepart || ""]);
+    rows.push(["Motif de l'appel", localDoc.motifAppel || ""]);
+    rows.push(["Diagnostic", localDoc.diagnostic || ""]);
+    rows.push(["Travaux réalisés", localDoc.travauxRealises || ""]);
+    rows.push(["Statut", STATUTS_RESOLUTION[localDoc.statutResolution]?.label || ""]);
+    rows.push(["Recommandations", localDoc.recommandations || ""]);
+    if ((localDoc.materielsUtilises || []).length) {
+      rows.push([]);
+      rows.push(["Matériel utilisé", "Quantité"]);
+      localDoc.materielsUtilises.forEach((m) => rows.push([m.designation, m.quantite]));
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 26 }, { wch: 40 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Rapport");
+    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  }
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
+          </button>
+          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
+            <Download size={15} /> Excel
+          </button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        {isLocked && (
+          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+              <Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}
+            </span>
+            {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
+          </div>
+        )}
+        <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Rapport d'intervention</h1>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Type d'intervention</label>
+              <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.typeIntervention} onChange={(e) => patch({ typeIntervention: e.target.value })}>
+                {Object.entries(TYPES_INTERVENTION).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Technicien</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.technicien || ""} onChange={(e) => patch({ technicien: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Heure d'arrivée</label>
+              <input type="time" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.heureArrivee || ""} onChange={(e) => patch({ heureArrivee: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Heure de départ</label>
+              <input type="time" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.heureDepart || ""} onChange={(e) => patch({ heureDepart: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Durée</label>
+              <div className="df-mono rounded-md px-3 py-2 text-sm" style={{ background: colors.paper }}>{duree ? `${duree.heures}h${String(duree.minutes).padStart(2, "0")}` : "—"}</div>
+            </div>
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse de facturation" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Adresse d'intervention (si différente)</label>
+              <input className="df-input w-full rounded-md px-2 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.adresseIntervention || ""} onChange={(e) => patch({ adresseIntervention: e.target.value })} />
+            </div>
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Motif de l'appel</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.motifAppel} onChange={(e) => patch({ motifAppel: e.target.value })} />
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Diagnostic</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.diagnostic} onChange={(e) => patch({ diagnostic: e.target.value })} />
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Travaux réalisés</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.travauxRealises} onChange={(e) => patch({ travauxRealises: e.target.value })} />
+
+          <div className="mb-6">
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Matériel utilisé</label>
+              <button onClick={addMateriel} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Matériel</button>
+            </div>
+            <div className="space-y-2">
+              {(localDoc.materielsUtilises || []).map((m) => (
+                <div key={m.id} className="flex items-center gap-2">
+                  <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation" value={m.designation} onChange={(e) => patchMateriel(m.id, { designation: e.target.value })} />
+                  <input type="number" className="df-input df-mono w-20 rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.quantite} onChange={(e) => patchMateriel(m.id, { quantite: e.target.value })} />
+                  <button onClick={() => removeMateriel(m.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Statut à l'issue de l'intervention</label>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(STATUTS_RESOLUTION).map(([id, info]) => (
+                <button key={id} onClick={() => patch({ statutResolution: id })} className="rounded-lg px-3 py-2 text-sm font-medium" style={{ background: localDoc.statutResolution === id ? info.color : colors.paper, color: localDoc.statutResolution === id ? "white" : colors.inkSoft }}>
+                  {info.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Recommandations</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.recommandations} onChange={(e) => patch({ recommandations: e.target.value })} />
+
+          <div className="mb-6 max-w-xs">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Prochaine intervention recommandée</label>
+            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.prochaineInterventionDate || ""} onChange={(e) => patch({ prochaineInterventionDate: e.target.value })} />
+          </div>
+
+          <div className="mb-6 rounded-lg p-3" style={{ background: colors.paper }}>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Signature du client (atteste de l'intervention)</label>
+            <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom (vaut signature)" value={localDoc.signatureClient?.name || ""} onChange={(e) => patchDeep("signatureClient", { name: e.target.value })} />
+            <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.signatureClient?.date || ""} onChange={(e) => patchDeep("signatureClient", { date: e.target.value })} />
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
+          <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+        </div>
+      </div>
+
+      <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+    </div>
+  );
+}
+
+const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, watermarkEnabled = true }, ref) {
+  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const inkSoft = "#4A5B63", line = "#DAE1DC";
+  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
+  const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
+  const mono = { fontFamily: "'IBM Plex Mono', monospace" };
+  const montantTVA = (Number(doc.montantTotalHT) || 0) * (Number(doc.tva) || 0) / 100;
+  const montantTTC = (Number(doc.montantTotalHT) || 0) + montantTVA;
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
+  const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
+  const pStyle = {
+    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.45,
+    background: pageBg, width: "210mm", minHeight: "294mm", boxSizing: "border-box",
+    padding: "24px 28px", position: "relative", overflow: "hidden",
+  };
+  const clause = (titre, texte) => texte && (
+    <div style={{ marginTop: "14px", position: "relative", zIndex: 1 }}>
+      <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "3px" }}>{titre}</div>
+      <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{texte}</div>
+    </div>
+  );
+  return (
+    <div ref={ref} className="print-doc" style={pStyle}>
+      {watermarkEnabled && (
+        <div style={{ position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-32deg)", fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.08)", whiteSpace: "nowrap", pointerEvents: "none" }}>{watermarkText}</div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "14pt" }}>CONTRAT DE CHANTIER</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+        </div>
+        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
+      </div>
+
+      <div style={{ marginTop: "10px", padding: "8px 12px", borderRadius: "4px", background: "#FDF3D9", color: "#7A5A12", fontSize: "8pt", fontStyle: "italic", position: "relative", zIndex: 1 }}>
+        Modèle de contrat à adapter à votre situation. Ce document ne constitue pas un conseil juridique — faites-le relire par un professionnel du droit ou votre fédération professionnelle avant signature.
+      </div>
+
+      <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          <div style={{ fontWeight: 700, marginBottom: "3px" }}>L'entreprise</div>
+          <div>{doc.company.name || "—"}</div>
+          {doc.company.address && <div>{doc.company.address}</div>}
+          {doc.company.siret && <div>SIRET : {doc.company.siret}</div>}
+        </div>
+        <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
+          <div style={{ fontWeight: 700, marginBottom: "3px" }}>Le maître d'ouvrage</div>
+          <div>{doc.client.name || "—"}</div>
+          {doc.client.address && <div>{doc.client.address}</div>}
+        </div>
+      </div>
+
+      {clause("Article 1 — Objet des travaux", doc.objetTravaux)}
+
+      <div style={{ marginTop: "14px", padding: "10px 14px", borderRadius: "4px", background: box, position: "relative", zIndex: 1 }}>
+        <div style={{ fontWeight: 700, marginBottom: "6px" }}>Article 2 — Prix</div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span>Montant total HT</span><span style={mono}>{formatMoney(Number(doc.montantTotalHT) || 0, "EUR")}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", color: inkSoft }}><span>TVA {doc.tva}%</span><span style={mono}>{formatMoney(montantTVA, "EUR")}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, marginTop: "3px" }}><span>Montant total TTC</span><span style={mono}>{formatMoney(montantTTC, "EUR")}</span></div>
+      </div>
+
+      {clause("Article 3 — Modalités de paiement", doc.modalitesPaiement)}
+
+      <div style={{ marginTop: "14px", display: "flex", gap: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>
+        {doc.dateDebutTravaux && <div>Début des travaux prévu : <strong>{new Date(doc.dateDebutTravaux).toLocaleDateString("fr-FR")}</strong></div>}
+        {doc.dureeTravauxJours && <div>Durée prévisionnelle : <strong>{doc.dureeTravauxJours} jours</strong></div>}
+      </div>
+
+      {clause("Article 4 — Pénalités de retard", doc.penalitesRetard)}
+      {clause("Article 5 — Assurances", doc.assurances)}
+      {clause("Article 6 — Résiliation", doc.clauseResiliation)}
+      {clause("Article 7 — Litiges", doc.clauseLitiges)}
+      {doc.notes && clause("Notes complémentaires", doc.notes)}
+
+      <div style={{ display: "flex", gap: "24px", marginTop: "32px", position: "relative", zIndex: 1 }}>
+        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+          <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le maître d'ouvrage</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
+          {doc.signatureClient?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
+        </div>
+        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+          <div style={{ fontWeight: 700, fontSize: "9pt" }}>L'entreprise</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureEntreprise?.date ? new Date(doc.signatureEntreprise.date).toLocaleDateString("fr-FR") : ""}</div>
+          {doc.signatureEntreprise?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureEntreprise.name}</div>}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+  const [localDoc, setLocalDoc] = useState(doc);
+  const saveTimer = useRef(null);
+  useEffect(() => setLocalDoc(doc), [doc.id]);
+
+  function patch(p) {
+    const next = { ...localDoc, ...p };
+    setLocalDoc(next);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => onChange(p), 400);
+  }
+  function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
+
+  const currentPlanData = (plans || []).find((p) => p.id === (account?.plan || "gratuit"));
+  const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
+  const printRef = useRef(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el || pdfGenerating) return;
+    setPdfGenerating(true);
+    const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
+    el.style.display = "block";
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    el.style.top = "0";
+    el.style.zIndex = "-1";
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let heightLeft = imgHeight, position = 0;
+      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 3) { position -= pageHeight; pdf.addPage(); pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight); heightLeft -= pageHeight; }
+      pdf.save(`${(localDoc.docNumber || "contrat").replace(/[\\/:*?"<>|]/g, "-")}.pdf`);
+    } catch (err) {
+      console.error("Erreur de génération du PDF", err);
+      alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      el.style.display = prevStyle.display;
+      el.style.position = prevStyle.position;
+      el.style.left = prevStyle.left;
+      el.style.top = prevStyle.top;
+      el.style.zIndex = prevStyle.zIndex;
+      setPdfGenerating(false);
+    }
+  }
+
+  function exportExcel() {
+    const rows = [];
+    rows.push(["CONTRAT DE CHANTIER", localDoc.docNumber]);
+    rows.push(["Date", fr(localDoc.issueDate)]);
+    rows.push(["Entreprise", localDoc.company?.name || ""]);
+    rows.push(["Maître d'ouvrage", localDoc.client?.name || ""]);
+    rows.push(["Objet des travaux", localDoc.objetTravaux || ""]);
+    rows.push(["Montant total HT", Number(localDoc.montantTotalHT) || 0]);
+    rows.push(["TVA %", Number(localDoc.tva) || 0]);
+    rows.push(["Début des travaux", localDoc.dateDebutTravaux ? fr(localDoc.dateDebutTravaux) : ""]);
+    rows.push(["Durée prévisionnelle (jours)", localDoc.dureeTravauxJours || ""]);
+    rows.push(["Modalités de paiement", localDoc.modalitesPaiement || ""]);
+    rows.push(["Pénalités de retard", localDoc.penalitesRetard || ""]);
+    rows.push(["Assurances", localDoc.assurances || ""]);
+    rows.push(["Résiliation", localDoc.clauseResiliation || ""]);
+    rows.push(["Litiges", localDoc.clauseLitiges || ""]);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 26 }, { wch: 50 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Contrat");
+    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  }
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
+          </button>
+          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
+            <Download size={15} /> Excel
+          </button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <div className="no-print mb-6 flex items-start gap-2.5 rounded-xl p-4" style={{ background: "#FDF3D9", border: "1px solid #E9CE85" }}>
+          <AlertTriangle size={16} style={{ color: "#7A5A12", flexShrink: 0, marginTop: "1px" }} />
+          <p className="text-xs" style={{ color: "#7A5A12" }}>
+            <strong>Ce document fournit une structure et des clauses de départ courantes — ce n'est pas un conseil juridique.</strong> Le texte pré-rempli est générique et doit être adapté à ta situation, idéalement relu par un professionnel du droit ou ta fédération professionnelle avant signature.
+          </p>
+        </div>
+
+        {isLocked && (
+          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+              <Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}
+            </span>
+            {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
+          </div>
+        )}
+        <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Contrat de chantier</h1>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="SIRET" value={localDoc.company.siret} onChange={(e) => patchDeep("company", { siret: e.target.value })} />
+            </div>
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Maître d'ouvrage (client)</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+            </div>
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 1 — Objet des travaux</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "4rem" }} value={localDoc.objetTravaux} onChange={(e) => patch({ objetTravaux: e.target.value })} />
+
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Montant total HT</label>
+              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.montantTotalHT} onChange={(e) => patch({ montantTotalHT: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>TVA %</label>
+              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.tva} onChange={(e) => patch({ tva: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Durée prévisionnelle (jours)</label>
+              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dureeTravauxJours} onChange={(e) => patch({ dureeTravauxJours: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-4 max-w-xs">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Début des travaux prévu</label>
+            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateDebutTravaux || ""} onChange={(e) => patch({ dateDebutTravaux: e.target.value })} />
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 3 — Modalités de paiement</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.modalitesPaiement} onChange={(e) => patch({ modalitesPaiement: e.target.value })} />
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 4 — Pénalités de retard</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.penalitesRetard} onChange={(e) => patch({ penalitesRetard: e.target.value })} />
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 5 — Assurances</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.assurances} onChange={(e) => patch({ assurances: e.target.value })} />
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 6 — Résiliation</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.clauseResiliation} onChange={(e) => patch({ clauseResiliation: e.target.value })} />
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 7 — Litiges</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.clauseLitiges} onChange={(e) => patch({ clauseLitiges: e.target.value })} />
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Signature — le maître d'ouvrage</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom (vaut signature)" value={localDoc.signatureClient?.name || ""} onChange={(e) => patchDeep("signatureClient", { name: e.target.value })} />
+              <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.signatureClient?.date || ""} onChange={(e) => patchDeep("signatureClient", { date: e.target.value })} />
+            </div>
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Signature — l'entreprise</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom (vaut signature)" value={localDoc.signatureEntreprise?.name || ""} onChange={(e) => patchDeep("signatureEntreprise", { name: e.target.value })} />
+              <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.signatureEntreprise?.date || ""} onChange={(e) => patchDeep("signatureEntreprise", { date: e.target.value })} />
+            </div>
+          </div>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Notes complémentaires</label>
+          <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+        </div>
+      </div>
+
+      <PrintContrat ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+    </div>
+  );
+}
+
+const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, watermarkEnabled = true }, ref) {
+  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const inkSoft = "#4A5B63", line = "#DAE1DC";
+  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
+  const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
+  const mono = { fontFamily: "'IBM Plex Mono', monospace" };
+  const dateLimite = computeRelanceDateLimite(doc);
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
+  const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
+  const pStyle = {
+    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10pt", lineHeight: 1.5,
+    background: pageBg, width: "210mm", minHeight: "294mm", boxSizing: "border-box",
+    padding: "26px 30px", position: "relative", overflow: "hidden",
+  };
+  return (
+    <div ref={ref} className="print-doc" style={pStyle}>
+      {watermarkEnabled && (
+        <div style={{ position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-32deg)", fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.08)", whiteSpace: "nowrap", pointerEvents: "none" }}>{watermarkText}</div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
+        <div>
+          {doc.company.name && <div style={{ fontWeight: 700 }}>{doc.company.name}</div>}
+          {doc.company.address && <div style={{ fontSize: "9pt", color: inkSoft }}>{doc.company.address}</div>}
+        </div>
+        <div style={{ textAlign: "right", fontSize: "9pt", color: inkSoft }}>{new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+      </div>
+
+      <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
+        <div>{doc.client.name}</div>
+        {doc.client.address && <div>{doc.client.address}</div>}
+      </div>
+
+      <div style={{ marginTop: "10px", fontSize: "8pt", color: inkSoft, fontStyle: "italic", position: "relative", zIndex: 1 }}>Envoyé par lettre recommandée avec accusé de réception</div>
+
+      <div style={{ marginTop: "24px", textAlign: "center", fontWeight: 700, fontSize: "13pt", letterSpacing: "0.03em", position: "relative", zIndex: 1 }}>
+        MISE EN DEMEURE DE PAYER
+      </div>
+
+      <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
+        <p>Madame, Monsieur,</p>
+        <p style={{ marginTop: "10px" }}>
+          Malgré nos relances précédentes, nous constatons que la facture {doc.factureRef ? <strong>n° {doc.factureRef}</strong> : ""}{doc.factureDate ? ` du ${new Date(doc.factureDate).toLocaleDateString("fr-FR")}` : ""}, d'un montant de <strong>{formatMoney(Number(doc.montantDu) || 0, doc.currency || "EUR")}</strong>{doc.dateEcheanceOrigine ? `, échue depuis le ${new Date(doc.dateEcheanceOrigine).toLocaleDateString("fr-FR")}` : ""}, demeure impayée à ce jour.
+        </p>
+        <p style={{ marginTop: "10px" }}>
+          Par la présente, nous vous <strong>mettons en demeure</strong> de régler l'intégralité de cette somme dans un délai de <strong>{doc.delaiPaiementJours} jours</strong> à compter de la réception de ce courrier{dateLimite ? `, soit au plus tard le ${dateLimite.toLocaleDateString("fr-FR")}` : ""}.
+        </p>
+        <p style={{ marginTop: "10px" }}>
+          À défaut de règlement dans ce délai, des pénalités de retard au taux de {doc.tauxInteretRetard} seront appliquées, ainsi qu'une indemnité forfaitaire pour frais de recouvrement de {formatMoney(Number(doc.indemniteForfaitaire) || 40, doc.currency || "EUR")}, conformément aux dispositions du Code de commerce. Nous nous réservons également le droit d'engager toute action, y compris judiciaire, pour obtenir le recouvrement de cette créance.
+        </p>
+        {doc.notes && <p style={{ marginTop: "10px", whiteSpace: "pre-wrap" }}>{doc.notes}</p>}
+        <p style={{ marginTop: "10px" }}>Nous restons à votre disposition pour tout règlement amiable de cette situation.</p>
+        <p style={{ marginTop: "10px" }}>Veuillez agréer, Madame, Monsieur, l'expression de nos salutations distinguées.</p>
+      </div>
+
+      <div style={{ marginTop: "40px", textAlign: "right", position: "relative", zIndex: 1 }}>
+        <div>{doc.company.name}</div>
+      </div>
+
+      <div style={{ marginTop: "30px", padding: "10px 14px", borderRadius: "4px", background: box, fontSize: "8pt", color: inkSoft, position: "relative", zIndex: 1 }}>
+        Rappel des montants dus : {formatMoney(Number(doc.montantDu) || 0, doc.currency || "EUR")} — Date limite de paiement : {dateLimite ? dateLimite.toLocaleDateString("fr-FR") : "—"}
+      </div>
+    </div>
+  );
+});
+
+function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+  const [localDoc, setLocalDoc] = useState(doc);
+  const saveTimer = useRef(null);
+  useEffect(() => setLocalDoc(doc), [doc.id]);
+
+  function patch(p) {
+    const next = { ...localDoc, ...p };
+    setLocalDoc(next);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => onChange(p), 400);
+  }
+  function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
+
+  const currentPlanData = (plans || []).find((p) => p.id === (account?.plan || "gratuit"));
+  const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
+  const printRef = useRef(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const dateLimite = computeRelanceDateLimite(localDoc);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el || pdfGenerating) return;
+    setPdfGenerating(true);
+    const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
+    el.style.display = "block";
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    el.style.top = "0";
+    el.style.zIndex = "-1";
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let heightLeft = imgHeight, position = 0;
+      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 3) { position -= pageHeight; pdf.addPage(); pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight); heightLeft -= pageHeight; }
+      pdf.save(`${(localDoc.docNumber || "mise-en-demeure").replace(/[\\/:*?"<>|]/g, "-")}.pdf`);
+    } catch (err) {
+      console.error("Erreur de génération du PDF", err);
+      alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      el.style.display = prevStyle.display;
+      el.style.position = prevStyle.position;
+      el.style.left = prevStyle.left;
+      el.style.top = prevStyle.top;
+      el.style.zIndex = prevStyle.zIndex;
+      setPdfGenerating(false);
+    }
+  }
+
+  function exportExcel() {
+    const rows = [];
+    rows.push(["MISE EN DEMEURE", localDoc.docNumber]);
+    rows.push(["Date d'émission", fr(localDoc.issueDate)]);
+    rows.push(["Entreprise", localDoc.company?.name || ""]);
+    rows.push(["Client débiteur", localDoc.client?.name || ""]);
+    rows.push(["Facture concernée", localDoc.factureRef || ""]);
+    rows.push(["Date de la facture", localDoc.factureDate ? fr(localDoc.factureDate) : ""]);
+    rows.push(["Montant dû", Number(localDoc.montantDu) || 0]);
+    rows.push(["Échéance d'origine", localDoc.dateEcheanceOrigine ? fr(localDoc.dateEcheanceOrigine) : ""]);
+    rows.push(["Délai accordé (jours)", localDoc.delaiPaiementJours || ""]);
+    rows.push(["Date limite de paiement", dateLimite ? dateLimite.toLocaleDateString("fr-FR") : ""]);
+    rows.push(["Taux d'intérêt de retard", localDoc.tauxInteretRetard || ""]);
+    rows.push(["Indemnité forfaitaire", Number(localDoc.indemniteForfaitaire) || 0]);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 26 }, { wch: 40 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Mise en demeure");
+    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  }
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
+          </button>
+          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
+            <Download size={15} /> Excel
+          </button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <div className="no-print mb-6 flex items-start gap-2.5 rounded-xl p-4" style={{ background: "#FDF3D9", border: "1px solid #E9CE85" }}>
+          <AlertTriangle size={16} style={{ color: "#7A5A12", flexShrink: 0, marginTop: "1px" }} />
+          <p className="text-xs" style={{ color: "#7A5A12" }}>
+            Pour avoir sa pleine valeur légale, cette mise en demeure doit être envoyée par <strong>lettre recommandée avec accusé de réception</strong> (au guichet ou en ligne) — ce PDF en est le contenu, pas l'envoi lui-même.
+          </p>
+        </div>
+
+        {isLocked && (
+          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+              <Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}
+            </span>
+            {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
+          </div>
+        )}
+        <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Mise en demeure de payer</h1>
+
+          <div className="mb-6 max-w-xs">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date d'émission de ce courrier</label>
+            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.issueDate || ""} onChange={(e) => patch({ issueDate: e.target.value })} />
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+            </div>
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client débiteur</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Facture concernée (référence)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : FAC-014" value={localDoc.factureRef || ""} onChange={(e) => patch({ factureRef: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date de la facture</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.factureDate || ""} onChange={(e) => patch({ factureDate: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Montant dû</label>
+              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.montantDu} onChange={(e) => patch({ montantDu: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Échéance d'origine</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateEcheanceOrigine || ""} onChange={(e) => patch({ dateEcheanceOrigine: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Délai accordé (jours)</label>
+              <input type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.delaiPaiementJours} onChange={(e) => patch({ delaiPaiementJours: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Taux d'intérêt de retard</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.tauxInteretRetard} onChange={(e) => patch({ tauxInteretRetard: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Indemnité forfaitaire</label>
+              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indemniteForfaitaire} onChange={(e) => patch({ indemniteForfaitaire: e.target.value })} />
+            </div>
+          </div>
+
+          {dateLimite && (
+            <div className="mb-6 rounded-lg p-3" style={{ background: `${colors.brick}0D`, border: `1px solid ${colors.brick}30` }}>
+              <div className="flex items-center justify-between text-sm font-medium" style={{ color: colors.brick }}>
+                <span>Date limite de paiement calculée</span>
+                <span className="df-mono">{dateLimite.toLocaleDateString("fr-FR")}</span>
+              </div>
+            </div>
+          )}
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note complémentaire (optionnel, insérée dans le courrier)</label>
+          <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+        </div>
+      </div>
+
+      <PrintRelance ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+    </div>
+  );
+}
+
+const STATUTS_TACHE = {
+  a_venir: { label: "À venir", color: "#8A97A0" },
+  en_cours: { label: "En cours", color: "#B8763E" },
+  termine: { label: "Terminé", color: "#2F6B4F" },
+  retard: { label: "En retard", color: "#A33B2A" },
+};
+
+// Repères de mois pour la frise (une ligne verticale + libellé par
+// début de mois compris dans la plage du planning).
+function computeMonthMarkers(range) {
+  if (!range) return [];
+  const markers = [];
+  const cursor = new Date(range.min.getFullYear(), range.min.getMonth(), 1);
+  while (cursor <= range.max) {
+    if (cursor >= range.min) {
+      const offsetDays = Math.round((cursor - range.min) / 86400000);
+      markers.push({ label: cursor.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }), leftPct: (offsetDays / range.totalDays) * 100 });
+    }
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return markers;
+}
+
+const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, watermarkEnabled = true }, ref) {
+  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const inkSoft = "#4A5B63", line = "#DAE1DC";
+  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
+  const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
+  const range = computePlanningRange(doc);
+  const monthMarkers = computeMonthMarkers(range);
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
+  const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
+  const pStyle = {
+    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.4,
+    background: pageBg, width: "297mm", minHeight: "210mm", boxSizing: "border-box",
+    padding: "22px 26px", position: "relative", overflow: "hidden",
+  };
+  return (
+    <div ref={ref} className="print-doc" style={pStyle}>
+      {watermarkEnabled && (
+        <div style={{ position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-25deg)", fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.07)", whiteSpace: "nowrap", pointerEvents: "none" }}>{watermarkText}</div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: "14pt" }}>PLANNING DE CHANTIER</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}{doc.marcheNumero ? ` — Marché N° ${doc.marcheNumero}` : ""}</div>
+          {doc.objet && <div style={{ color: inkSoft }}>{doc.objet}</div>}
+          {doc.client?.name && <div style={{ color: inkSoft }}>Client : {doc.client.name}</div>}
+        </div>
+        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "44px", maxWidth: "150px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "12pt" }}>{doc.company.name}</div>}
+      </div>
+
+      {range ? (
+        <div style={{ marginTop: "20px", position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", marginBottom: "4px" }}>
+            <div style={{ width: "160px", flexShrink: 0 }} />
+            <div style={{ flex: 1, position: "relative", height: "16px" }}>
+              {monthMarkers.map((m, i) => (
+                <div key={i} style={{ position: "absolute", left: `${m.leftPct}%`, fontSize: "7.5pt", color: inkSoft, borderLeft: `1px solid ${line}`, paddingLeft: "3px", height: "100%" }}>{m.label}</div>
+              ))}
+            </div>
+          </div>
+          {(doc.taches || []).map((t) => {
+            const pos = computeTachePosition(t, range);
+            const statutEff = computeTacheStatutEffectif(t);
+            const info = STATUTS_TACHE[statutEff];
+            return (
+              <div key={t.id} style={{ display: "flex", alignItems: "center", marginBottom: "6px" }}>
+                <div style={{ width: "160px", flexShrink: 0, fontSize: "8.5pt", paddingRight: "8px" }}>
+                  <div style={{ fontWeight: 600 }}>{t.designation || "—"}</div>
+                  {t.corpsMetier && <div style={{ color: inkSoft, fontSize: "7.5pt" }}>{t.corpsMetier}</div>}
+                </div>
+                <div style={{ flex: 1, position: "relative", height: "18px", background: "#00000006", borderRadius: "3px" }}>
+                  {monthMarkers.map((m, i) => (
+                    <div key={i} style={{ position: "absolute", left: `${m.leftPct}%`, top: 0, bottom: 0, borderLeft: `1px solid ${line}` }} />
+                  ))}
+                  {pos && (
+                    <div style={{ position: "absolute", left: `${pos.leftPct}%`, width: `${pos.widthPct}%`, top: "2px", bottom: "2px", background: info.color, borderRadius: "3px", minWidth: "3px" }} />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ display: "flex", gap: "14px", marginTop: "12px", fontSize: "7.5pt" }}>
+            {Object.entries(STATUTS_TACHE).map(([id, info]) => (
+              <div key={id} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <div style={{ width: "9px", height: "9px", borderRadius: "2px", background: info.color }} />
+                <span style={{ color: inkSoft }}>{info.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginTop: "24px", color: inkSoft, position: "relative", zIndex: 1 }}>Aucune tâche datée pour l'instant.</div>
+      )}
+
+      {doc.notes && <div style={{ marginTop: "20px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
+    </div>
+  );
+});
+
+function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+  const [localDoc, setLocalDoc] = useState(doc);
+  const saveTimer = useRef(null);
+  useEffect(() => setLocalDoc(doc), [doc.id]);
+
+  function patch(p) {
+    const next = { ...localDoc, ...p };
+    setLocalDoc(next);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => onChange(p), 400);
+  }
+  function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
+  function addTache() { patch({ taches: [...(localDoc.taches || []), emptyTachePlanning((localDoc.taches || []).length)] }); }
+  function patchTache(id, p) { patch({ taches: (localDoc.taches || []).map((t) => (t.id === id ? { ...t, ...p } : t)) }); }
+  function removeTache(id) { patch({ taches: (localDoc.taches || []).filter((t) => t.id !== id) }); }
+
+  const currentPlanData = (plans || []).find((p) => p.id === (account?.plan || "gratuit"));
+  const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
+  const printRef = useRef(null);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const range = computePlanningRange(localDoc);
+  const monthMarkers = computeMonthMarkers(range);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el || pdfGenerating) return;
+    setPdfGenerating(true);
+    const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
+    el.style.display = "block";
+    el.style.position = "fixed";
+    el.style.left = "-9999px";
+    el.style.top = "0";
+    el.style.zIndex = "-1";
+    try {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+      let heightLeft = imgHeight, position = 0;
+      pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 3) { position -= pageHeight; pdf.addPage(); pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight); heightLeft -= pageHeight; }
+      pdf.save(`${(localDoc.docNumber || "planning").replace(/[\\/:*?"<>|]/g, "-")}.pdf`);
+    } catch (err) {
+      console.error("Erreur de génération du PDF", err);
+      alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      el.style.display = prevStyle.display;
+      el.style.position = prevStyle.position;
+      el.style.left = prevStyle.left;
+      el.style.top = prevStyle.top;
+      el.style.zIndex = prevStyle.zIndex;
+      setPdfGenerating(false);
+    }
+  }
+
+  function exportExcel() {
+    const rows = [];
+    rows.push(["PLANNING DE CHANTIER", localDoc.docNumber]);
+    rows.push(["Date", fr(localDoc.issueDate)]);
+    rows.push(["Marché N°", localDoc.marcheNumero || ""]);
+    rows.push(["Objet", localDoc.objet || ""]);
+    rows.push([]);
+    rows.push(["Tâche", "Corps de métier", "Début", "Fin", "Statut"]);
+    (localDoc.taches || []).forEach((t) => rows.push([t.designation, t.corpsMetier, t.dateDebut ? fr(t.dateDebut) : "", t.dateFin ? fr(t.dateFin) : "", STATUTS_TACHE[computeTacheStatutEffectif(t)]?.label || ""]));
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 26 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Planning");
+    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  }
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
+          </button>
+          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
+            <Download size={15} /> Excel
+          </button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+        {isLocked && (
+          <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+            <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
+              <Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}
+            </span>
+            {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Passer à un forfait payant</button>}
+          </div>
+        )}
+        <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Planning de chantier</h1>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+            </div>
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client (optionnel)</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-6 max-w-xs">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date d'émission</label>
+            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.issueDate || ""} onChange={(e) => patch({ issueDate: e.target.value })} />
+          </div>
+
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Marché N°</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.marcheNumero || ""} onChange={(e) => patch({ marcheNumero: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
+            </div>
+          </div>
+
+          <div className="mb-3 flex items-center justify-between">
+            <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tâches</label>
+            <button onClick={addTache} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Tâche</button>
+          </div>
+          <div className="mb-6 space-y-2">
+            {(localDoc.taches || []).map((t) => {
+              const statutEff = computeTacheStatutEffectif(t);
+              const info = STATUTS_TACHE[statutEff];
+              return (
+                <div key={t.id} className="rounded-lg p-3" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: t.couleur }} />
+                    <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation de la tâche" value={t.designation} onChange={(e) => patchTache(t.id, { designation: e.target.value })} />
+                    <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${info.color}18`, color: info.color }}>{info.label}</span>
+                    {(localDoc.taches || []).length > 1 && <button onClick={() => removeTache(t.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>}
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Corps de métier" value={t.corpsMetier} onChange={(e) => patchTache(t.id, { corpsMetier: e.target.value })} />
+                    <input type="date" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.dateDebut} onChange={(e) => patchTache(t.id, { dateDebut: e.target.value })} />
+                    <input type="date" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.dateFin} onChange={(e) => patchTache(t.id, { dateFin: e.target.value })} />
+                    <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}>
+                      <input type="checkbox" checked={t.statut === "termine"} onChange={(e) => patchTache(t.id, { statut: e.target.checked ? "termine" : "a_venir" })} /> Terminé
+                    </label>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {range && (
+            <div className="mb-6">
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Aperçu de la frise</label>
+              <div className="overflow-x-auto rounded-lg p-3" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+                <div style={{ minWidth: "480px" }}>
+                  <div className="flex" style={{ marginBottom: "4px" }}>
+                    <div style={{ width: "120px", flexShrink: 0 }} />
+                    <div style={{ flex: 1, position: "relative", height: "14px" }}>
+                      {monthMarkers.map((m, i) => (
+                        <div key={i} className="text-xs" style={{ position: "absolute", left: `${m.leftPct}%`, color: colors.inkSoft, borderLeft: `1px solid ${colors.line}`, paddingLeft: "3px" }}>{m.label}</div>
+                      ))}
+                    </div>
+                  </div>
+                  {(localDoc.taches || []).map((t) => {
+                    const pos = computeTachePosition(t, range);
+                    const statutEff = computeTacheStatutEffectif(t);
+                    const info = STATUTS_TACHE[statutEff];
+                    return (
+                      <div key={t.id} className="flex items-center" style={{ marginBottom: "6px" }}>
+                        <div className="truncate text-xs" style={{ width: "120px", flexShrink: 0, paddingRight: "6px" }}>{t.designation || "—"}</div>
+                        <div style={{ flex: 1, position: "relative", height: "16px", background: "rgba(0,0,0,0.03)", borderRadius: "3px" }}>
+                          {pos && <div style={{ position: "absolute", left: `${pos.leftPct}%`, width: `${pos.widthPct}%`, top: "2px", bottom: "2px", background: info.color, borderRadius: "3px", minWidth: "3px" }} />}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
+          <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+        </div>
+      </div>
+
+      <PrintPlanning ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+    </div>
+  );
+}
+
+// Extrait le code ISO à 2 lettres d'une entrée du type "🇲🇦 MA" -> "ma".
+function countryCodeOf(entry) {
+  const m = /([A-Z]{2})\s*$/.exec(entry || "");
+  return m ? m[1].toLowerCase() : null;
+}
+
+// Remplace le <select> natif pour le pays : les emojis drapeaux ne
+// s'affichent pas correctement sur Windows (ils retombent sur du texte
+// qui ressemble au code répété, ex: "MA MA") — on utilise donc de
+// vraies images de drapeau (flagcdn.com), qui s'affichent partout,
+// avec une recherche vu le grand nombre de pays.
+function CountrySelect({ value, onChange, options, placeholder = "— Non précisé —", allowOther = false, showEmpty = true }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const list = (options || COUNTRIES).filter((c) => c.toLowerCase().includes(query.toLowerCase()));
+  const code = countryCodeOf(value);
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="df-input flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm" style={{ border: `1px solid ${colors.line}`, background: "white" }}>
+        {code ? <img src={`https://flagcdn.com/24x18/${code}.png`} alt="" width={20} height={15} style={{ borderRadius: "2px", flexShrink: 0 }} onError={(e) => { e.target.style.display = "none"; }} /> : null}
+        <span className="grow truncate" style={{ color: value ? colors.ink : colors.inkSoft }}>{value || placeholder}</span>
+        <ChevronDown size={14} style={{ color: colors.inkSoft, flexShrink: 0 }} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-20 mt-1 w-full overflow-hidden rounded-lg shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+            <input
+              autoFocus
+              className="df-input w-full border-b px-3 py-2 text-sm outline-none"
+              style={{ borderColor: colors.line }}
+              placeholder="Rechercher un pays..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <div className="max-h-60 overflow-y-auto">
+              {showEmpty && (
+                <button type="button" onClick={() => { onChange(""); setOpen(false); setQuery(""); }} className="flex w-full items-center px-3 py-2 text-left text-sm hover:bg-black/5" style={{ color: colors.inkSoft }}>
+                  {placeholder}
+                </button>
+              )}
+              {list.map((c) => {
+                const cCode = countryCodeOf(c);
+                return (
+                  <button key={c} type="button" onClick={() => { onChange(c); setOpen(false); setQuery(""); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-black/5">
+                    {cCode ? <img src={`https://flagcdn.com/24x18/${cCode}.png`} alt="" width={20} height={15} style={{ borderRadius: "2px", flexShrink: 0 }} onError={(e) => { e.target.style.display = "none"; }} /> : <span style={{ width: 20, flexShrink: 0 }} />}
+                    <span>{c}</span>
+                  </button>
+                );
+              })}
+              {allowOther && (
+                <button type="button" onClick={() => { onChange("Autre"); setOpen(false); setQuery(""); }} className="flex w-full items-center px-3 py-2 text-left text-sm hover:bg-black/5">
+                  Autre pays
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -4711,10 +6711,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Pays</label>
-            <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.country || ""} onChange={(e) => patch({ country: e.target.value })}>
-              <option value="">— Non précisé —</option>
-              {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
+            <CountrySelect value={local.country || ""} onChange={(v) => patch({ country: v })} />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
@@ -5074,7 +7071,13 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
 function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
-  const totalTTC = documents.reduce((s, d) => s + (d.type === "revision" ? computeRevision(d).montantRevise : d.type === "situation" ? computeSituation(d).netAPayer : computeTotals(d).totalTTC), 0);
+  const totalTTC = documents.reduce((s, d) => s + (
+    d.type === "revision" ? computeRevision(d).montantRevise
+    : d.type === "situation" ? computeSituation(d).netAPayer
+    : d.type === "contrat" ? (Number(d.montantTotalHT) || 0) * (1 + (Number(d.tva) || 0) / 100)
+    : d.type === "relance" ? (Number(d.montantDu) || 0)
+    : computeTotals(d).totalTTC
+  ), 0);
   const paid = account?.paymentStatus === "payé";
 
   const TABS = [
@@ -5698,30 +7701,43 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     rows.push(["SIRET", localDoc.company.siret]);
     rows.push([]);
     rows.push(["Client", localDoc.client.name]);
+    const hidePricesXls = localDoc.type === "livraison" && !localDoc.showPrices;
     rows.push([]);
-    rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT / PV TTC (marge)", "TVA %", "Remise %", "Total"]);
-    computedLines.forEach((l) => {
-      const puValue = l.marginScheme ? Number(l.salePriceTTC) || 0 : Number(l.unitPrice) || 0;
-      const lineTotal = l.marginScheme ? Number(l.saleTTC || 0) : Number(l.totalHT || 0);
-      rows.push([l.designation + (l.marginScheme ? " (régime de la marge)" : ""), "", l.qty, l.unit, puValue, l.tva, l.discount, Number(lineTotal.toFixed(2))]);
-      if (l.marginScheme) {
-        rows.push(["", `Prix d'achat TTC unitaire : ${Number(l.purchasePriceTTC) || 0} — TVA sur marge : ${Number(l.marginTVA || 0).toFixed(2)}`, "", "", "", "", "", ""]);
-      }
-      (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
-        rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + stripMarkup(d.text), "", "", "", "", "", Number(d.price) > 0 ? Number(d.price) : ""]);
+    if (hidePricesXls) {
+      rows.push(["Désignation", "Description", "Qté", "Unité"]);
+      computedLines.forEach((l) => {
+        rows.push([l.designation, "", l.qty, l.unit]);
+        (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
+          rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + stripMarkup(d.text), "", ""]);
+        });
       });
-    });
-    rows.push([]);
-    rows.push(["", "", "", "", "", "", "Sous-total HT", Number(subtotalHT.toFixed(2))]);
-    Object.entries(tvaGroups).forEach(([rate, amount]) => rows.push(["", "", "", "", "", "", `TVA ${rate}%`, Number(amount.toFixed(2))]));
-    rows.push(["", "", "", "", "", "", "Total TTC", Number(totalTTC.toFixed(2))]);
-    if (Number(localDoc.acompte) > 0) {
-      rows.push(["", "", "", "", "", "", `Acompte (${localDoc.acompte}%)`, Number(acompteAmount.toFixed(2))]);
-      rows.push(["", "", "", "", "", "", "Reste à payer", Number(resteAPayer.toFixed(2))]);
+    } else {
+      rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT / PV TTC (marge)", "TVA %", "Remise %", "Total"]);
+      computedLines.forEach((l) => {
+        const puValue = l.marginScheme ? Number(l.salePriceTTC) || 0 : Number(l.unitPrice) || 0;
+        const lineTotal = l.marginScheme ? Number(l.saleTTC || 0) : Number(l.totalHT || 0);
+        rows.push([l.designation + (l.marginScheme ? " (régime de la marge)" : ""), "", l.qty, l.unit, puValue, l.tva, l.discount, Number(lineTotal.toFixed(2))]);
+        if (l.marginScheme) {
+          rows.push(["", `Prix d'achat TTC unitaire : ${Number(l.purchasePriceTTC) || 0} — TVA sur marge : ${Number(l.marginTVA || 0).toFixed(2)}`, "", "", "", "", "", ""]);
+        }
+        (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
+          rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + stripMarkup(d.text), "", "", "", "", "", Number(d.price) > 0 ? Number(d.price) : ""]);
+        });
+      });
+    }
+    if (!hidePricesXls) {
+      rows.push([]);
+      rows.push(["", "", "", "", "", "", "Sous-total HT", Number(subtotalHT.toFixed(2))]);
+      Object.entries(tvaGroups).forEach(([rate, amount]) => rows.push(["", "", "", "", "", "", `TVA ${rate}%`, Number(amount.toFixed(2))]));
+      rows.push(["", "", "", "", "", "", "Total TTC", Number(totalTTC.toFixed(2))]);
+      if (Number(localDoc.acompte) > 0) {
+        rows.push(["", "", "", "", "", "", `Acompte (${localDoc.acompte}%)`, Number(acompteAmount.toFixed(2))]);
+        rows.push(["", "", "", "", "", "", "Reste à payer", Number(resteAPayer.toFixed(2))]);
+      }
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 30 }, { wch: 30 }, { wch: 6 }, { wch: 9 }, { wch: 10 }, { wch: 7 }, { wch: 9 }, { wch: 13 }];
-    XLSX.utils.book_append_sheet(wb, ws, localDoc.type === "devis" ? "Devis" : localDoc.type === "proforma" ? "Proforma" : "Facture");
+    XLSX.utils.book_append_sheet(wb, ws, docTypeLabel(localDoc.type).slice(0, 31));
     XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
   }
 
@@ -5912,10 +7928,9 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                   </label>
                   <label className="text-xs" style={{ color: colors.inkSoft }}>
                     Pays d'origine des marchandises
-                    <select className="df-select mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={pf.originCountry} onChange={(e) => patchProforma({ originCountry: e.target.value })}>
-                      <option value="">— Non précisé —</option>
-                      {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                    <div className="mt-1">
+                      <CountrySelect value={pf.originCountry} onChange={(v) => patchProforma({ originCountry: v })} />
+                    </div>
                   </label>
                   <label className="text-xs" style={{ color: colors.inkSoft }}>
                     Code SH / douanier
@@ -6093,6 +8108,25 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 <input type="checkbox" checked={!!localDoc.showPrices} onChange={(e) => patch({ showPrices: e.target.checked })} />
                 Afficher les prix sur ce bon de livraison (généralement masqués)
               </label>
+            </div>
+          )}
+
+          {localDoc.type === "bpu" && (
+            <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
+              <div className="df-display mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
+                <List size={13} /> Conditions du bordereau
+              </div>
+              <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Un bordereau de prix unitaires fixe des prix de référence — les quantités saisies ci-dessous sont <strong>estimatives</strong>, pas engageantes. Les commandes réelles se feront ensuite via des bons de commande à ces prix.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Durée de validité des prix
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : 12 mois à compter de la notification" value={localDoc.dureeValidite || ""} onChange={(e) => patch({ dureeValidite: e.target.value })} />
+                </label>
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Révision des prix (référence, si applicable)
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : voir REV-003" value={localDoc.referenceRevision || ""} onChange={(e) => patch({ referenceRevision: e.target.value })} />
+                </label>
+              </div>
             </div>
           )}
 
