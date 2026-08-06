@@ -199,7 +199,8 @@ const REVISION_SECTORS = [
   "Gros œuvre / Maçonnerie", "Plomberie / Sanitaire", "Électricité", "Menuiserie",
   "Peinture / Revêtements", "Couverture / Étanchéité", "Chauffage / Climatisation",
   "Carrelage / Sols", "Terrassement / VRD", "Métallerie / Serrurerie", "Isolation",
-  "Travaux publics", "Autre secteur",
+  "Travaux publics", "Réservoirs / Ouvrages hydrauliques", "Conduites / Canalisations",
+  "Équipements électromécaniques", "Autre secteur",
 ];
 
 // Repères par pays pour la révision de prix — uniquement là où la
@@ -322,6 +323,8 @@ function emptyRevisionSector(sector, country) {
     coeffFixe: 0.15,
     terms: [{ ...emptyRevisionTerm(), symbole: info.indexHint || "", poids: 0.85 }],
     dateBase: today,
+    articleCPS: "",
+    tvaRate: 0.20,
     montantInitialHT: "",
     dateActuelle: today,
     valeursActuelles: {},
@@ -2673,17 +2676,23 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       rows.push(["Date de soumission :", "", sec.dateBase ? fr(sec.dateBase) : ""]);
       rows.push(["Symbole d'index:", "", ...terms.map((t) => t.symbole || "")]);
       rows.push(["Index de base:", "", ...terms.map((t) => Number(t.indexBase) || "")]);
+      rows.push(["T.V.A Initiale", "", Number(sec.tvaRate ?? 0.20)]);
+      if (sec.articleCPS) rows.push(["Article de la révision des prix CPS :", "", sec.articleCPS]);
       if (localDoc.dateDemarrage) rows.push(["Ordre de service de commencer des travaux:", "", fr(localDoc.dateDemarrage)]);
       const a = Number(sec.coeffFixe) || 0;
-      const formuleStr = `P/P0 = ${a} ${terms.map((t) => ` + ${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`).join("")}`;
+      // Chaque terme reçoit une lettre (A, B, C...) — comme dans les
+      // vraies notes de calcul marocaines — pour alléger les colonnes.
+      const termLetters = terms.map((_, i) => String.fromCharCode(65 + i));
+      const formuleStr = `P/P0 = ${a} + ${termLetters.join(" + ")}`;
       rows.push(["Formule de révision des prix", "", formuleStr]);
+      terms.forEach((t, i) => rows.push([`${termLetters[i]} = ${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`]));
       rows.push([]);
 
       // En-têtes de colonnes : Nb jours, Situation, un couple [index,
-      // valeur pondérée] par terme, puis P/P0, %, montants, formule, résultat.
+      // valeur pondérée-lettrée] par terme, puis P/P0, %, montants, formule, résultat.
       const headers = ["N.B jours", "Situation"];
       terms.forEach((t) => headers.push(`index "${t.symbole || "?"}"`));
-      terms.forEach((t) => headers.push(`${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`));
+      termLetters.forEach((letter) => headers.push(letter));
       headers.push("P/P0", "%", "MT DE DECOMPTE", "MT A REVISER", "Formule", "MT DE LA REVISION");
       rows.push(headers);
 
@@ -2736,7 +2745,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         if (r.valid) totalHT += r.ecartMontant;
       }
 
-      const tvaRate = 0.20;
+      const tvaRate = Number(sec.tvaRate ?? 0.20);
       rows.push([]);
       rows.push(["", "", "", "", "", "", "", "", "Total de la révision des prix HTVA", "", Number(totalHT.toFixed(2))]);
       rows.push(["", "", "", "", "", "", "", "", `TVA ${Math.round(tvaRate * 100)}%`, "", Number((totalHT * tvaRate).toFixed(2))]);
@@ -2839,9 +2848,19 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                     <button onClick={() => patchSector(sec.id, { useDecomptes: true, decomptes: sec.decomptes?.length ? sec.decomptes : [emptyDecompte()] })} className="grow rounded-md py-1.5 text-xs font-medium" style={{ background: sec.useDecomptes ? colors.ink : "transparent", color: sec.useDecomptes ? "white" : colors.inkSoft }}>Plusieurs décomptes (chantier en plusieurs paiements)</button>
                   </div>
 
-                  <div className="mb-3">
-                    <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date de base (soumission / origine)</label>
-                    <input type="date" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateBase} onChange={(e) => patchSector(sec.id, { dateBase: e.target.value })} />
+                  <div className="mb-3 grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date de base (soumission / origine)</label>
+                      <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateBase} onChange={(e) => patchSector(sec.id, { dateBase: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Article CPS (optionnel)</label>
+                      <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex: 13 page 9 et 10" value={sec.articleCPS || ""} onChange={(e) => patchSector(sec.id, { articleCPS: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Taux de TVA</label>
+                      <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.tvaRate ?? 0.20} onChange={(e) => patchSector(sec.id, { tvaRate: e.target.value })} />
+                    </div>
                   </div>
 
                   {!sec.useDecomptes && (
