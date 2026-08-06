@@ -1672,6 +1672,12 @@ export default function DeviFactApp() {
       try {
         if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
         if (session?.user) {
+          // Vider d'abord toute donnée encore en mémoire (d'un compte
+          // précédent) avant de charger celles de cette connexion —
+          // même précaution que switchOrganization, pour ne jamais
+          // laisser des documents d'un autre compte s'afficher, même
+          // brièvement, pendant le chargement.
+          clearUserData();
           const profile = await loadProfile(session.user.id, session.user.email);
           setActiveOrganization(profile?.organizationId || null);
           await loadUserData();
@@ -3348,7 +3354,9 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                   style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
                   title="Changer d'organisation"
                 >
-                  <UserPlus size={13} /> Invité <ChevronDown size={12} />
+                  <Building2 size={13} /> <span className="max-w-[9rem] truncate">{account.organizationName || "Organisation"}</span>
+                  <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
+                  <ChevronDown size={12} />
                 </button>
                 {orgMenuOpen && (
                   <>
