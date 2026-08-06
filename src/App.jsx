@@ -3014,16 +3014,27 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   }
   function patchMoisValeur(sectorId, decompteId, moisId, termId, value) {
     const sec = sectorLines.find((l) => l.id === sectorId);
-    // Remplit cette valeur ici, ET partout ailleurs dans le secteur où
-    // ce terme n'a encore aucune valeur saisie — jamais là où une
-    // valeur différente a déjà été mise exprès (cas particulier).
-    const decomptes = (sec?.decomptes || []).map((d) => ({
-      ...d,
-      mois: (d.mois || []).map((m) => {
-        if (m.id === moisId) return { ...m, valeurs: { ...(m.valeurs || {}), [termId]: value } };
-        const dejaRempli = m.valeurs?.[termId] !== undefined && m.valeurs?.[termId] !== "";
-        if (dejaRempli) return m;
-        return { ...m, valeurs: { ...(m.valeurs || {}), [termId]: value } };
+    const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
+    const m = (d?.mois || []).find((mm) => mm.id === moisId);
+    patchMois(sectorId, decompteId, moisId, { valeurs: { ...(m?.valeurs || {}), [termId]: value } });
+  }
+  // Propage la valeur d'un mois vers les autres mois qui n'ont encore
+  // rien pour ce terme — seulement à la fin de la saisie (quitter le
+  // champ), jamais à chaque frappe, sinon un nombre à plusieurs
+  // chiffres se retrouve tronqué au premier chiffre tapé.
+  function propagateMoisValeur(sectorId, decompteId, moisId, termId) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
+    const m = (d?.mois || []).find((mm) => mm.id === moisId);
+    const value = m?.valeurs?.[termId];
+    if (value === undefined || value === "") return;
+    const decomptes = (sec?.decomptes || []).map((dd) => ({
+      ...dd,
+      mois: (dd.mois || []).map((mm) => {
+        if (mm.id === moisId) return mm;
+        const dejaRempli = mm.valeurs?.[termId] !== undefined && mm.valeurs?.[termId] !== "";
+        if (dejaRempli) return mm;
+        return { ...mm, valeurs: { ...(mm.valeurs || {}), [termId]: value } };
       }),
     }));
     patchSector(sectorId, { decomptes });
@@ -3340,7 +3351,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                                       {(sec.terms || []).map((t) => (
                                         <div key={t.id}>
                                           <label className="mb-0.5 block truncate text-xs" style={{ color: colors.inkSoft }} title={t.symbole}>{t.symbole || "Indice"}</label>
-                                          <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.valeurs?.[t.id] || ""} onChange={(e) => patchMoisValeur(sec.id, d.id, m.id, t.id, e.target.value)} />
+                                          <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.valeurs?.[t.id] || ""} onChange={(e) => patchMoisValeur(sec.id, d.id, m.id, t.id, e.target.value)} onBlur={() => propagateMoisValeur(sec.id, d.id, m.id, t.id)} />
                                         </div>
                                       ))}
                                     </div>
