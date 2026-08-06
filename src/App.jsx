@@ -1659,6 +1659,34 @@ export default function DeviFactApp() {
     setView("dashboard");
   }
 
+  // Pour une personne arrivée uniquement via une invitation (jamais
+  // inscrite par elle-même) : lui permet de se créer son propre
+  // espace, séparé de celui où elle a été invitée, en réutilisant
+  // exactement la même logique que l'inscription classique.
+  const [creatingOwnOrg, setCreatingOwnOrg] = useState(false);
+  async function createMyOwnOrganization() {
+    const { data: { user } } = await db.auth.getUser();
+    if (!user) return;
+    setCreatingOwnOrg(true);
+    try {
+      const { data: newOrg, error: orgError } = await db.from("organizations").insert({ name: user.email }).select("id").single();
+      if (orgError) {
+        console.error("Erreur de création de l'organisation", orgError);
+        alert("Impossible de créer ton espace pour le moment. Réessaie dans un instant.");
+        return;
+      }
+      const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: user.id, role: "owner", status: "active" });
+      if (memberError) {
+        console.error("Erreur d'ajout comme propriétaire", memberError);
+        alert("Impossible de créer ton espace pour le moment. Réessaie dans un instant.");
+        return;
+      }
+      await switchOrganization(newOrg.id);
+    } finally {
+      setCreatingOwnOrg(false);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       await Promise.all([loadPlans(), loadSiteSettings()]);
@@ -2459,7 +2487,7 @@ export default function DeviFactApp() {
       return;
     }
   }
-  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
+  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
 
   if (view === "revision-sector") {
     const countryInfo = getRevisionCountryInfo(revisionCountry);
@@ -3291,7 +3319,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   );
 }
 
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, siteSettings, companyProfile, onSetCompanyType }) {
+function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType }) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
   const mainTabs = [
@@ -3346,38 +3374,54 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             )}
           </div>
           <div className="flex items-center gap-2">
-            {account?.memberships?.length > 1 && (
-              <div className="relative">
-                <button
-                  onClick={() => setOrgMenuOpen((v) => !v)}
-                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium"
-                  style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
-                  title="Changer d'organisation"
-                >
-                  <Building2 size={13} /> <span className="max-w-[9rem] truncate">{account.organizationName || "Organisation"}</span>
-                  <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
-                  <ChevronDown size={12} />
-                </button>
-                {orgMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
-                    <div className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                      {account.memberships.map((m) => (
-                        <button
-                          key={m.organizationId}
-                          onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }}
-                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
-                          style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}
-                        >
-                          <span className="truncate">{m.name || "Organisation"}</span>
-                          <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            {(() => {
+              const memberships = account?.memberships || [];
+              const hasOwnOrg = memberships.some((m) => m.role === "owner");
+              if (memberships.length <= 1 && hasOwnOrg) return null;
+              return (
+                <div className="relative">
+                  <button
+                    onClick={() => setOrgMenuOpen((v) => !v)}
+                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium"
+                    style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
+                    title="Changer d'organisation"
+                  >
+                    <Building2 size={13} /> <span className="max-w-[9rem] truncate">{account.organizationName || "Organisation"}</span>
+                    <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
+                    <ChevronDown size={12} />
+                  </button>
+                  {orgMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
+                      <div className="absolute right-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                        {memberships.map((m) => (
+                          <button
+                            key={m.organizationId}
+                            onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }}
+                            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
+                            style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}
+                          >
+                            <span className="truncate">{m.name || "Organisation"}</span>
+                            <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
+                          </button>
+                        ))}
+                        {!hasOwnOrg && (
+                          <button
+                            onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }}
+                            disabled={creatingOwnOrg}
+                            className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium"
+                            style={{ borderColor: colors.line, color: colors.brassDark }}
+                          >
+                            {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                            {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
             <div className="flex items-center gap-1">
               {rightTabs.map(({ id, label, icon: Icon }) => (
                 <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
