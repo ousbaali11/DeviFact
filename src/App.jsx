@@ -4,6 +4,7 @@ import jsPDF from "jspdf";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
   ArrowRightLeft, Eraser, ChevronUp, ChevronDown, LayoutList, ArrowLeft, TrendingUp, Info, Minus,
@@ -2357,119 +2358,191 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   );
 }
 
+const REV_COL = {
+  label: "#EDEDED", jours: "#DCEEFB", situation: "#E2F0D9", index: "#FFF2CC",
+  lettre: "#FCE4D6", ppo: "#E4DFEC", pct: "#FCE4EC", montant: "#D9F2E6",
+  formule: "#E8ECF5", revision: "#FAD9D9", dpLabel: "#D6E4F0", blank: "#000000",
+};
+const upx = (v) => String(v ?? "").toUpperCase();
+
 const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, watermarkEnabled = true }, ref) {
   const sectorLines = getRevisionSectors(doc);
-  const total = computeRevision(doc);
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
-  const inkSoft = "#4A5B63", brass = "#B8763E", brassDark = "#8F5C2E", line = "#DAE1DC";
-  const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
-  const mono = { fontFamily: "'IBM Plex Mono', monospace" };
-  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
+  const cellStyle = { border: "1px solid #B7B7B7", padding: "3px 5px", verticalAlign: "middle" };
+  const watermarkText = upx(siteSettings?.name || "DeviFact");
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
-    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10.5pt", lineHeight: 1.4,
+    fontFamily: "'Inter', sans-serif", color: ink, fontSize: "7.5pt", lineHeight: 1.3,
     background: pageBg,
-    width: "210mm", minHeight: "294mm", boxSizing: "border-box",
-    padding: "24px 28px", position: "relative", overflow: "hidden",
+    width: "297mm", minHeight: "210mm", boxSizing: "border-box",
+    padding: "16px 18px", position: "relative", overflow: "hidden",
   };
 
   return (
     <div ref={ref} className="print-doc" style={pStyle}>
       {watermarkEnabled && (
         <div style={{
-          position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-32deg)",
-          fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.08)",
+          position: "absolute", top: "45%", left: "50%", transform: "translate(-50%, -50%) rotate(-25deg)",
+          fontFamily: "'Space Grotesk', sans-serif", fontSize: `${watermarkSize}pt`, fontWeight: 700, color: "rgba(27,42,51,0.07)",
           whiteSpace: "nowrap", pointerEvents: "none",
         }}>{watermarkText}</div>
       )}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: "14pt" }}>NOTE DE CALCUL DE LA RÉVISION DES PRIX</div>
-          <div style={{ color: inkSoft, marginTop: "4px" }}>N° : {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
-          {doc.marcheNumero && <div style={{ color: inkSoft }}>Marché N° : {doc.marcheNumero}</div>}
-        </div>
-        {doc.company.logo ? (
-          <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} />
-        ) : (
-          <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>
-        )}
-      </div>
 
-      {doc.objet && (
-        <div style={{ marginTop: "14px", fontSize: "9.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{doc.objet}</div>
-      )}
+      {sectorLines.map((sec, secIdx) => {
+        const terms = sec.terms || [];
+        const termLetters = terms.map((_, i) => String.fromCharCode(65 + i));
+        const nCols = 8 + terms.length * 2;
+        const a = Number(sec.coeffFixe) || 0;
+        const headerCols = [
+          { label: "N.B JOURS", color: REV_COL.jours },
+          { label: "SITUATION", color: REV_COL.situation },
+          ...terms.map((t) => ({ label: `INDEX "${upx(t.symbole || "?")}"`, color: REV_COL.index })),
+          ...termLetters.map((l) => ({ label: l, color: REV_COL.lettre })),
+          { label: "P/P0", color: REV_COL.ppo },
+          { label: "%", color: REV_COL.pct },
+          { label: "MT DE DECOMPTE", color: REV_COL.montant },
+          { label: "MT A REVISER", color: REV_COL.montant },
+          { label: "FORMULE", color: REV_COL.formule },
+          { label: "MT DE LA REVISION", color: REV_COL.revision },
+        ];
 
-      <div style={{ marginTop: "16px", background: box, borderRadius: "4px", padding: "10px 14px", position: "relative", zIndex: 1 }}>
-        <div style={{ fontWeight: 700 }}>ste : {doc.company.name || "—"}</div>
-      </div>
-
-      <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
-        <div style={{ fontWeight: 700, marginBottom: "8px", fontSize: "11pt" }}>Calcul de la révision, par secteur</div>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9pt" }}>
-          <thead>
-            <tr style={{ borderBottom: `2px solid ${ink}` }}>
-              <th style={{ padding: "6px 4px", textAlign: "left" }}>Secteur</th>
-              <th style={{ padding: "6px 4px", textAlign: "left" }}>Termes (symbole : base → valeur)</th>
-              <th style={{ padding: "6px 4px", textAlign: "right" }}>Montant initial</th>
-              <th style={{ padding: "6px 4px", textAlign: "right" }}>Date</th>
-              <th style={{ padding: "6px 4px", textAlign: "right" }}>Montant révisé</th>
+        let totalHT = 0;
+        const bodyRows = [];
+        (sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d, dIdx) => {
+          if (d.isBlank) {
+            bodyRows.push(<tr key={`blank-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.blank, height: "10px" }}></td></tr>);
+            return;
+          }
+          if (d.label) {
+            bodyRows.push(<tr key={`lbl-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.dpLabel, fontWeight: 700, textAlign: "left" }}>{upx(d.label)}</td></tr>);
+          }
+          const dr = computeDecompteRevision(sec, d);
+          const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
+          (d.mois || []).forEach((m, mIdx) => {
+            const detail = (dr.detail || [])[mIdx];
+            const cells = [
+              Number(m.jours) || "",
+              m.date ? fr(m.date) : "",
+              ...terms.map((t) => Number(m.valeurs?.[t.id]) || ""),
+              ...terms.map((t) => {
+                const base = Number(t.indexBase), val = Number(m.valeurs?.[t.id]);
+                return base && val ? ((Number(t.poids) || 0) * (val / base)).toFixed(4) : "";
+              }),
+              detail?.valid ? detail.coefficient.toFixed(4) : "",
+              detail?.valid ? detail.delta.toFixed(4) : "",
+              formatMoney(Number(d.montantTotal) || 0, doc.currency),
+              formatMoney(Number(d.montantTotal) || 0, doc.currency),
+              detail?.valid ? upx(`x ${detail.delta.toFixed(4)} x ${m.jours}/${totalJours}`) : "",
+              detail?.valid ? formatMoney(detail.ecart, doc.currency) : "",
+            ];
+            bodyRows.push(
+              <tr key={`${dIdx}-${mIdx}`}>
+                {cells.map((v, i) => <td key={i} style={{ ...cellStyle, background: headerCols[i].color, textAlign: i < 2 ? "left" : "right" }}>{v}</td>)}
+              </tr>
+            );
+          });
+          const subCells = new Array(nCols).fill("");
+          subCells[0] = totalJours;
+          subCells[nCols - 1] = dr.valid ? formatMoney(dr.ecartMontant, doc.currency) : "";
+          bodyRows.push(
+            <tr key={`sub-${dIdx}`}>
+              {subCells.map((v, i) => <td key={i} style={{ ...cellStyle, background: v !== "" ? headerCols[i].color : "transparent", fontWeight: 700, textAlign: i < 2 ? "left" : "right" }}>{v}</td>)}
             </tr>
-          </thead>
-          <tbody>
-            {sectorLines.flatMap((l, idx) => {
-              const terms = l.terms || [];
-              if (l.useDecomptes && Array.isArray(l.decomptes) && l.decomptes.length) {
-                return l.decomptes.filter((d) => !d.isBlank).map((d, dIdx) => {
-                  const dr = computeDecompteRevision(l, d);
-                  const moisCount = (d.mois || []).length;
-                  const termsSummary = `${moisCount} mois — ${terms.map((t) => t.symbole || "?").join(", ")}`;
-                  return (
-                    <tr key={`${l.id || idx}-${d.id || dIdx}`} style={{ borderBottom: `1px solid ${line}` }}>
-                      <td style={{ padding: "6px 4px" }}>{l.sector}{d.label ? ` — ${d.label}` : ` — décompte ${dIdx + 1}`}</td>
-                      <td style={{ padding: "6px 4px", fontSize: "7.5pt", color: inkSoft }}>{termsSummary}</td>
-                      <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(d.montantTotal) || 0, doc.currency)}</td>
-                      <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{d.dateDecompte ? new Date(d.dateDecompte).toLocaleDateString("fr-FR") : "—"}</td>
-                      <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{dr.valid ? formatMoney(dr.montantRevise, doc.currency) : "—"}</td>
-                    </tr>
-                  );
-                });
-              }
-              const r = computeRevisionLine(l);
-              const termsSummary = terms.map((t) => `${t.symbole || "?"} : ${t.indexBase || "—"} → ${l.valeursActuelles?.[t.id] || "—"}`).join(" · ");
-              return [(
-                <tr key={l.id || idx} style={{ borderBottom: `1px solid ${line}` }}>
-                  <td style={{ padding: "6px 4px" }}>{l.sector}</td>
-                  <td style={{ padding: "6px 4px", fontSize: "7.5pt", color: inkSoft }}>{termsSummary}</td>
-                  <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(l.montantInitialHT) || 0, doc.currency)}</td>
-                  <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{l.dateActuelle ? new Date(l.dateActuelle).toLocaleDateString("fr-FR") : "—"}</td>
-                  <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{r.valid ? formatMoney(r.montantRevise, doc.currency) : "—"}</td>
-                </tr>
-              )];
-            })}
-          </tbody>
-        </table>
+          );
+          if (dr.valid) totalHT += dr.ecartMontant;
+        });
+        if (!sec.useDecomptes) {
+          const rr = computeRevisionLine(sec);
+          const cells = [
+            "", sec.dateActuelle ? fr(sec.dateActuelle) : "",
+            ...terms.map((t) => Number(sec.valeursActuelles?.[t.id]) || ""),
+            ...terms.map((t) => {
+              const base = Number(t.indexBase), val = Number(sec.valeursActuelles?.[t.id]);
+              return base && val ? ((Number(t.poids) || 0) * (val / base)).toFixed(4) : "";
+            }),
+            rr.valid ? rr.coefficient.toFixed(4) : "",
+            rr.valid ? (rr.coefficient - 1).toFixed(4) : "",
+            formatMoney(Number(sec.montantInitialHT) || 0, doc.currency),
+            formatMoney(Number(sec.montantInitialHT) || 0, doc.currency),
+            "",
+            rr.valid ? formatMoney(rr.ecartMontant, doc.currency) : "",
+          ];
+          bodyRows.push(<tr key="simple">{cells.map((v, i) => <td key={i} style={{ ...cellStyle, background: headerCols[i].color, textAlign: i < 2 ? "left" : "right" }}>{v}</td>)}</tr>);
+          if (rr.valid) totalHT += rr.ecartMontant;
+        }
+        const tvaRate = Number(sec.tvaRate ?? 0.20);
 
-        {doc.showTotal && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
-            <div style={{ width: "260px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px", color: inkSoft }}>
-                <span>Écart total</span>
-                <span style={mono}>{total.ecartMontant >= 0 ? "+" : ""}{formatMoney(total.ecartMontant, doc.currency)} ({total.ecartPct >= 0 ? "+" : ""}{total.ecartPct.toFixed(2)}%)</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: ink, color: "white", fontWeight: 700, borderRadius: "4px" }}>
-                <span>Total révisé HT</span>
-                <span style={mono}>{formatMoney(total.montantRevise, doc.currency)}</span>
-              </div>
-            </div>
+        return (
+          <div key={sec.id || secIdx} style={{ position: "relative", zIndex: 1, marginBottom: "22px", pageBreakAfter: secIdx < sectorLines.length - 1 ? "always" : "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <tbody>
+                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, fontSize: "10pt", textAlign: "left" }}>NOTE DE CALCUL DE LA REVISION DES PRIX — {upx(sec.sector)}</td></tr>
+                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>{upx(`MARCHE N°: ${doc.marcheNumero || ""}`)}</td></tr>
+                {doc.objet && <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{upx(doc.objet)}</td></tr>}
+                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>{upx(`STE : ${doc.company.name || ""}`)}</td></tr>
+                <tr>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>DATE DE SOUMISSION :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{sec.dateBase ? fr(sec.dateBase) : ""}</td>
+                </tr>
+                <tr>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>SYMBOLE D'INDEX :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{terms.map((t) => upx(t.symbole)).join(" · ")}</td>
+                </tr>
+                <tr>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>INDEX DE BASE :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{terms.map((t) => t.indexBase).join(" · ")}</td>
+                </tr>
+                <tr>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>T.V.A INITIALE :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{tvaRate}</td>
+                </tr>
+                {sec.articleCPS && (
+                  <tr>
+                    <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>ARTICLE CPS :</td>
+                    <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{upx(sec.articleCPS)}</td>
+                  </tr>
+                )}
+                {doc.dateDemarrage && (
+                  <tr>
+                    <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>ORDRE DE SERVICE :</td>
+                    <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{fr(doc.dateDemarrage)}</td>
+                  </tr>
+                )}
+                <tr>
+                  <td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>{upx(`FORMULE DE REVISION DES PRIX : P/P0 = ${a} + ${termLetters.join(" + ")}`)}</td>
+                </tr>
+                {terms.map((t, i) => (
+                  <tr key={t.id}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{upx(`${termLetters[i]} = ${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`)}</td></tr>
+                ))}
+                <tr>{headerCols.map((h, i) => <td key={i} style={{ ...cellStyle, background: h.color, fontWeight: 700, textAlign: "center" }}>{h.label}</td>)}</tr>
+                {bodyRows}
+                <tr>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right" }}>TOTAL DE LA REVISION DES PRIX HTVA</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right" }}>{formatMoney(totalHT, doc.currency)}</td>
+                </tr>
+                <tr>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right" }}>{upx(`TVA ${Math.round(tvaRate * 100)}%`)}</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right" }}>{formatMoney(totalHT * tvaRate, doc.currency)}</td>
+                </tr>
+                <tr>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right" }}>TOTAL DE LA REVISION DES PRIX TTC</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right" }}>{formatMoney(totalHT * (1 + tvaRate), doc.currency)}</td>
+                </tr>
+                <tr>
+                  <td colSpan={Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center" }}>ENTREPRISE</td>
+                  <td colSpan={nCols - Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center" }}>SERVICE / MAÎTRE D'OUVRAGE</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+        );
+      })}
 
       {doc.notes && (
-        <div style={{ marginTop: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>
-          <div style={{ fontWeight: 700, marginBottom: "4px" }}>Note :</div>
-          <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{renderMarkup(doc.notes)}</div>
+        <div style={{ marginTop: "16px", fontSize: "9pt", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, marginBottom: "4px" }}>NOTE :</div>
+          <div style={{ whiteSpace: "pre-wrap" }}>{upx(doc.notes)}</div>
         </div>
       )}
     </div>
@@ -2584,7 +2657,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     try {
       const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
       const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
       const imgHeight = (canvas.height * pageWidth) / canvas.width;
@@ -2660,108 +2733,219 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   // nombre de termes de la formule, reproduisant la mise en page de
   // ce type de document (index de base, formule détaillée, décomptes,
   // total HT/TVA/TTC, cadres de signature).
-  function exportExcelMaroc() {
-    const wb = XLSX.utils.book_new();
+  async function exportExcelMaroc() {
+    const up = (v) => String(v ?? "").toUpperCase();
+    // Palette de couleurs claires uniquement (jamais foncées), sauf la
+    // ligne "vide" qui doit être noire — demandé explicitement.
+    const COL = {
+      label: "FFEDEDED",     // tous les libellés — une seule couleur
+      jours: "FFDCEEFB",
+      situation: "FFE2F0D9",
+      index: "FFFFF2CC",
+      lettre: "FFFCE4D6",
+      ppo: "FFE4DFEC",
+      pct: "FFFCE4EC",
+      montant: "FFD9F2E6",   // MT DE DECOMPTE et MT A REVISER = même valeur = même couleur
+      formule: "FFE8ECF5",
+      revision: "FFFAD9D9",
+      dpLabel: "FFD6E4F0",
+      blank: "FF000000",
+    };
+    const thinBorder = { style: "thin", color: { argb: "FFB7B7B7" } };
+    const allBorders = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder };
+    function fillCell(cell, color, opts = {}) {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
+      cell.border = allBorders;
+      if (opts.bold) cell.font = { bold: true };
+      if (opts.align) cell.alignment = { horizontal: opts.align, vertical: "middle", wrapText: true };
+      else cell.alignment = { vertical: "middle", wrapText: true };
+    }
+
+    const workbook = new ExcelJS.Workbook();
     sectorLines.forEach((sec) => {
       const terms = sec.terms || [];
-      const rows = [];
-      rows.push(["NOTE DE CALCUL DE LA REVISION DES PRIX"]);
-      rows.push([]);
-      rows.push([`MARCHE N°: ${localDoc.marcheNumero || ""}`]);
-      rows.push([]);
-      rows.push([localDoc.objet || ""]);
-      rows.push([]);
-      rows.push([`ste : ${localDoc.company.name || ""}`]);
-      rows.push([]);
-      rows.push(["Date de soumission :", "", sec.dateBase ? fr(sec.dateBase) : ""]);
-      rows.push(["Symbole d'index:", "", ...terms.map((t) => t.symbole || "")]);
-      rows.push(["Index de base:", "", ...terms.map((t) => Number(t.indexBase) || "")]);
-      rows.push(["T.V.A Initiale", "", Number(sec.tvaRate ?? 0.20)]);
-      if (sec.articleCPS) rows.push(["Article de la révision des prix CPS :", "", sec.articleCPS]);
-      if (localDoc.dateDemarrage) rows.push(["Ordre de service de commencer des travaux:", "", fr(localDoc.dateDemarrage)]);
-      const a = Number(sec.coeffFixe) || 0;
-      // Chaque terme reçoit une lettre (A, B, C...) — comme dans les
-      // vraies notes de calcul marocaines — pour alléger les colonnes.
-      const termLetters = terms.map((_, i) => String.fromCharCode(65 + i));
-      const formuleStr = `P/P0 = ${a} + ${termLetters.join(" + ")}`;
-      rows.push(["Formule de révision des prix", "", formuleStr]);
-      terms.forEach((t, i) => rows.push([`${termLetters[i]} = ${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`]));
-      rows.push([]);
+      const nCols = 8 + terms.length * 2; // nombre total de colonnes du tableau
+      const sheetName0 = up(sec.sector || "SECTEUR").replace(/[\\/*?:[\]]/g, "").slice(0, 31) || "SECTEUR";
+      let sheetName = sheetName0, n = 2;
+      while (workbook.getWorksheet(sheetName)) { sheetName = `${sheetName0.slice(0, 28)} (${n})`; n++; }
+      const ws = workbook.addWorksheet(sheetName);
 
-      // En-têtes de colonnes : Nb jours, Situation, un couple [index,
-      // valeur pondérée-lettrée] par terme, puis P/P0, %, montants, formule, résultat.
-      const headers = ["N.B jours", "Situation"];
-      terms.forEach((t) => headers.push(`index "${t.symbole || "?"}"`));
-      termLetters.forEach((letter) => headers.push(letter));
-      headers.push("P/P0", "%", "MT DE DECOMPTE", "MT A REVISER", "Formule", "MT DE LA REVISION");
-      rows.push(headers);
+      // Largeurs de colonnes généreuses pour qu'aucun texte ne soit
+      // masqué à l'ouverture du fichier.
+      const widths = [10, 14, ...terms.map(() => 12), ...terms.map(() => 8), 9, 9, 15, 15, 22, 15];
+      widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+      let r = 1;
+      function labelRow(text, mergeTo) {
+        ws.mergeCells(r, 1, r, mergeTo || Math.min(4, nCols));
+        const cell = ws.getCell(r, 1);
+        cell.value = up(text);
+        fillCell(cell, COL.label, { bold: true, align: "left" });
+        r++;
+      }
+      function kvRow(label, values) {
+        const cell = ws.getCell(r, 1);
+        cell.value = up(label);
+        fillCell(cell, COL.label, { bold: true, align: "left" });
+        (values || []).forEach((v, i) => {
+          const c = ws.getCell(r, 3 + i);
+          c.value = v;
+          fillCell(c, COL.label);
+        });
+        r++;
+      }
+
+      labelRow("NOTE DE CALCUL DE LA REVISION DES PRIX", nCols);
+      r++;
+      labelRow(`MARCHE N°: ${localDoc.marcheNumero || ""}`, nCols);
+      r++;
+      labelRow(localDoc.objet || "", nCols);
+      r++;
+      labelRow(`STE : ${localDoc.company.name || ""}`, nCols);
+      r++;
+      kvRow("Date de soumission :", [sec.dateBase ? fr(sec.dateBase) : ""]);
+      kvRow("Symbole d'index:", terms.map((t) => up(t.symbole || "")));
+      kvRow("Index de base:", terms.map((t) => Number(t.indexBase) || ""));
+      kvRow("T.V.A Initiale", [Number(sec.tvaRate ?? 0.20)]);
+      if (sec.articleCPS) kvRow("Article de la révision des prix CPS :", [up(sec.articleCPS)]);
+      if (localDoc.dateDemarrage) kvRow("Ordre de service de commencer des travaux:", [fr(localDoc.dateDemarrage)]);
+      const a = Number(sec.coeffFixe) || 0;
+      const termLetters = terms.map((_, i) => String.fromCharCode(65 + i));
+      kvRow("Formule de révision des prix", [up(`P/P0 = ${a} + ${termLetters.join(" + ")}`)]);
+      terms.forEach((t, i) => kvRow(`${termLetters[i]} = ${t.poids}*(${up(t.symbole || "?")}/${up(t.symbole || "?")}0)`, []));
+      r++;
+
+      // En-têtes de colonnes
+      const headers = ["N.B JOURS", "SITUATION"];
+      terms.forEach((t) => headers.push(`INDEX "${up(t.symbole || "?")}"`));
+      termLetters.forEach((l) => headers.push(l));
+      headers.push("P/P0", "%", "MT DE DECOMPTE", "MT A REVISER", "FORMULE", "MT DE LA REVISION");
+      const headerColors = ["jours", "situation", ...terms.map(() => "index"), ...terms.map(() => "lettre"), "ppo", "pct", "montant", "montant", "formule", "revision"];
+      headers.forEach((h, i) => {
+        const c = ws.getCell(r, i + 1);
+        c.value = h;
+        fillCell(c, COL[headerColors[i]], { bold: true, align: "center" });
+      });
+      const headerRowIdx = r;
+      r++;
 
       let totalHT = 0;
       (sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d) => {
-        if (d.isBlank) { rows.push([]); return; }
+        if (d.isBlank) {
+          // Ligne vide, cellules fusionnées, remplie en noir.
+          ws.mergeCells(r, 1, r, nCols);
+          const c = ws.getCell(r, 1);
+          c.value = "";
+          c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COL.blank } };
+          c.border = allBorders;
+          r++;
+          return;
+        }
+        // Libellé du décompte (DP), sur sa propre ligne, cellules fusionnées.
+        if (d.label) {
+          ws.mergeCells(r, 1, r, nCols);
+          const c = ws.getCell(r, 1);
+          c.value = up(d.label);
+          fillCell(c, COL.dpLabel, { bold: true, align: "left" });
+          r++;
+        }
         const dr = computeDecompteRevision(sec, d);
         const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
         (d.mois || []).forEach((m, mIdx) => {
           const detail = (dr.detail || [])[mIdx];
-          const row = [Number(m.jours) || "", m.date ? fr(m.date) : ""];
-          terms.forEach((t) => row.push(Number(m.valeurs?.[t.id]) || ""));
+          const values = [Number(m.jours) || "", m.date ? fr(m.date) : ""];
+          terms.forEach((t) => values.push(Number(m.valeurs?.[t.id]) || ""));
           terms.forEach((t) => {
             const base = Number(t.indexBase), val = Number(m.valeurs?.[t.id]);
-            row.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
+            values.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
           });
-          row.push(detail?.valid ? Number(detail.coefficient.toFixed(4)) : "");
-          row.push(detail?.valid ? Number(detail.delta.toFixed(4)) : "");
-          row.push(Number(d.montantTotal) || "");
-          row.push(Number(d.montantTotal) || "");
-          row.push(detail?.valid ? `x ${detail.delta.toFixed(4)} x ${m.jours}/${totalJours}` : "");
-          row.push(detail?.valid ? Number(detail.ecart.toFixed(2)) : "");
-          rows.push(row);
+          values.push(detail?.valid ? Number(detail.coefficient.toFixed(4)) : "");
+          values.push(detail?.valid ? Number(detail.delta.toFixed(4)) : "");
+          values.push(Number(d.montantTotal) || "");
+          values.push(Number(d.montantTotal) || "");
+          values.push(detail?.valid ? up(`x ${detail.delta.toFixed(4)} x ${m.jours}/${totalJours}`) : "");
+          values.push(detail?.valid ? Number(detail.ecart.toFixed(2)) : "");
+          values.forEach((v, i) => {
+            const c = ws.getCell(r, i + 1);
+            c.value = v;
+            fillCell(c, COL[headerColors[i]]);
+          });
+          r++;
         });
-        // Ligne de sous-total du décompte (comme dans le vrai document).
-        const subtotalRow = new Array(2 + terms.length * 2 + 6).fill("");
-        subtotalRow[0] = totalJours;
-        subtotalRow[subtotalRow.length - 1] = dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "";
-        rows.push(subtotalRow);
+        // Sous-total du décompte.
+        const subCell = ws.getCell(r, 1);
+        subCell.value = totalJours;
+        fillCell(subCell, COL.jours, { bold: true });
+        const subResult = ws.getCell(r, nCols);
+        subResult.value = dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "";
+        fillCell(subResult, COL.revision, { bold: true });
+        for (let cc = 2; cc < nCols; cc++) { const c = ws.getCell(r, cc); c.value = ""; c.border = allBorders; }
+        r++;
         if (dr.valid) totalHT += dr.ecartMontant;
       });
 
-      // Si le secteur n'utilise pas les décomptes multiples, on
-      // ajoute quand même une seule ligne de résultat.
       if (!sec.useDecomptes) {
-        const r = computeRevisionLine(sec);
-        const row = ["", sec.dateActuelle ? fr(sec.dateActuelle) : ""];
-        terms.forEach((t) => row.push(Number(sec.valeursActuelles?.[t.id]) || ""));
+        const rr = computeRevisionLine(sec);
+        const values = ["", sec.dateActuelle ? fr(sec.dateActuelle) : ""];
+        terms.forEach((t) => values.push(Number(sec.valeursActuelles?.[t.id]) || ""));
         terms.forEach((t) => {
           const base = Number(t.indexBase), val = Number(sec.valeursActuelles?.[t.id]);
-          row.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
+          values.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
         });
-        row.push(r.valid ? Number(r.coefficient.toFixed(4)) : "");
-        row.push(r.valid ? Number((r.coefficient - 1).toFixed(4)) : "");
-        row.push(Number(sec.montantInitialHT) || "");
-        row.push(Number(sec.montantInitialHT) || "");
-        row.push("");
-        row.push(r.valid ? Number(r.ecartMontant.toFixed(2)) : "");
-        rows.push(row);
-        if (r.valid) totalHT += r.ecartMontant;
+        values.push(rr.valid ? Number(rr.coefficient.toFixed(4)) : "");
+        values.push(rr.valid ? Number((rr.coefficient - 1).toFixed(4)) : "");
+        values.push(Number(sec.montantInitialHT) || "");
+        values.push(Number(sec.montantInitialHT) || "");
+        values.push("");
+        values.push(rr.valid ? Number(rr.ecartMontant.toFixed(2)) : "");
+        values.forEach((v, i) => {
+          const c = ws.getCell(r, i + 1);
+          c.value = v;
+          fillCell(c, COL[headerColors[i]]);
+        });
+        r++;
+        if (rr.valid) totalHT += rr.ecartMontant;
       }
 
+      r++;
       const tvaRate = Number(sec.tvaRate ?? 0.20);
-      rows.push([]);
-      rows.push(["", "", "", "", "", "", "", "", "Total de la révision des prix HTVA", "", Number(totalHT.toFixed(2))]);
-      rows.push(["", "", "", "", "", "", "", "", `TVA ${Math.round(tvaRate * 100)}%`, "", Number((totalHT * tvaRate).toFixed(2))]);
-      rows.push(["", "", "", "", "", "", "", "", "Total de la révision des prix TTC", "", Number((totalHT * (1 + tvaRate)).toFixed(2))]);
-      rows.push([]);
-      rows.push(["ENTREPRISE", "", "", "", "", "", "", "", "SERVICE / MAÎTRE D'OUVRAGE"]);
+      function totalRow(label, value, color) {
+        ws.mergeCells(r, 1, r, nCols - 2);
+        const lc = ws.getCell(r, 1);
+        lc.value = up(label);
+        fillCell(lc, COL.label, { bold: true, align: "right" });
+        ws.mergeCells(r, nCols - 1, r, nCols);
+        const vc = ws.getCell(r, nCols - 1);
+        vc.value = Number(value.toFixed(2));
+        fillCell(vc, color, { bold: true, align: "right" });
+        r++;
+      }
+      totalRow("Total de la révision des prix HTVA", totalHT, COL.revision);
+      totalRow(`TVA ${Math.round(tvaRate * 100)}%`, totalHT * tvaRate, COL.revision);
+      totalRow("Total de la révision des prix TTC", totalHT * (1 + tvaRate), COL.revision);
+      r++;
+      ws.mergeCells(r, 1, r, Math.floor(nCols / 2));
+      const ent = ws.getCell(r, 1);
+      ent.value = "ENTREPRISE";
+      fillCell(ent, COL.label, { bold: true, align: "center" });
+      ws.mergeCells(r, Math.floor(nCols / 2) + 1, r, nCols);
+      const srv = ws.getCell(r, Math.floor(nCols / 2) + 1);
+      srv.value = "SERVICE / MAÎTRE D'OUVRAGE";
+      fillCell(srv, COL.label, { bold: true, align: "center" });
 
-      const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws["!cols"] = [{ wch: 10 }, { wch: 16 }, ...terms.map(() => ({ wch: 10 })), ...terms.map(() => ({ wch: 12 })), { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }];
-      // Nom de feuille limité à 31 caractères (limite Excel), sans caractères interdits.
-      const sheetName = (sec.sector || "Secteur").replace(/[\\/*?:[\]]/g, "").slice(0, 31) || `Secteur ${wb.SheetNames.length + 1}`;
-      let uniqueName = sheetName, n = 2;
-      while (wb.SheetNames.includes(uniqueName)) { uniqueName = `${sheetName.slice(0, 28)} (${n})`; n++; }
-      XLSX.utils.book_append_sheet(wb, ws, uniqueName);
+      ws.views = [{ state: "frozen", ySplit: headerRowIdx }];
     });
-    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${localDoc.docNumber}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   return (
