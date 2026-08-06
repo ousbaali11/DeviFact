@@ -2368,7 +2368,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
   const sectorLines = getRevisionSectors(doc);
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
-  const cellStyle = { border: "1px solid #B7B7B7", padding: "3px 5px", verticalAlign: "middle" };
+  const cellStyle = { border: "1px solid #B7B7B7", padding: "3px 5px", verticalAlign: "middle", whiteSpace: "nowrap" };
   const watermarkText = upx(siteSettings?.name || "DeviFact");
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
@@ -2414,7 +2414,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
             return;
           }
           if (d.label) {
-            bodyRows.push(<tr key={`lbl-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.dpLabel, fontWeight: 700, textAlign: "left" }}>{upx(d.label)}</td></tr>);
+            bodyRows.push(<tr key={`lbl-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.dpLabel, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(d.label)}</td></tr>);
           }
           const dr = computeDecompteRevision(sec, d);
           const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
@@ -2474,63 +2474,63 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
 
         return (
           <div key={sec.id || secIdx} style={{ position: "relative", zIndex: 1, marginBottom: "22px", pageBreakAfter: secIdx < sectorLines.length - 1 ? "always" : "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <tbody>
-                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, fontSize: "10pt", textAlign: "left" }}>NOTE DE CALCUL DE LA REVISION DES PRIX — {upx(sec.sector)}</td></tr>
-                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>{upx(`MARCHE N°: ${doc.marcheNumero || ""}`)}</td></tr>
-                {doc.objet && <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{upx(doc.objet)}</td></tr>}
-                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>{upx(`STE : ${doc.company.name || ""}`)}</td></tr>
+                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, fontSize: "10pt", textAlign: "center", whiteSpace: "nowrap" }}>NOTE DE CALCUL DE LA REVISION DES PRIX — {upx(sec.sector)}</td></tr>
+                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(`MARCHE N°: ${doc.marcheNumero || ""}`)}</td></tr>
+                {doc.objet && <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, textAlign: "center", whiteSpace: "normal" }}>{upx(doc.objet)}</td></tr>}
+                <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(`STE : ${doc.company.name || ""}`)}</td></tr>
                 <tr>
-                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>DATE DE SOUMISSION :</td>
-                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{sec.dateBase ? fr(sec.dateBase) : ""}</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>DATE DE SOUMISSION :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{sec.dateBase ? fr(sec.dateBase) : ""}</td>
                 </tr>
                 <tr>
-                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>SYMBOLE D'INDEX :</td>
-                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{terms.map((t) => upx(t.symbole)).join(" · ")}</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>SYMBOLE D'INDEX :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{terms.map((t) => upx(t.symbole)).join(" · ")}</td>
                 </tr>
                 <tr>
-                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>INDEX DE BASE :</td>
-                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{terms.map((t) => t.indexBase).join(" · ")}</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>INDEX DE BASE :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{terms.map((t) => t.indexBase).join(" · ")}</td>
                 </tr>
                 <tr>
-                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>T.V.A INITIALE :</td>
-                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{tvaRate}</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>T.V.A INITIALE :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{tvaRate}</td>
                 </tr>
                 {sec.articleCPS && (
                   <tr>
-                    <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>ARTICLE CPS :</td>
-                    <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{upx(sec.articleCPS)}</td>
+                    <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>ARTICLE CPS :</td>
+                    <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{upx(sec.articleCPS)}</td>
                   </tr>
                 )}
                 {doc.dateDemarrage && (
                   <tr>
-                    <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>ORDRE DE SERVICE :</td>
-                    <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{fr(doc.dateDemarrage)}</td>
+                    <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>ORDRE DE SERVICE :</td>
+                    <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{fr(doc.dateDemarrage)}</td>
                   </tr>
                 )}
                 <tr>
-                  <td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left" }}>{upx(`FORMULE DE REVISION DES PRIX : P/P0 = ${a} + ${termLetters.join(" + ")}`)}</td>
+                  <td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(`FORMULE DE REVISION DES PRIX : P/P0 = ${a} + ${termLetters.join(" + ")}`)}</td>
                 </tr>
                 {terms.map((t, i) => (
-                  <tr key={t.id}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left" }}>{upx(`${termLetters[i]} = ${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`)}</td></tr>
+                  <tr key={t.id}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, textAlign: "center", whiteSpace: "nowrap" }}>{upx(`${termLetters[i]} = ${t.poids}*(${t.symbole || "?"}/${t.symbole || "?"}0)`)}</td></tr>
                 ))}
-                <tr>{headerCols.map((h, i) => <td key={i} style={{ ...cellStyle, background: h.color, fontWeight: 700, textAlign: "center" }}>{h.label}</td>)}</tr>
+                <tr>{headerCols.map((h, i) => <td key={i} style={{ ...cellStyle, background: h.color, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{h.label}</td>)}</tr>
                 {bodyRows}
                 <tr>
-                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right" }}>TOTAL DE LA REVISION DES PRIX HTVA</td>
-                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right" }}>{formatMoney(totalHT, doc.currency)}</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>TOTAL DE LA REVISION DES PRIX HTVA</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{formatMoney(totalHT, doc.currency)}</td>
                 </tr>
                 <tr>
-                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right" }}>{upx(`TVA ${Math.round(tvaRate * 100)}%`)}</td>
-                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right" }}>{formatMoney(totalHT * tvaRate, doc.currency)}</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{upx(`TVA ${Math.round(tvaRate * 100)}%`)}</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{formatMoney(totalHT * tvaRate, doc.currency)}</td>
                 </tr>
                 <tr>
-                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right" }}>TOTAL DE LA REVISION DES PRIX TTC</td>
-                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right" }}>{formatMoney(totalHT * (1 + tvaRate), doc.currency)}</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>TOTAL DE LA REVISION DES PRIX TTC</td>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{formatMoney(totalHT * (1 + tvaRate), doc.currency)}</td>
                 </tr>
                 <tr>
-                  <td colSpan={Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center" }}>ENTREPRISE</td>
-                  <td colSpan={nCols - Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center" }}>SERVICE / MAÎTRE D'OUVRAGE</td>
+                  <td colSpan={Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>ENTREPRISE</td>
+                  <td colSpan={nCols - Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>SERVICE / MAÎTRE D'OUVRAGE</td>
                 </tr>
               </tbody>
             </table>
@@ -2760,8 +2760,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
       cell.border = allBorders;
       if (opts.bold) cell.font = { bold: true };
-      if (opts.align) cell.alignment = { horizontal: opts.align, vertical: "middle", wrapText: true };
-      else cell.alignment = { vertical: "middle", wrapText: true };
+      cell.alignment = { horizontal: opts.align, vertical: "middle", wrapText: !!opts.wrap };
     }
 
     const workbook = new ExcelJS.Workbook();
@@ -2777,23 +2776,29 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       // masqué à l'ouverture du fichier.
       const widths = [10, 14, ...terms.map(() => 12), ...terms.map(() => 8), 9, 9, 15, 15, 22, 15];
       widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      // Largeur fusionnée réservée aux libellés (5 colonnes) — assez
+      // large pour un texte comme "ARTICLE DE LA RÉVISION DES PRIX
+      // CPS :" sans jamais revenir à la ligne.
+      const labelSpan = Math.min(5, nCols);
 
       let r = 1;
-      function labelRow(text, mergeTo) {
+      function labelRow(text, mergeTo, opts = {}) {
         ws.mergeCells(r, 1, r, mergeTo || Math.min(4, nCols));
         const cell = ws.getCell(r, 1);
         cell.value = up(text);
-        fillCell(cell, COL.label, { bold: true, align: "left" });
+        fillCell(cell, COL.label, { bold: true, align: "center", wrap: !!opts.wrap });
+        if (opts.wrap) ws.getRow(r).height = 30;
         r++;
       }
       function kvRow(label, values) {
+        ws.mergeCells(r, 1, r, labelSpan);
         const cell = ws.getCell(r, 1);
         cell.value = up(label);
         fillCell(cell, COL.label, { bold: true, align: "left" });
         (values || []).forEach((v, i) => {
-          const c = ws.getCell(r, 3 + i);
+          const c = ws.getCell(r, labelSpan + 1 + i);
           c.value = v;
-          fillCell(c, COL.label);
+          fillCell(c, COL.label, { align: "left" });
         });
         r++;
       }
@@ -2802,7 +2807,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       r++;
       labelRow(`MARCHE N°: ${localDoc.marcheNumero || ""}`, nCols);
       r++;
-      labelRow(localDoc.objet || "", nCols);
+      labelRow(localDoc.objet || "", nCols, { wrap: true });
       r++;
       labelRow(`STE : ${localDoc.company.name || ""}`, nCols);
       r++;
@@ -2849,7 +2854,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
           ws.mergeCells(r, 1, r, nCols);
           const c = ws.getCell(r, 1);
           c.value = up(d.label);
-          fillCell(c, COL.dpLabel, { bold: true, align: "left" });
+          fillCell(c, COL.dpLabel, { bold: true, align: "center" });
           r++;
         }
         const dr = computeDecompteRevision(sec, d);
@@ -2936,7 +2941,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       srv.value = "SERVICE / MAÎTRE D'OUVRAGE";
       fillCell(srv, COL.label, { bold: true, align: "center" });
 
-      ws.views = [{ state: "frozen", ySplit: headerRowIdx }];
+      // Pas de volets figés — la personne veut pouvoir tout faire défiler librement.
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
