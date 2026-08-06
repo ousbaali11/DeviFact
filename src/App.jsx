@@ -12,7 +12,7 @@ import {
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
   Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu,
-  Ship, Package, MapPinned,
+  Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
 
 const colors = {
@@ -61,19 +61,56 @@ function docTypeIcon(type) {
   if (type === "devis") return FileText;
   if (type === "proforma") return Ship;
   if (type === "revision") return TrendingUp;
+  if (type === "avoir") return RotateCcw;
+  if (type === "acompte") return Wallet;
+  if (type === "commande") return ShoppingCart;
+  if (type === "livraison") return Truck;
   return Receipt;
 }
 function docTypeColor(type) {
   if (type === "devis") return colors.slate;
   if (type === "proforma") return colors.moss;
   if (type === "revision") return colors.brick;
+  if (type === "avoir") return colors.brick;
+  if (type === "acompte") return colors.brassDark;
+  if (type === "commande") return colors.slate;
+  if (type === "livraison") return colors.moss;
   return colors.brassDark;
 }
 function docTypeLabel(type) {
   if (type === "devis") return "Devis";
   if (type === "proforma") return "Proforma";
   if (type === "revision") return "Revision-prix";
+  if (type === "avoir") return "Avoir";
+  if (type === "acompte") return "Facture d'acompte";
+  if (type === "commande") return "Bon de commande";
+  if (type === "livraison") return "Bon de livraison";
   return "Facture";
+}
+
+// Registre central de tous les services proposés par l'application —
+// utilisé par le menu de création, la page Admin (afficher/masquer)
+// et la page d'accueil. "implemented" distingue ce qui a un vrai
+// éditeur de ce qui est encore en développement.
+const SERVICES = [
+  { id: "devis", label: "Devis", icon: FileText, description: "Proposition commerciale avant travaux", implemented: true },
+  { id: "facture", label: "Facture", icon: Receipt, description: "Facturation classique", implemented: true },
+  { id: "proforma", label: "Facture proforma", icon: Ship, description: "Facture indicative, souvent pour douane ou import", implemented: true },
+  { id: "revision", label: "Révision de prix", icon: TrendingUp, description: "Révision de prix pour marchés à long terme", implemented: true },
+  { id: "acompte", label: "Facture d'acompte", icon: Wallet, description: "Facture séparée pour une avance avant travaux", implemented: true },
+  { id: "avoir", label: "Avoir", icon: RotateCcw, description: "Note de crédit pour annuler ou corriger une facture", implemented: true },
+  { id: "commande", label: "Bon de commande", icon: ShoppingCart, description: "Commande de matériel auprès d'un fournisseur", implemented: true },
+  { id: "livraison", label: "Bon de livraison", icon: Truck, description: "Accusé de réception de matériel ou de travaux", implemented: true },
+  { id: "situation", label: "Situation de travaux", icon: BarChart3, description: "Facturation par tranches selon l'avancement du chantier", implemented: false },
+  { id: "pv_reception", label: "PV de réception", icon: ClipboardCheck, description: "Validation de fin de chantier signée par le client", implemented: false },
+  { id: "bpu", label: "Bordereau de prix unitaires", icon: List, description: "Liste de prix détaillée par unité", implemented: false },
+  { id: "rapport", label: "Rapport d'intervention", icon: Wrench, description: "Fiche de visite pour dépannage ou service", implemented: false },
+  { id: "contrat", label: "Contrat de chantier", icon: FileSignature, description: "Contrat signé, distinct du simple devis", implemented: false },
+  { id: "relance", label: "Relance formelle", icon: AlertTriangle, description: "Mise en demeure pour impayé", implemented: false },
+  { id: "planning", label: "Planning de chantier", icon: Calendar, description: "Planification des travaux", implemented: false },
+];
+function getService(id) {
+  return SERVICES.find((s) => s.id === id);
 }
 
 function statusColor(status) {
@@ -188,7 +225,8 @@ function emptyPrestation() {
 }
 
 function nextNumber(documents, type) {
-  const prefix = type === "devis" ? "DEV" : type === "proforma" ? "PRO" : type === "revision" ? "REV" : "FAC";
+  const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL" };
+  const prefix = prefixes[type] || "FAC";
   const nums = documents.filter((d) => d.type === type).map((d) => parseInt((d.docNumber.match(/(\d+)$/) || [])[1] || "0", 10));
   const next = (nums.length ? Math.max(...nums) : 0) + 1;
   return `${prefix}-${String(next).padStart(3, "0")}`;
@@ -1129,11 +1167,12 @@ export default function DeviFactApp() {
       pdfBackground: data.pdf_background || "#FBF7EF",
       pdfHeaderColor: data.pdf_header_color || "#1B2A33",
       pdfBlockColor: data.pdf_block_color || "#F1F0EA",
+      visibleServices: data.visible_services || null,
     });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -1742,7 +1781,21 @@ export default function DeviFactApp() {
     );
   }
 
-  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), account, onLogout: logout, onSwitchOrganization: switchOrganization, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
+  const visibleServices = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
+  function openNewService(serviceId) {
+    const svc = getService(serviceId);
+    if (!svc) return;
+    if (!svc.implemented) {
+      alert(`"${svc.label}" est encore en développement — bientôt disponible !`);
+      return;
+    }
+    if (serviceId === "revision") { setView("revision-sector"); return; }
+    if (serviceId === "devis" || serviceId === "facture" || serviceId === "proforma" || serviceId === "acompte" || serviceId === "avoir" || serviceId === "commande" || serviceId === "livraison") {
+      openNew(serviceId);
+      return;
+    }
+  }
+  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
 
   if (view === "revision-sector") {
     const countryInfo = getRevisionCountryInfo(revisionCountry);
@@ -2092,7 +2145,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
   const visiblePlans = plans.filter((p) => !p.hidden);
 
   const features = [
-    { icon: FileText, title: "Devis ou facture, à la carte", text: "Choisissez ce que vous produisez : un devis, une facture, ou les deux liés automatiquement en un clic." },
+    { icon: Menu, title: "Un service pour chaque besoin", text: "Devis, factures, révisions de prix, bons de commande, avoirs... choisissez le bon document en quelques clics." },
     { icon: Calculator, title: "Calculs automatiques", text: "TVA multi-taux, remises par ligne ou globales, acomptes : les totaux se recalculent seuls, sans erreur." },
     { icon: Layers, title: "Descriptions détaillées", text: "Structurez vos devis avec des descriptions et sous-descriptions imbriquées, uniquement si vous en avez besoin." },
     { icon: PenTool, title: "Signature électronique", text: "Signature saisie, dessinée à l'écran ou importée depuis une image, directement sur le document." },
@@ -2113,7 +2166,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
 
       <div className="relative w-full overflow-hidden py-2.5" style={{ background: colors.ink }}>
         <span className="df-marquee-text df-display text-xl font-semibold sm:text-2xl" style={{ color: colors.brass }}>
-          ✦ Votre devis prêt en quelques clics
+          ✦ Devis, factures, révisions de prix et bien plus — tout pour votre entreprise
         </span>
       </div>
 
@@ -2151,9 +2204,9 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
       {/* Hero */}
       <section className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-6 py-16 lg:grid-cols-2 lg:py-24">
         <div>
-          <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Devis &amp; factures pour artisans</span>
-          <h1 className="df-display mt-3 text-4xl font-semibold leading-tight sm:text-5xl">Des devis clairs et des factures propres, sans y perdre votre soirée.</h1>
-          <p className="mt-4 max-w-md text-base" style={{ color: colors.inkSoft }}>{siteSettings.name} réunit devis, factures, signature électronique et calculs automatiques dans un seul outil pensé pour les artisans et petites entreprises françaises.</p>
+          <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>La gestion administrative des artisans</span>
+          <h1 className="df-display mt-3 text-4xl font-semibold leading-tight sm:text-5xl">Devis, factures, et bien plus — un seul outil pour toute votre administration.</h1>
+          <p className="mt-4 max-w-md text-base" style={{ color: colors.inkSoft }}>{siteSettings.name} réunit devis, factures, révisions de prix et plusieurs autres services dans un seul outil pensé pour les artisans et petites entreprises.</p>
           <div className="mt-6 flex flex-wrap gap-3">
             <button onClick={onGetStarted} className="flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Commencer gratuitement <ArrowRight size={16} /></button>
             <a href="#tarifs" className="flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-medium" style={{ border: `1px solid ${colors.line}` }}>Voir les tarifs</a>
@@ -2565,8 +2618,9 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   );
 }
 
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, account, onLogout, onSwitchOrganization, siteSettings, companyProfile, onSetCompanyType }) {
+function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, siteSettings, companyProfile, onSetCompanyType }) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
+  const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
   const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "clients", label: "Clients", icon: Users },
@@ -2672,6 +2726,36 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
         <button onClick={onNewRevision} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.slate, color: "white" }} title="Nouvelle révision des prix">
           <TrendingUp size={15} /> Révision des prix
         </button>
+        <div className="relative">
+          <button onClick={() => setServicesMenuOpen((v) => !v)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium" style={{ background: "rgba(255,255,255,0.1)", color: "white" }} title="Tous les services">
+            <Menu size={16} />
+          </button>
+          {servicesMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setServicesMenuOpen(false)} />
+              <div className="absolute right-0 top-full z-20 mt-1 max-h-96 w-72 overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Tous les services</div>
+                {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
+                  const SIcon = s.icon;
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => { setServicesMenuOpen(false); onNewService(s.id); }}
+                      className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs hover:bg-black/5"
+                      style={{ color: colors.ink }}
+                    >
+                      <SIcon size={15} className="mt-0.5 shrink-0" style={{ color: colors.brassDark }} />
+                      <span className="min-w-0">
+                        <span className="block font-medium">{s.label}{!s.implemented && <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-normal" style={{ background: `${colors.inkSoft}18`, color: colors.inkSoft }}>bientôt</span>}</span>
+                        <span className="block truncate" style={{ color: colors.inkSoft }}>{s.description}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
         <button onClick={onLogout} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Se déconnecter">
           <LogOut size={15} />
         </button>
@@ -4351,6 +4435,46 @@ function PaypalIdField({ label, value, onSave }) {
   );
 }
 
+function ServicesVisibilitySettings({ siteSettings, saving, onSave }) {
+  const current = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
+  function toggle(id) {
+    const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+    onSave({ visibleServices: next });
+  }
+  return (
+    <div className="mb-6 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+      <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+        <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Services</span>
+        {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={13} className="animate-spin" /> Enregistrement</span>}
+      </div>
+      <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+        Choisis les services visibles pour tout le monde dans le menu "+". Utile pour cacher un service encore en cours de développement, ou en retirer un temporairement.
+      </p>
+      <div>
+        {SERVICES.map((s, idx) => {
+          const SIcon = s.icon;
+          const visible = current.includes(s.id);
+          return (
+            <div key={s.id} className="flex items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
+              <SIcon size={16} style={{ color: colors.brassDark }} />
+              <div className="min-w-0 grow">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  {s.label}
+                  {!s.implemented && <span className="rounded-full px-1.5 py-0.5 text-[10px] font-normal" style={{ background: `${colors.inkSoft}18`, color: colors.inkSoft }}>en développement</span>}
+                </div>
+                <div className="truncate text-xs" style={{ color: colors.inkSoft }}>{s.description}</div>
+              </div>
+              <button onClick={() => toggle(s.id)} title={visible ? "Visible pour tout le monde" : "Masqué"}>
+                {visible ? <ToggleRight size={26} style={{ color: colors.moss }} /> : <ToggleLeft size={26} style={{ color: colors.inkSoft }} />}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   const [local, setLocal] = useState(siteSettings);
 
@@ -4453,6 +4577,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
   const TABS = [
     { id: "apercu", label: "Vue d'ensemble", icon: LayoutDashboard },
     { id: "identite", label: "Identité du site", icon: Building2 },
+    { id: "services", label: "Services", icon: Menu },
     { id: "forfaits", label: "Forfaits & tarifs", icon: CreditCard },
     { id: "paiement", label: "Paiement (PayPal)", icon: KeyRound },
     { id: "compte", label: "Mon compte", icon: Users },
@@ -4494,6 +4619,10 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
 
       {tab === "identite" && (
         <SiteIdentitySettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
+      )}
+
+      {tab === "services" && (
+        <ServicesVisibilitySettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
       )}
 
       {tab === "compte" && (
