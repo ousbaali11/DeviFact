@@ -518,6 +518,204 @@ function computeRevision(doc) {
   return { valid: true, montantRevise, ecartMontant, ecartPct, montantInitialTotal, coefficient: 0 };
 }
 
+// Construit une feuille Excel au format marocain pour UN secteur d'UN
+// document — fonction partagée entre l'export d'un seul document et
+// l'export groupé de plusieurs documents (tableau de bord), pour ne
+// jamais avoir deux versions différentes de cette mise en forme.
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
+  const up = (v) => String(v ?? "").toUpperCase();
+  const COL = {
+    label: "FFEDEDED", jours: "FFDCEEFB", situation: "FFE2F0D9", index: "FFFFF2CC",
+    lettre: "FFFCE4D6", ppo: "FFE4DFEC", pct: "FFFCE4EC", montant: "FFD9F2E6",
+    formule: "FFE8ECF5", revision: "FFFAD9D9", dpLabel: "FFD6E4F0", blank: "FF000000",
+  };
+  const thinBorder = { style: "thin", color: { argb: "FFB7B7B7" } };
+  const allBorders = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder };
+  function fillCell(cell, color, opts = {}) {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
+    cell.border = allBorders;
+    if (opts.bold) cell.font = { bold: true };
+    cell.alignment = { horizontal: opts.align, vertical: "middle", wrapText: !!opts.wrap };
+  }
+
+  const terms = sec.terms || [];
+  const nCols = 8 + terms.length * 2;
+  const sheetName0 = up(`${namePrefix}${sec.sector || "SECTEUR"}`).replace(/[\\/*?:[\]]/g, "").slice(0, 31) || "SECTEUR";
+  let sheetName = sheetName0, n = 2;
+  while (workbook.getWorksheet(sheetName)) { sheetName = `${sheetName0.slice(0, 28)} (${n})`; n++; }
+  const ws = workbook.addWorksheet(sheetName);
+
+  const widths = [10, 14, ...terms.map(() => 12), ...terms.map(() => 8), 9, 9, 15, 15, 22, 15];
+  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  const labelSpan = Math.min(5, nCols);
+
+  let r = 1;
+  function labelRow(text, mergeTo, opts = {}) {
+    ws.mergeCells(r, 1, r, mergeTo || Math.min(4, nCols));
+    const cell = ws.getCell(r, 1);
+    cell.value = up(text);
+    fillCell(cell, COL.label, { bold: true, align: "center", wrap: !!opts.wrap });
+    if (opts.wrap) ws.getRow(r).height = 30;
+    r++;
+  }
+  function kvRow(label, values) {
+    ws.mergeCells(r, 1, r, labelSpan);
+    const cell = ws.getCell(r, 1);
+    cell.value = up(label);
+    fillCell(cell, COL.label, { bold: true, align: "left" });
+    (values || []).forEach((v, i) => {
+      const c = ws.getCell(r, labelSpan + 1 + i);
+      c.value = v;
+      fillCell(c, COL.label, { align: "left" });
+    });
+    r++;
+  }
+
+  labelRow("NOTE DE CALCUL DE LA REVISION DES PRIX", nCols);
+  r++;
+  labelRow(`MARCHE N°: ${doc.marcheNumero || ""}`, nCols);
+  r++;
+  labelRow(doc.objet || "", nCols, { wrap: true });
+  r++;
+  labelRow(`STE : ${doc.company.name || ""}`, nCols);
+  r++;
+  kvRow("Date de soumission :", [sec.dateBase ? fr(sec.dateBase) : ""]);
+  kvRow("Symbole d'index:", terms.map((t) => up(t.symbole || "")));
+  kvRow("Index de base:", terms.map((t) => Number(t.indexBase) || ""));
+  kvRow("T.V.A Initiale", [Number(sec.tvaRate ?? 0.20)]);
+  if (sec.articleCPS) kvRow("Article / référence du contrat :", [up(sec.articleCPS)]);
+  if (doc.dateDemarrage) kvRow("Ordre de service de commencer des travaux:", [fr(doc.dateDemarrage)]);
+  const a = Number(sec.coeffFixe) || 0;
+  const termLetters = terms.map((_, i) => String.fromCharCode(65 + i));
+  kvRow("Formule de révision des prix", [up(`P/P0 = ${a} + ${termLetters.join(" + ")}`)]);
+  terms.forEach((t, i) => kvRow(`${termLetters[i]} = ${t.poids}*(${up(t.symbole || "?")}/${up(t.symbole || "?")}0)`, []));
+  r++;
+
+  const headers = ["N.B JOURS", "SITUATION"];
+  terms.forEach((t) => headers.push(`INDEX ${up(t.symbole || "?")}`));
+  termLetters.forEach((l) => headers.push(l));
+  headers.push("P/P0", "%", "MT DE DECOMPTE", "MT A REVISER", "FORMULE", "MT DE LA REVISION");
+  const headerColors = ["jours", "situation", ...terms.map(() => "index"), ...terms.map(() => "lettre"), "ppo", "pct", "montant", "montant", "formule", "revision"];
+  headers.forEach((h, i) => {
+    const c = ws.getCell(r, i + 1);
+    c.value = h;
+    fillCell(c, COL[headerColors[i]], { bold: true, align: "center" });
+  });
+  r++;
+
+  let totalHT = 0;
+  (sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d) => {
+    if (d.isBlank) {
+      ws.mergeCells(r, 1, r, nCols);
+      const c = ws.getCell(r, 1);
+      c.value = "";
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COL.blank } };
+      c.border = allBorders;
+      r++;
+      return;
+    }
+    if (d.label) {
+      ws.mergeCells(r, 1, r, nCols);
+      const c = ws.getCell(r, 1);
+      c.value = up(d.label);
+      fillCell(c, COL.dpLabel, { bold: true, align: "center" });
+      r++;
+    }
+    const dr = computeDecompteRevision(sec, d);
+    const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
+    (d.mois || []).forEach((m, mIdx) => {
+      const detail = (dr.detail || [])[mIdx];
+      const values = [Number(m.jours) || "", m.date ? frShort(m.date) : ""];
+      terms.forEach((t) => values.push(Number(m.valeurs?.[t.id]) || ""));
+      terms.forEach((t) => {
+        const base = Number(t.indexBase), val = Number(m.valeurs?.[t.id]);
+        values.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
+      });
+      values.push(detail?.valid ? Number(detail.coefficient.toFixed(4)) : "");
+      values.push(detail?.valid ? Number(detail.delta.toFixed(4)) : "");
+      values.push(Number(d.montantTotal) || "");
+      values.push(Number(d.montantTotal) || "");
+      values.push(detail?.valid ? up(`x ${detail.delta.toFixed(4)} x ${m.jours}/${totalJours}`) : "");
+      values.push(detail?.valid ? Number(detail.ecart.toFixed(2)) : "");
+      values.forEach((v, i) => {
+        const c = ws.getCell(r, i + 1);
+        c.value = v;
+        fillCell(c, COL[headerColors[i]]);
+      });
+      r++;
+    });
+    const subCell = ws.getCell(r, 1);
+    subCell.value = totalJours;
+    fillCell(subCell, COL.jours, { bold: true });
+    const subResult = ws.getCell(r, nCols);
+    subResult.value = dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "";
+    fillCell(subResult, COL.revision, { bold: true });
+    for (let cc = 2; cc < nCols; cc++) { const c = ws.getCell(r, cc); c.value = ""; c.border = allBorders; }
+    r++;
+    if (dr.valid) totalHT += dr.ecartMontant;
+  });
+
+  if (!sec.useDecomptes) {
+    const rr = computeRevisionLine(sec);
+    const values = ["", sec.dateActuelle ? frShort(sec.dateActuelle) : ""];
+    terms.forEach((t) => values.push(Number(sec.valeursActuelles?.[t.id]) || ""));
+    terms.forEach((t) => {
+      const base = Number(t.indexBase), val = Number(sec.valeursActuelles?.[t.id]);
+      values.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
+    });
+    values.push(rr.valid ? Number(rr.coefficient.toFixed(4)) : "");
+    values.push(rr.valid ? Number((rr.coefficient - 1).toFixed(4)) : "");
+    values.push(Number(sec.montantInitialHT) || "");
+    values.push(Number(sec.montantInitialHT) || "");
+    values.push("");
+    values.push(rr.valid ? Number(rr.ecartMontant.toFixed(2)) : "");
+    values.forEach((v, i) => {
+      const c = ws.getCell(r, i + 1);
+      c.value = v;
+      fillCell(c, COL[headerColors[i]]);
+    });
+    r++;
+    if (rr.valid) totalHT += rr.ecartMontant;
+  }
+
+  r++;
+  const tvaRate = Number(sec.tvaRate ?? 0.20);
+  function totalRow(label, value, color) {
+    ws.mergeCells(r, 1, r, nCols - 2);
+    const lc = ws.getCell(r, 1);
+    lc.value = up(label);
+    fillCell(lc, COL.label, { bold: true, align: "right" });
+    ws.mergeCells(r, nCols - 1, r, nCols);
+    const vc = ws.getCell(r, nCols - 1);
+    vc.value = Number(value.toFixed(2));
+    fillCell(vc, color, { bold: true, align: "right" });
+    r++;
+  }
+  totalRow("Total de la révision des prix HTVA", totalHT, COL.revision);
+  totalRow(`TVA ${Math.round(tvaRate * 100)}%`, totalHT * tvaRate, COL.revision);
+  totalRow("Total de la révision des prix TTC", totalHT * (1 + tvaRate), COL.revision);
+  r++;
+  ws.mergeCells(r, 1, r, Math.floor(nCols / 2));
+  const ent = ws.getCell(r, 1);
+  ent.value = "ENTREPRISE";
+  fillCell(ent, COL.label, { bold: true, align: "center" });
+  ws.mergeCells(r, Math.floor(nCols / 2) + 1, r, nCols);
+  const srv = ws.getCell(r, Math.floor(nCols / 2) + 1);
+  srv.value = "SERVICE / MAÎTRE D'OUVRAGE";
+  fillCell(srv, COL.label, { bold: true, align: "center" });
+}
+
 function newDocument(type, documents) {
   return {
     id: nextId("doc"),
@@ -835,6 +1033,9 @@ export default function DeviFactApp() {
   const [revisionCountry, setRevisionCountry] = useState("🇫🇷 FR");
   const [limitNotice, setLimitNotice] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [batchExportDoc, setBatchExportDoc] = useState(null);
+  const [batchExporting, setBatchExporting] = useState(false);
+  const batchPrintRef = useRef(null);
   const [splitNotice, setSplitNotice] = useState(null);
   const [savingPlanSettings, setSavingPlanSettings] = useState(false);
   const [preAuthView, setPreAuthView] = useState("landing"); // landing | auth
@@ -1285,6 +1486,96 @@ export default function DeviFactApp() {
     setActiveId(merged.id);
     setView("editor");
   }
+  // Excel groupé : un classeur, une feuille par document (les
+  // révisions Maroc peuvent en avoir plusieurs, une par secteur).
+  async function exportBatchExcel(docs) {
+    if (!docs.length) return;
+    const type = docs[0].type;
+    if (type === "revision") {
+      const { default: ExcelJS } = await import("exceljs");
+      const workbook = new ExcelJS.Workbook();
+      docs.forEach((doc) => {
+        const sectors = getRevisionSectors(doc);
+        const prefix = `${doc.docNumber} `;
+        sectors.forEach((sec) => {
+          buildMarocRevisionSheet(workbook, doc, sec, prefix);
+        });
+      });
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      downloadBlob(blob, "Revisions-groupees.xlsx");
+      return;
+    }
+    const wb = XLSX.utils.book_new();
+    docs.forEach((doc) => {
+      const t = computeTotals(doc);
+      const rows = [];
+      rows.push([docTypeLabel(doc.type).toUpperCase(), doc.docNumber]);
+      rows.push(["Date", fr(doc.issueDate)]);
+      rows.push(["Client", doc.client?.name || ""]);
+      rows.push([]);
+      rows.push(["Désignation", "Qté", "Prix unitaire HT", "TVA %", "Total HT"]);
+      t.computedLines.forEach((line) => {
+        rows.push([line.designation || "", Number(line.qty) || 0, Number(line.unitPrice) || 0, Number(line.tva) || 0, Number(line.totalHT.toFixed(2))]);
+      });
+      rows.push([]);
+      rows.push(["", "", "", "Total HT", Number(t.subtotalHT.toFixed(2))]);
+      rows.push(["", "", "", "Total TVA", Number(t.totalTVA.toFixed(2))]);
+      rows.push(["", "", "", "Total TTC", Number(t.totalTTC.toFixed(2))]);
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 8 }, { wch: 14 }];
+      let sheetName = doc.docNumber.replace(/[\\/*?:[\]]/g, "").slice(0, 31);
+      let n = 2;
+      while (wb.SheetNames.includes(sheetName)) { sheetName = `${doc.docNumber.slice(0, 28)} (${n})`; n++; }
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+    XLSX.writeFile(wb, `${docTypeLabel(type)}s-groupes.xlsx`);
+  }
+
+  // PDF groupé : un seul fichier, une page (ou plus) par document —
+  // rendu séquentiellement dans une zone cachée puis capturé.
+  async function exportBatchPdf(docs) {
+    if (!docs.length || batchExporting) return;
+    setBatchExporting(true);
+    const isRevision = docs[0].type === "revision";
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: isRevision ? "landscape" : "portrait" });
+    try {
+      for (let i = 0; i < docs.length; i++) {
+        setBatchExportDoc(docs[i]);
+        // Laisse React monter/mettre à jour le rendu caché avant de capturer
+        // (marge un peu large : les révisions à plusieurs secteurs ont
+        // beaucoup de contenu à afficher avant d'être prêtes).
+        await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+        await new Promise((res) => setTimeout(res, 120));
+        const el = batchPrintRef.current;
+        if (!el) continue;
+        el.style.display = "block";
+        const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
+        const imgData = canvas.toDataURL("image/jpeg", 0.95);
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const imgHeight = (canvas.height * pageWidth) / canvas.width;
+        if (i > 0) pdf.addPage();
+        let heightLeft = imgHeight, position = 0;
+        pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+        heightLeft -= pageHeight;
+        while (heightLeft > 3) {
+          position -= pageHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
+          heightLeft -= pageHeight;
+        }
+      }
+      pdf.save(`${docTypeLabel(docs[0].type)}s-groupes.pdf`);
+    } catch (err) {
+      console.error("Erreur d'export PDF groupé", err);
+      alert("Impossible de générer le PDF groupé. Réessaie, et préviens-moi si ça persiste.");
+    } finally {
+      setBatchExportDoc(null);
+      setBatchExporting(false);
+    }
+  }
+
   function createSplitDocument(sourceDoc, extractedItems) {
     const newDoc = {
       ...newDocument(sourceDoc.type, documents),
@@ -1691,17 +1982,38 @@ export default function DeviFactApp() {
             const selectedDocs = documents.filter((d) => selectedIds.includes(d.id));
             const sameType = selectedDocs.every((d) => d.type === selectedDocs[0].type);
             const canMerge = selectedDocs.length >= 2 && sameType && !isLocked;
+            const canBatchExport = selectedDocs.length >= 2 && sameType;
             return (
               <div className="ml-auto flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
                 <span className="text-xs font-medium" style={{ color: colors.inkSoft }}>{selectedIds.length} sélectionné(s)</span>
+                {(selectedDocs[0]?.type === "devis" || selectedDocs[0]?.type === "facture") && (
+                  <button
+                    onClick={() => canMerge && mergeDocuments(selectedIds)}
+                    disabled={!canMerge}
+                    title={!sameType ? "Sélectionne uniquement des devis ou uniquement des factures" : selectedDocs.length < 2 ? "Sélectionne au moins 2 documents" : "Fusionner en un seul document"}
+                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
+                    style={{ background: canMerge ? colors.slate : colors.line, color: canMerge ? "white" : colors.inkSoft, cursor: canMerge ? "pointer" : "not-allowed" }}
+                  >
+                    <GitMerge size={13} /> Fusionner
+                  </button>
+                )}
                 <button
-                  onClick={() => canMerge && mergeDocuments(selectedIds)}
-                  disabled={!canMerge}
-                  title={!sameType ? "Sélectionne uniquement des devis ou uniquement des factures" : selectedDocs.length < 2 ? "Sélectionne au moins 2 documents" : "Fusionner en un seul document"}
+                  onClick={() => canBatchExport && exportBatchExcel(selectedDocs)}
+                  disabled={!canBatchExport}
+                  title={!sameType ? "Sélectionne des documents du même type (tous devis, ou toutes factures...)" : selectedDocs.length < 2 ? "Sélectionne au moins 2 documents" : "Un seul fichier Excel, un onglet par document"}
                   className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
-                  style={{ background: canMerge ? colors.slate : colors.line, color: canMerge ? "white" : colors.inkSoft, cursor: canMerge ? "pointer" : "not-allowed" }}
+                  style={{ background: canBatchExport ? colors.moss : colors.line, color: canBatchExport ? "white" : colors.inkSoft, cursor: canBatchExport ? "pointer" : "not-allowed" }}
                 >
-                  <GitMerge size={13} /> Fusionner
+                  <FileSpreadsheet size={13} /> Excel
+                </button>
+                <button
+                  onClick={() => canBatchExport && exportBatchPdf(selectedDocs)}
+                  disabled={!canBatchExport || batchExporting}
+                  title={!sameType ? "Sélectionne des documents du même type (tous devis, ou toutes factures...)" : selectedDocs.length < 2 ? "Sélectionne au moins 2 documents" : "Un seul PDF, une page par document"}
+                  className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
+                  style={{ background: canBatchExport ? colors.brass : colors.line, color: canBatchExport ? colors.ink : colors.inkSoft, cursor: canBatchExport ? "pointer" : "not-allowed" }}
+                >
+                  {batchExporting ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} PDF
                 </button>
                 <button onClick={() => setSelectedIds([])} className="text-xs" style={{ color: colors.inkSoft }}>Annuler</button>
               </div>
@@ -1758,6 +2070,16 @@ export default function DeviFactApp() {
               );
             })}
           </div>
+        )}
+      </div>
+
+      <div style={{ position: "fixed", top: 0, left: "-9999px", zIndex: -1 }}>
+        {batchExportDoc && (
+          batchExportDoc.type === "revision" ? (
+            <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={(plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false} />
+          ) : (
+            <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={(plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false} />
+          )
         )}
       </div>
     </div>
@@ -2506,7 +2828,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
                 </tr>
                 {sec.articleCPS && (
                   <tr>
-                    <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>ARTICLE CPS :</td>
+                    <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>ARTICLE / RÉFÉRENCE :</td>
                     <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{upx(sec.articleCPS)}</td>
                   </tr>
                 )}
@@ -2588,9 +2910,26 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     if (sectorLines.length <= 1) return;
     patch({ sectors: sectorLines.filter((l) => l.id !== sectorId) });
   }
+  // Renvoie, pour chaque terme, la dernière valeur saisie quelque part
+  // dans le secteur (tous décomptes confondus) — sert à pré-remplir
+  // les nouveaux mois avec ce qui ne change probablement pas.
+  function getLastKnownValeurs(sec) {
+    const result = {};
+    (sec?.decomptes || []).forEach((d) => {
+      (d.mois || []).forEach((m) => {
+        Object.entries(m.valeurs || {}).forEach(([termId, val]) => {
+          if (val !== "" && val !== undefined && val !== null) result[termId] = val;
+        });
+      });
+    });
+    return result;
+  }
   function addDecompte(sectorId) {
     const sec = sectorLines.find((l) => l.id === sectorId);
-    patchSector(sectorId, { decomptes: [...(sec?.decomptes || []), emptyDecompte()] });
+    const nd = emptyDecompte();
+    const known = getLastKnownValeurs(sec);
+    nd.mois = nd.mois.map((m) => ({ ...m, valeurs: { ...known } }));
+    patchSector(sectorId, { decomptes: [...(sec?.decomptes || []), nd] });
   }
   function addBlankRow(sectorId) {
     const sec = sectorLines.find((l) => l.id === sectorId);
@@ -2631,7 +2970,10 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   function addMois(sectorId, decompteId) {
     const sec = sectorLines.find((l) => l.id === sectorId);
     const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
-    patchDecompte(sectorId, decompteId, { mois: [...(d?.mois || []), emptyMois()] });
+    // Pré-remplit le nouveau mois avec les dernières valeurs connues
+    // de chaque terme — modifiable ensuite si ce mois est un cas particulier.
+    const known = getLastKnownValeurs(sec);
+    patchDecompte(sectorId, decompteId, { mois: [...(d?.mois || []), { ...emptyMois(), valeurs: known }] });
   }
   function patchMois(sectorId, decompteId, moisId, p) {
     const sec = sectorLines.find((l) => l.id === sectorId);
@@ -2646,9 +2988,19 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   }
   function patchMoisValeur(sectorId, decompteId, moisId, termId, value) {
     const sec = sectorLines.find((l) => l.id === sectorId);
-    const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
-    const m = (d?.mois || []).find((mm) => mm.id === moisId);
-    patchMois(sectorId, decompteId, moisId, { valeurs: { ...(m?.valeurs || {}), [termId]: value } });
+    // Remplit cette valeur ici, ET partout ailleurs dans le secteur où
+    // ce terme n'a encore aucune valeur saisie — jamais là où une
+    // valeur différente a déjà été mise exprès (cas particulier).
+    const decomptes = (sec?.decomptes || []).map((d) => ({
+      ...d,
+      mois: (d.mois || []).map((m) => {
+        if (m.id === moisId) return { ...m, valeurs: { ...(m.valeurs || {}), [termId]: value } };
+        const dejaRempli = m.valeurs?.[termId] !== undefined && m.valeurs?.[termId] !== "";
+        if (dejaRempli) return m;
+        return { ...m, valeurs: { ...(m.valeurs || {}), [termId]: value } };
+      }),
+    }));
+    patchSector(sectorId, { decomptes });
   }
 
   async function downloadPdf() {
@@ -2692,49 +3044,17 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     }
   }
 
-  function exportExcel() {
-    if (localDoc.country === "🇲🇦 MA") return exportExcelMaroc();
-    const wb = XLSX.utils.book_new();
-    const rows = [];
-    rows.push(["RÉVISION DE PRIX", localDoc.docNumber]);
-    rows.push(["Date d'émission", frLong(localDoc.issueDate)]);
-    rows.push(["Marché N°", localDoc.marcheNumero || ""]);
-    rows.push(["Objet", localDoc.objet || ""]);
-    rows.push(["Entreprise", localDoc.company.name]);
-    rows.push(["Pays", localDoc.country || ""]);
-    rows.push(["Devise", localDoc.currency || "EUR"]);
-    rows.push([]);
-    rows.push(["Secteur", "Termes de la formule (symbole = valeur/base)", "Montant initial HT", "Montant révisé HT", "Écart", "Écart %"]);
-    sectorLines.forEach((l) => {
-      const termsLabel = (l.terms || []).map((t) => `${t.symbole || "?"} (poids ${t.poids})`).join(", ");
-      if (l.useDecomptes && Array.isArray(l.decomptes) && l.decomptes.length) {
-        l.decomptes.forEach((d, dIdx) => {
-          if (d.isBlank) { rows.push([]); return; }
-          const dr = computeDecompteRevision(l, d);
-          rows.push([
-            `${l.sector} — ${d.label || `décompte ${dIdx + 1}`}`, termsLabel, Number(d.montantTotal) || 0,
-            dr.valid ? Number(dr.montantRevise.toFixed(2)) : "", dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "",
-            dr.valid && d.montantTotal ? `${((dr.ecartMontant / Number(d.montantTotal)) * 100).toFixed(2)}%` : "",
-          ]);
-        });
-        return;
-      }
-      const r = computeRevisionLine(l);
-      rows.push([
-        l.sector, termsLabel, Number(l.montantInitialHT) || 0,
-        r.valid ? Number(r.montantRevise.toFixed(2)) : "", r.valid ? Number(r.ecartMontant.toFixed(2)) : "",
-        r.valid ? `${r.ecartPct.toFixed(2)}%` : "",
-      ]);
-    });
-    rows.push([]);
-    rows.push(["", "", "TOTAL", Number(total.montantRevise.toFixed(2)), Number(total.ecartMontant.toFixed(2)), total.valid ? `${total.ecartPct.toFixed(2)}%` : ""]);
-    if (localDoc.notes) { rows.push([]); rows.push(["Note", localDoc.notes]); }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{ wch: 28 }, { wch: 36 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, ws, "Révision");
-    XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
+  // Même mise en forme complète (bordures, couleurs, décomptes mois
+  // par mois) pour tous les pays — le Maroc a juste été le premier
+  // dont j'avais un vrai exemple pour la construire, mais la
+  // structure (jours, décomptes, termes lettrés A/B/C...) est
+  // universelle, pas propre à un seul pays.
+  async function exportExcel() {
+    return exportExcelMaroc();
   }
 
+  // Ancien export au format exact des notes de calcul marocaines —
+  // s'applique désormais à tous les pays (voir exportExcel ci-dessus).
   // Export au format exact des notes de calcul marocaines (marchés
   // publics) — une feuille par secteur, colonnes dynamiques selon le
   // nombre de termes de la formule, reproduisant la mise en page de
@@ -2745,212 +3065,8 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     // le chargement initial de l'application pour tout le monde avec
     // une librairie dont seul le forfait Entreprise au Maroc a besoin.
     const { default: ExcelJS } = await import("exceljs");
-    const up = (v) => String(v ?? "").toUpperCase();
-    // Palette de couleurs claires uniquement (jamais foncées), sauf la
-    // ligne "vide" qui doit être noire — demandé explicitement.
-    const COL = {
-      label: "FFEDEDED",     // tous les libellés — une seule couleur
-      jours: "FFDCEEFB",
-      situation: "FFE2F0D9",
-      index: "FFFFF2CC",
-      lettre: "FFFCE4D6",
-      ppo: "FFE4DFEC",
-      pct: "FFFCE4EC",
-      montant: "FFD9F2E6",   // MT DE DECOMPTE et MT A REVISER = même valeur = même couleur
-      formule: "FFE8ECF5",
-      revision: "FFFAD9D9",
-      dpLabel: "FFD6E4F0",
-      blank: "FF000000",
-    };
-    const thinBorder = { style: "thin", color: { argb: "FFB7B7B7" } };
-    const allBorders = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder };
-    function fillCell(cell, color, opts = {}) {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
-      cell.border = allBorders;
-      if (opts.bold) cell.font = { bold: true };
-      cell.alignment = { horizontal: opts.align, vertical: "middle", wrapText: !!opts.wrap };
-    }
-
     const workbook = new ExcelJS.Workbook();
-    sectorLines.forEach((sec) => {
-      const terms = sec.terms || [];
-      const nCols = 8 + terms.length * 2; // nombre total de colonnes du tableau
-      const sheetName0 = up(sec.sector || "SECTEUR").replace(/[\\/*?:[\]]/g, "").slice(0, 31) || "SECTEUR";
-      let sheetName = sheetName0, n = 2;
-      while (workbook.getWorksheet(sheetName)) { sheetName = `${sheetName0.slice(0, 28)} (${n})`; n++; }
-      const ws = workbook.addWorksheet(sheetName);
-
-      // Largeurs de colonnes généreuses pour qu'aucun texte ne soit
-      // masqué à l'ouverture du fichier.
-      const widths = [10, 14, ...terms.map(() => 12), ...terms.map(() => 8), 9, 9, 15, 15, 22, 15];
-      widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-      // Largeur fusionnée réservée aux libellés (5 colonnes) — assez
-      // large pour un texte comme "ARTICLE DE LA RÉVISION DES PRIX
-      // CPS :" sans jamais revenir à la ligne.
-      const labelSpan = Math.min(5, nCols);
-
-      let r = 1;
-      function labelRow(text, mergeTo, opts = {}) {
-        ws.mergeCells(r, 1, r, mergeTo || Math.min(4, nCols));
-        const cell = ws.getCell(r, 1);
-        cell.value = up(text);
-        fillCell(cell, COL.label, { bold: true, align: "center", wrap: !!opts.wrap });
-        if (opts.wrap) ws.getRow(r).height = 30;
-        r++;
-      }
-      function kvRow(label, values) {
-        ws.mergeCells(r, 1, r, labelSpan);
-        const cell = ws.getCell(r, 1);
-        cell.value = up(label);
-        fillCell(cell, COL.label, { bold: true, align: "left" });
-        (values || []).forEach((v, i) => {
-          const c = ws.getCell(r, labelSpan + 1 + i);
-          c.value = v;
-          fillCell(c, COL.label, { align: "left" });
-        });
-        r++;
-      }
-
-      labelRow("NOTE DE CALCUL DE LA REVISION DES PRIX", nCols);
-      r++;
-      labelRow(`MARCHE N°: ${localDoc.marcheNumero || ""}`, nCols);
-      r++;
-      labelRow(localDoc.objet || "", nCols, { wrap: true });
-      r++;
-      labelRow(`STE : ${localDoc.company.name || ""}`, nCols);
-      r++;
-      kvRow("Date de soumission :", [sec.dateBase ? fr(sec.dateBase) : ""]);
-      kvRow("Symbole d'index:", terms.map((t) => up(t.symbole || "")));
-      kvRow("Index de base:", terms.map((t) => Number(t.indexBase) || ""));
-      kvRow("T.V.A Initiale", [Number(sec.tvaRate ?? 0.20)]);
-      if (sec.articleCPS) kvRow("Article de la révision des prix CPS :", [up(sec.articleCPS)]);
-      if (localDoc.dateDemarrage) kvRow("Ordre de service de commencer des travaux:", [fr(localDoc.dateDemarrage)]);
-      const a = Number(sec.coeffFixe) || 0;
-      const termLetters = terms.map((_, i) => String.fromCharCode(65 + i));
-      kvRow("Formule de révision des prix", [up(`P/P0 = ${a} + ${termLetters.join(" + ")}`)]);
-      terms.forEach((t, i) => kvRow(`${termLetters[i]} = ${t.poids}*(${up(t.symbole || "?")}/${up(t.symbole || "?")}0)`, []));
-      r++;
-
-      // En-têtes de colonnes
-      const headers = ["N.B JOURS", "SITUATION"];
-      terms.forEach((t) => headers.push(`INDEX ${up(t.symbole || "?")}`));
-      termLetters.forEach((l) => headers.push(l));
-      headers.push("P/P0", "%", "MT DE DECOMPTE", "MT A REVISER", "FORMULE", "MT DE LA REVISION");
-      const headerColors = ["jours", "situation", ...terms.map(() => "index"), ...terms.map(() => "lettre"), "ppo", "pct", "montant", "montant", "formule", "revision"];
-      headers.forEach((h, i) => {
-        const c = ws.getCell(r, i + 1);
-        c.value = h;
-        fillCell(c, COL[headerColors[i]], { bold: true, align: "center" });
-      });
-      const headerRowIdx = r;
-      r++;
-
-      let totalHT = 0;
-      (sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d) => {
-        if (d.isBlank) {
-          // Ligne vide, cellules fusionnées, remplie en noir.
-          ws.mergeCells(r, 1, r, nCols);
-          const c = ws.getCell(r, 1);
-          c.value = "";
-          c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COL.blank } };
-          c.border = allBorders;
-          r++;
-          return;
-        }
-        // Libellé du décompte (DP), sur sa propre ligne, cellules fusionnées.
-        if (d.label) {
-          ws.mergeCells(r, 1, r, nCols);
-          const c = ws.getCell(r, 1);
-          c.value = up(d.label);
-          fillCell(c, COL.dpLabel, { bold: true, align: "center" });
-          r++;
-        }
-        const dr = computeDecompteRevision(sec, d);
-        const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
-        (d.mois || []).forEach((m, mIdx) => {
-          const detail = (dr.detail || [])[mIdx];
-          const values = [Number(m.jours) || "", m.date ? frShort(m.date) : ""];
-          terms.forEach((t) => values.push(Number(m.valeurs?.[t.id]) || ""));
-          terms.forEach((t) => {
-            const base = Number(t.indexBase), val = Number(m.valeurs?.[t.id]);
-            values.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
-          });
-          values.push(detail?.valid ? Number(detail.coefficient.toFixed(4)) : "");
-          values.push(detail?.valid ? Number(detail.delta.toFixed(4)) : "");
-          values.push(Number(d.montantTotal) || "");
-          values.push(Number(d.montantTotal) || "");
-          values.push(detail?.valid ? up(`x ${detail.delta.toFixed(4)} x ${m.jours}/${totalJours}`) : "");
-          values.push(detail?.valid ? Number(detail.ecart.toFixed(2)) : "");
-          values.forEach((v, i) => {
-            const c = ws.getCell(r, i + 1);
-            c.value = v;
-            fillCell(c, COL[headerColors[i]]);
-          });
-          r++;
-        });
-        // Sous-total du décompte.
-        const subCell = ws.getCell(r, 1);
-        subCell.value = totalJours;
-        fillCell(subCell, COL.jours, { bold: true });
-        const subResult = ws.getCell(r, nCols);
-        subResult.value = dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "";
-        fillCell(subResult, COL.revision, { bold: true });
-        for (let cc = 2; cc < nCols; cc++) { const c = ws.getCell(r, cc); c.value = ""; c.border = allBorders; }
-        r++;
-        if (dr.valid) totalHT += dr.ecartMontant;
-      });
-
-      if (!sec.useDecomptes) {
-        const rr = computeRevisionLine(sec);
-        const values = ["", sec.dateActuelle ? frShort(sec.dateActuelle) : ""];
-        terms.forEach((t) => values.push(Number(sec.valeursActuelles?.[t.id]) || ""));
-        terms.forEach((t) => {
-          const base = Number(t.indexBase), val = Number(sec.valeursActuelles?.[t.id]);
-          values.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
-        });
-        values.push(rr.valid ? Number(rr.coefficient.toFixed(4)) : "");
-        values.push(rr.valid ? Number((rr.coefficient - 1).toFixed(4)) : "");
-        values.push(Number(sec.montantInitialHT) || "");
-        values.push(Number(sec.montantInitialHT) || "");
-        values.push("");
-        values.push(rr.valid ? Number(rr.ecartMontant.toFixed(2)) : "");
-        values.forEach((v, i) => {
-          const c = ws.getCell(r, i + 1);
-          c.value = v;
-          fillCell(c, COL[headerColors[i]]);
-        });
-        r++;
-        if (rr.valid) totalHT += rr.ecartMontant;
-      }
-
-      r++;
-      const tvaRate = Number(sec.tvaRate ?? 0.20);
-      function totalRow(label, value, color) {
-        ws.mergeCells(r, 1, r, nCols - 2);
-        const lc = ws.getCell(r, 1);
-        lc.value = up(label);
-        fillCell(lc, COL.label, { bold: true, align: "right" });
-        ws.mergeCells(r, nCols - 1, r, nCols);
-        const vc = ws.getCell(r, nCols - 1);
-        vc.value = Number(value.toFixed(2));
-        fillCell(vc, color, { bold: true, align: "right" });
-        r++;
-      }
-      totalRow("Total de la révision des prix HTVA", totalHT, COL.revision);
-      totalRow(`TVA ${Math.round(tvaRate * 100)}%`, totalHT * tvaRate, COL.revision);
-      totalRow("Total de la révision des prix TTC", totalHT * (1 + tvaRate), COL.revision);
-      r++;
-      ws.mergeCells(r, 1, r, Math.floor(nCols / 2));
-      const ent = ws.getCell(r, 1);
-      ent.value = "ENTREPRISE";
-      fillCell(ent, COL.label, { bold: true, align: "center" });
-      ws.mergeCells(r, Math.floor(nCols / 2) + 1, r, nCols);
-      const srv = ws.getCell(r, Math.floor(nCols / 2) + 1);
-      srv.value = "SERVICE / MAÎTRE D'OUVRAGE";
-      fillCell(srv, COL.label, { bold: true, align: "center" });
-
-      // Pas de volets figés — la personne veut pouvoir tout faire défiler librement.
-    });
+    sectorLines.forEach((sec) => buildMarocRevisionSheet(workbook, localDoc, sec));
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -3054,7 +3170,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                       <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateBase} onChange={(e) => patchSector(sec.id, { dateBase: e.target.value })} />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Article CPS (optionnel)</label>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Article / référence du contrat (optionnel)</label>
                       <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex: 13 page 9 et 10" value={sec.articleCPS || ""} onChange={(e) => patchSector(sec.id, { articleCPS: e.target.value })} />
                     </div>
                     <div>
