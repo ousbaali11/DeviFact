@@ -6463,19 +6463,20 @@ function TeamView({ account }) {
 
   async function loadMembers() {
     if (!account?.organizationId) { setMembers([]); return; }
-    const { data, error: loadError } = await db
-      .from("organization_members")
-      .select("id, user_id, role, status, profiles:user_id ( email, company_name )")
-      .eq("organization_id", account.organizationId)
-      .order("created_at", { ascending: true });
+    const { data, error: loadError } = await db.rpc("get_organization_members_with_profiles", { org_id: account.organizationId });
     if (loadError) {
       console.error("Erreur de chargement de l'équipe", loadError);
-      setMembersError("Impossible de charger la liste des membres. Réessaie dans un instant.");
+      setMembersError(`Impossible de charger la liste des membres (${loadError.message || "erreur inconnue"}). Réessaie dans un instant.`);
       setMembers([]);
       return;
     }
     setMembersError("");
-    setMembers(data || []);
+    // Reforme la structure attendue par le reste du composant
+    // (profiles imbriqué), pour ne rien avoir à changer plus bas.
+    setMembers((data || []).map((m) => ({
+      id: m.id, user_id: m.user_id, role: m.role, status: m.status,
+      profiles: { email: m.email, company_name: m.company_name },
+    })));
   }
 
   useEffect(() => { loadMembers(); }, [account?.organizationId]);
