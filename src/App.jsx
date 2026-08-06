@@ -102,6 +102,14 @@ const CURRENCIES = [
   "CNY", "JPY", "AED", "SAR", "TRY", "INR", "BRL", "MXN", "AUD", "SEK", "NOK", "PLN",
 ];
 const fr = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+// Format court pour la colonne "Situation" des révisions de prix :
+// jour + mois sur 3 lettres, en majuscules, sans année (ex: "21 FEV").
+const MOIS_COURTS = ["JAN", "FEV", "MAR", "AVR", "MAI", "JUN", "JUL", "AOU", "SEP", "OCT", "NOV", "DEC"];
+const frShort = (d) => {
+  const date = new Date(d);
+  const jour = String(date.getDate()).padStart(2, "0");
+  return `${jour} ${MOIS_COURTS[date.getMonth()]}`;
+};
 const frLong = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 
 function emptyLine() {
@@ -2396,7 +2404,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
         const headerCols = [
           { label: "N.B JOURS", color: REV_COL.jours },
           { label: "SITUATION", color: REV_COL.situation },
-          ...terms.map((t) => ({ label: `INDEX "${upx(t.symbole || "?")}"`, color: REV_COL.index })),
+          ...terms.map((t) => ({ label: `INDEX ${upx(t.symbole || "?")}`, color: REV_COL.index })),
           ...termLetters.map((l) => ({ label: l, color: REV_COL.lettre })),
           { label: "P/P0", color: REV_COL.ppo },
           { label: "%", color: REV_COL.pct },
@@ -2422,7 +2430,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
             const detail = (dr.detail || [])[mIdx];
             const cells = [
               Number(m.jours) || "",
-              m.date ? fr(m.date) : "",
+              m.date ? frShort(m.date) : "",
               ...terms.map((t) => Number(m.valeurs?.[t.id]) || ""),
               ...terms.map((t) => {
                 const base = Number(t.indexBase), val = Number(m.valeurs?.[t.id]);
@@ -2454,7 +2462,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
         if (!sec.useDecomptes) {
           const rr = computeRevisionLine(sec);
           const cells = [
-            "", sec.dateActuelle ? fr(sec.dateActuelle) : "",
+            "", sec.dateActuelle ? frShort(sec.dateActuelle) : "",
             ...terms.map((t) => Number(sec.valeursActuelles?.[t.id]) || ""),
             ...terms.map((t) => {
               const base = Number(t.indexBase), val = Number(sec.valeursActuelles?.[t.id]);
@@ -2825,7 +2833,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
 
       // En-têtes de colonnes
       const headers = ["N.B JOURS", "SITUATION"];
-      terms.forEach((t) => headers.push(`INDEX "${up(t.symbole || "?")}"`));
+      terms.forEach((t) => headers.push(`INDEX ${up(t.symbole || "?")}`));
       termLetters.forEach((l) => headers.push(l));
       headers.push("P/P0", "%", "MT DE DECOMPTE", "MT A REVISER", "FORMULE", "MT DE LA REVISION");
       const headerColors = ["jours", "situation", ...terms.map(() => "index"), ...terms.map(() => "lettre"), "ppo", "pct", "montant", "montant", "formule", "revision"];
@@ -2861,7 +2869,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
         (d.mois || []).forEach((m, mIdx) => {
           const detail = (dr.detail || [])[mIdx];
-          const values = [Number(m.jours) || "", m.date ? fr(m.date) : ""];
+          const values = [Number(m.jours) || "", m.date ? frShort(m.date) : ""];
           terms.forEach((t) => values.push(Number(m.valeurs?.[t.id]) || ""));
           terms.forEach((t) => {
             const base = Number(t.indexBase), val = Number(m.valeurs?.[t.id]);
@@ -2894,7 +2902,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
 
       if (!sec.useDecomptes) {
         const rr = computeRevisionLine(sec);
-        const values = ["", sec.dateActuelle ? fr(sec.dateActuelle) : ""];
+        const values = ["", sec.dateActuelle ? frShort(sec.dateActuelle) : ""];
         terms.forEach((t) => values.push(Number(sec.valeursActuelles?.[t.id]) || ""));
         terms.forEach((t) => {
           const base = Number(t.indexBase), val = Number(sec.valeursActuelles?.[t.id]);
@@ -3138,13 +3146,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
 
                   {sec.useDecomptes && (
                     <div className="mb-3">
-                      <div className="mb-2 flex items-center justify-between">
-                        <label className="block text-xs" style={{ color: colors.inkSoft }}>Décomptes (DP) — chacun peut couvrir plusieurs mois</label>
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={() => addBlankRow(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}><Minus size={12} /> Ligne vide</button>
-                          <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
-                        </div>
-                      </div>
+                      <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Décomptes (DP) — chacun peut couvrir plusieurs mois</label>
                       <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Le montant total du décompte est réparti entre ses mois au prorata du nombre de jours de chacun — comme dans une vraie note de calcul marocaine.</p>
                       <div className="space-y-2">
                         {(sec.decomptes || []).map((d, dIdx) => {
@@ -3213,6 +3215,10 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                             </div>
                           );
                         })}
+                      </div>
+                      <div className="mt-2 flex items-center justify-end gap-1.5">
+                        <button onClick={() => addBlankRow(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}><Minus size={12} /> Ligne vide</button>
+                        <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
                       </div>
                     </div>
                   )}
