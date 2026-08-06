@@ -330,8 +330,12 @@ function emptyRevisionSector(sector, country) {
   };
 }
 
+function emptyMois() {
+  return { id: nextId("ms"), date: new Date().toISOString().slice(0, 10), jours: "", valeurs: {} };
+}
+
 function emptyDecompte() {
-  return { id: nextId("dc"), label: "", dateDecompte: new Date().toISOString().slice(0, 10), jours: "", montantHT: "", valeurs: {}, isFinal: false };
+  return { id: nextId("dc"), label: "", dateDecompte: new Date().toISOString().slice(0, 10), montantTotal: "", mois: [emptyMois()], isFinal: false };
 }
 
 function newRevisionDocument(sector, country, documents) {
@@ -401,9 +405,25 @@ function getRevisionSectors(doc) {
 // unique, soit la somme de ses décomptes s'il en utilise plusieurs.
 function getSectorMontantInitial(line) {
   if (line?.useDecomptes && Array.isArray(line.decomptes)) {
-    return line.decomptes.reduce((s, d) => s + (Number(d.montantHT) || 0), 0);
+    return line.decomptes.reduce((s, d) => s + (Number(d.montantTotal) || 0), 0);
   }
   return Number(line?.montantInitialHT) || 0;
+}
+
+// Calcule le coefficient de révision (P/P0) pour un jeu de valeurs
+// d'indices donné, sans référence à un montant — utilisé pour
+// calculer le coefficient MOIS PAR MOIS à l'intérieur d'un décompte.
+function computeCoefficientOnly(sector, valeurs) {
+  const terms = Array.isArray(sector?.terms) ? sector.terms : [];
+  if (!terms.length) return { valid: false, coefficient: 0 };
+  const a = Number(sector.coeffFixe) || 0;
+  let variable = 0;
+  for (const t of terms) {
+    const base = Number(t.indexBase), val = Number(valeurs?.[t.id]);
+    if (!base || !val) return { valid: false, coefficient: 0 };
+    variable += (Number(t.poids) || 0) * (val / base);
+  }
+  return { valid: true, coefficient: a + variable };
 }
 
 // Cœur du calcul, valable pour 1 terme (formule simple, ex: Maroc
@@ -426,12 +446,33 @@ function computeRevisionAmount(sector, montantHT, valeurs) {
   return { valid: true, montantRevise, ecartMontant: montantRevise - c0, coefficient };
 }
 
-// Calcule la révision d'un seul décompte, avec les indices de base
-// du secteur auquel il appartient (chaque décompte a sa propre date
-// et ses propres valeurs d'indices — c'est ce qui permet de suivre
-// un chantier mois par mois, comme sur les vrais décomptes DP1, DP2...).
+// Calcule la révision d'un décompte (DP) qui peut couvrir plusieurs
+// mois : le montant total du DP est réparti entre ses mois au
+// prorata du nombre de jours de chacun, chaque mois appliquant son
+// propre coefficient de révision (calculé avec ses propres valeurs
+// d'indices) — exactement la méthode utilisée dans les vraies notes
+// de calcul marocaines (DP1, DP2... avec répartition "jours / total").
 function computeDecompteRevision(sector, decompte) {
-  return computeRevisionAmount(sector, decompte?.montantHT, decompte?.valeurs);
+  const montantTotal = Number(decompte?.montantTotal) || 0;
+  const moisList = Array.isArray(decompte?.mois) ? decompte.mois : [];
+  if (!montantTotal || !moisList.length) return { valid: false, montantRevise: 0, ecartMontant: 0, coefficient: 0, detail: [] };
+  const totalJours = moisList.reduce((s, m) => s + (Number(m.jours) || 0), 0);
+  if (!totalJours) return { valid: false, montantRevise: 0, ecartMontant: 0, coefficient: 0, detail: [] };
+
+  let ecartTotal = 0;
+  let allValid = true;
+  const detail = moisList.map((m) => {
+    const c = computeCoefficientOnly(sector, m.valeurs);
+    const jours = Number(m.jours) || 0;
+    if (!c.valid) { allValid = false; return { valid: false, jours }; }
+    const delta = c.coefficient - 1;
+    const ecart = montantTotal * delta * (jours / totalJours);
+    ecartTotal += ecart;
+    return { valid: true, coefficient: c.coefficient, delta, ecart, jours };
+  });
+
+  if (!allValid) return { valid: false, montantRevise: 0, ecartMontant: 0, coefficient: 0, detail };
+  return { valid: true, montantRevise: montantTotal + ecartTotal, ecartMontant: ecartTotal, coefficient: 0, detail };
 }
 
 function computeRevisionLine(line) {
@@ -2378,12 +2419,13 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
               if (l.useDecomptes && Array.isArray(l.decomptes) && l.decomptes.length) {
                 return l.decomptes.filter((d) => !d.isBlank).map((d, dIdx) => {
                   const dr = computeDecompteRevision(l, d);
-                  const termsSummary = terms.map((t) => `${t.symbole || "?"} : ${t.indexBase || "—"} → ${d.valeurs?.[t.id] || "—"}`).join(" · ");
+                  const moisCount = (d.mois || []).length;
+                  const termsSummary = `${moisCount} mois — ${terms.map((t) => t.symbole || "?").join(", ")}`;
                   return (
                     <tr key={`${l.id || idx}-${d.id || dIdx}`} style={{ borderBottom: `1px solid ${line}` }}>
                       <td style={{ padding: "6px 4px" }}>{l.sector}{d.label ? ` — ${d.label}` : ` — décompte ${dIdx + 1}`}</td>
                       <td style={{ padding: "6px 4px", fontSize: "7.5pt", color: inkSoft }}>{termsSummary}</td>
-                      <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(d.montantHT) || 0, doc.currency)}</td>
+                      <td style={{ padding: "6px 4px", textAlign: "right", ...mono }}>{formatMoney(Number(d.montantTotal) || 0, doc.currency)}</td>
                       <td style={{ padding: "6px 4px", textAlign: "right", fontSize: "7.5pt", color: inkSoft }}>{d.dateDecompte ? new Date(d.dateDecompte).toLocaleDateString("fr-FR") : "—"}</td>
                       <td style={{ padding: "6px 4px", textAlign: "right", ...mono, fontWeight: 600 }}>{dr.valid ? formatMoney(dr.montantRevise, doc.currency) : "—"}</td>
                     </tr>
@@ -2493,17 +2535,37 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
     patchSector(sectorId, {
       terms: sec.terms.filter((t) => t.id !== termId),
       valeursActuelles: Object.fromEntries(Object.entries(sec.valeursActuelles || {}).filter(([k]) => k !== termId)),
-      decomptes: (sec.decomptes || []).map((d) => ({ ...d, valeurs: Object.fromEntries(Object.entries(d.valeurs || {}).filter(([k]) => k !== termId)) })),
+      decomptes: (sec.decomptes || []).map((d) => ({
+        ...d,
+        mois: (d.mois || []).map((m) => ({ ...m, valeurs: Object.fromEntries(Object.entries(m.valeurs || {}).filter(([k]) => k !== termId)) })),
+      })),
     });
   }
   function patchValeurActuelle(sectorId, termId, value) {
     const sec = sectorLines.find((l) => l.id === sectorId);
     patchSector(sectorId, { valeursActuelles: { ...(sec?.valeursActuelles || {}), [termId]: value } });
   }
-  function patchDecompteValeur(sectorId, decompteId, termId, value) {
+  function addMois(sectorId, decompteId) {
     const sec = sectorLines.find((l) => l.id === sectorId);
     const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
-    patchDecompte(sectorId, decompteId, { valeurs: { ...(d?.valeurs || {}), [termId]: value } });
+    patchDecompte(sectorId, decompteId, { mois: [...(d?.mois || []), emptyMois()] });
+  }
+  function patchMois(sectorId, decompteId, moisId, p) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
+    patchDecompte(sectorId, decompteId, { mois: (d?.mois || []).map((m) => (m.id === moisId ? { ...m, ...p } : m)) });
+  }
+  function removeMois(sectorId, decompteId, moisId) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
+    if ((d?.mois || []).length <= 1) return;
+    patchDecompte(sectorId, decompteId, { mois: (d.mois || []).filter((m) => m.id !== moisId) });
+  }
+  function patchMoisValeur(sectorId, decompteId, moisId, termId, value) {
+    const sec = sectorLines.find((l) => l.id === sectorId);
+    const d = (sec?.decomptes || []).find((dd) => dd.id === decompteId);
+    const m = (d?.mois || []).find((mm) => mm.id === moisId);
+    patchMois(sectorId, decompteId, moisId, { valeurs: { ...(m?.valeurs || {}), [termId]: value } });
   }
 
   async function downloadPdf() {
@@ -2567,9 +2629,9 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
           if (d.isBlank) { rows.push([]); return; }
           const dr = computeDecompteRevision(l, d);
           rows.push([
-            `${l.sector} — ${d.label || `décompte ${dIdx + 1}`}`, termsLabel, Number(d.montantHT) || 0,
+            `${l.sector} — ${d.label || `décompte ${dIdx + 1}`}`, termsLabel, Number(d.montantTotal) || 0,
             dr.valid ? Number(dr.montantRevise.toFixed(2)) : "", dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "",
-            dr.valid && d.montantHT ? `${((dr.ecartMontant / Number(d.montantHT)) * 100).toFixed(2)}%` : "",
+            dr.valid && d.montantTotal ? `${((dr.ecartMontant / Number(d.montantTotal)) * 100).toFixed(2)}%` : "",
           ]);
         });
         return;
@@ -2629,20 +2691,29 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       (sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d) => {
         if (d.isBlank) { rows.push([]); return; }
         const dr = computeDecompteRevision(sec, d);
-        const row = [Number(d.jours) || "", d.dateDecompte ? fr(d.dateDecompte) : (d.label || "")];
-        terms.forEach((t) => row.push(Number(d.valeurs?.[t.id]) || ""));
-        terms.forEach((t) => {
-          const base = Number(t.indexBase), val = Number(d.valeurs?.[t.id]);
-          row.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
+        const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
+        (d.mois || []).forEach((m, mIdx) => {
+          const detail = (dr.detail || [])[mIdx];
+          const row = [Number(m.jours) || "", m.date ? fr(m.date) : ""];
+          terms.forEach((t) => row.push(Number(m.valeurs?.[t.id]) || ""));
+          terms.forEach((t) => {
+            const base = Number(t.indexBase), val = Number(m.valeurs?.[t.id]);
+            row.push(base && val ? Number(((Number(t.poids) || 0) * (val / base)).toFixed(4)) : "");
+          });
+          row.push(detail?.valid ? Number(detail.coefficient.toFixed(4)) : "");
+          row.push(detail?.valid ? Number(detail.delta.toFixed(4)) : "");
+          row.push(Number(d.montantTotal) || "");
+          row.push(Number(d.montantTotal) || "");
+          row.push(detail?.valid ? `x ${detail.delta.toFixed(4)} x ${m.jours}/${totalJours}` : "");
+          row.push(detail?.valid ? Number(detail.ecart.toFixed(2)) : "");
+          rows.push(row);
         });
-        row.push(dr.valid ? Number(dr.coefficient.toFixed(4)) : "");
-        row.push(dr.valid ? Number((dr.coefficient - 1).toFixed(4)) : "");
-        row.push(Number(d.montantHT) || "");
-        row.push(Number(d.montantHT) || "");
-        row.push(dr.valid ? `x ${dr.coefficient.toFixed(4)}${d.jours ? ` x ${d.jours}` : ""}` : "");
-        row.push(dr.valid ? Number(dr.montantRevise.toFixed(2)) : "");
-        rows.push(row);
-        if (dr.valid) totalHT += dr.montantRevise;
+        // Ligne de sous-total du décompte (comme dans le vrai document).
+        const subtotalRow = new Array(2 + terms.length * 2 + 6).fill("");
+        subtotalRow[0] = totalJours;
+        subtotalRow[subtotalRow.length - 1] = dr.valid ? Number(dr.ecartMontant.toFixed(2)) : "";
+        rows.push(subtotalRow);
+        if (dr.valid) totalHT += dr.ecartMontant;
       });
 
       // Si le secteur n'utilise pas les décomptes multiples, on
@@ -2660,9 +2731,9 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         row.push(Number(sec.montantInitialHT) || "");
         row.push(Number(sec.montantInitialHT) || "");
         row.push("");
-        row.push(r.valid ? Number(r.montantRevise.toFixed(2)) : "");
+        row.push(r.valid ? Number(r.ecartMontant.toFixed(2)) : "");
         rows.push(row);
-        if (r.valid) totalHT += r.montantRevise;
+        if (r.valid) totalHT += r.ecartMontant;
       }
 
       const tvaRate = 0.20;
@@ -2857,12 +2928,13 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                   {sec.useDecomptes && (
                     <div className="mb-3">
                       <div className="mb-2 flex items-center justify-between">
-                        <label className="block text-xs" style={{ color: colors.inkSoft }}>Décomptes (un par période de paiement)</label>
+                        <label className="block text-xs" style={{ color: colors.inkSoft }}>Décomptes (DP) — chacun peut couvrir plusieurs mois</label>
                         <div className="flex items-center gap-1.5">
                           <button onClick={() => addBlankRow(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}><Minus size={12} /> Ligne vide</button>
                           <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
                         </div>
                       </div>
+                      <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Le montant total du décompte est réparti entre ses mois au prorata du nombre de jours de chacun — comme dans une vraie note de calcul marocaine.</p>
                       <div className="space-y-2">
                         {(sec.decomptes || []).map((d, dIdx) => {
                           if (d.isBlank) {
@@ -2874,40 +2946,57 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                             );
                           }
                           const dr = computeDecompteRevision(sec, d);
+                          const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
                           return (
                             <div key={d.id || dIdx} className="rounded-lg p-3" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
                               <div className="mb-2 flex items-center gap-2">
-                                <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder={`Décompte n°${dIdx + 1} (libellé optionnel)`} value={d.label} onChange={(e) => patchDecompte(sec.id, d.id, { label: e.target.value })} />
+                                <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder={`ex: DP N°${dIdx + 1} : Travaux exécutés du ... au ...`} value={d.label} onChange={(e) => patchDecompte(sec.id, d.id, { label: e.target.value })} />
                                 {(sec.decomptes || []).length > 1 && (
                                   <button onClick={() => removeDecompte(sec.id, d.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                                 )}
                               </div>
-                              <div className="mb-2 grid grid-cols-3 gap-2">
+                              <div className="mb-3 grid grid-cols-2 gap-2">
                                 <div>
-                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date</label>
+                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date du décompte</label>
                                   <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.dateDecompte} onChange={(e) => patchDecompte(sec.id, d.id, { dateDecompte: e.target.value })} />
                                 </div>
                                 <div>
-                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Jours (optionnel)</label>
-                                  <input type="number" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.jours || ""} onChange={(e) => patchDecompte(sec.id, d.id, { jours: e.target.value })} placeholder="ex: 28" />
-                                </div>
-                                <div>
-                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant HT</label>
-                                  <input type="number" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.montantHT} onChange={(e) => patchDecompte(sec.id, d.id, { montantHT: e.target.value })} placeholder="0" />
+                                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Montant total à réviser HT</label>
+                                  <input type="number" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.montantTotal} onChange={(e) => patchDecompte(sec.id, d.id, { montantTotal: e.target.value })} placeholder="0" />
                                 </div>
                               </div>
-                              <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min((sec.terms || []).length, 4) || 1}, minmax(0,1fr))` }}>
-                                {(sec.terms || []).map((t) => (
-                                  <div key={t.id}>
-                                    <label className="mb-1 block truncate text-xs" style={{ color: colors.inkSoft }} title={t.symbole}>{t.symbole || "Indice"}</label>
-                                    <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.valeurs?.[t.id] || ""} onChange={(e) => patchDecompteValeur(sec.id, d.id, t.id, e.target.value)} />
+
+                              <div className="mb-2 flex items-center justify-between">
+                                <label className="text-xs" style={{ color: colors.inkSoft }}>Mois inclus dans ce décompte ({totalJours} jour{totalJours > 1 ? "s" : ""} au total)</label>
+                                <button onClick={() => addMois(sec.id, d.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={11} /> Mois</button>
+                              </div>
+                              <div className="space-y-1.5">
+                                {(d.mois || []).map((m, mIdx) => (
+                                  <div key={m.id || mIdx} className="rounded-md p-2" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+                                    <div className="mb-1.5 flex items-center gap-2">
+                                      <input type="date" className="df-input df-mono rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}`, width: "9.5rem" }} value={m.date} onChange={(e) => patchMois(sec.id, d.id, m.id, { date: e.target.value })} />
+                                      <input type="number" className="df-input df-mono w-20 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.jours} onChange={(e) => patchMois(sec.id, d.id, m.id, { jours: e.target.value })} placeholder="jours" />
+                                      <span className="grow" />
+                                      {(d.mois || []).length > 1 && (
+                                        <button onClick={() => removeMois(sec.id, d.id, m.id)} style={{ color: colors.brick }}><Trash2 size={13} /></button>
+                                      )}
+                                    </div>
+                                    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min((sec.terms || []).length, 4) || 1}, minmax(0,1fr))` }}>
+                                      {(sec.terms || []).map((t) => (
+                                        <div key={t.id}>
+                                          <label className="mb-0.5 block truncate text-xs" style={{ color: colors.inkSoft }} title={t.symbole}>{t.symbole || "Indice"}</label>
+                                          <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.valeurs?.[t.id] || ""} onChange={(e) => patchMoisValeur(sec.id, d.id, m.id, t.id, e.target.value)} />
+                                        </div>
+                                      ))}
+                                    </div>
                                   </div>
                                 ))}
                               </div>
+
                               {dr.valid && (
                                 <div className="mt-2 flex items-center justify-between text-xs font-medium" style={{ color: colors.moss }}>
-                                  <span>Montant révisé</span>
-                                  <span className="df-mono">{formatMoney(dr.montantRevise, localDoc.currency)}</span>
+                                  <span>Écart de révision pour ce décompte</span>
+                                  <span className="df-mono">{formatMoney(dr.ecartMontant, localDoc.currency)}</span>
                                 </div>
                               )}
                             </div>
