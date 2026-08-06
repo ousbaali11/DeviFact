@@ -1669,19 +1669,25 @@ export default function DeviFactApp() {
     if (!user) return;
     setCreatingOwnOrg(true);
     try {
-      const { data: newOrg, error: orgError } = await db.from("organizations").insert({ name: user.email }).select("id").single();
+      // Identifiant généré ici plutôt que par la base : évite d'avoir à
+      // relire la ligne juste après l'avoir créée (.select().single()),
+      // ce que la règle de lecture bloque tant qu'on n'est pas encore
+      // membre de cette organisation — un problème classique de
+      // "poule et œuf" avec ce genre de sécurité en base de données.
+      const newOrgId = crypto.randomUUID();
+      const { error: orgError } = await db.from("organizations").insert({ id: newOrgId, name: user.email });
       if (orgError) {
         console.error("Erreur de création de l'organisation", orgError);
-        alert("Impossible de créer ton espace pour le moment. Réessaie dans un instant.");
+        alert(`Impossible de créer ton espace (${orgError.message || "erreur inconnue"}). Réessaie dans un instant.`);
         return;
       }
-      const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: user.id, role: "owner", status: "active" });
+      const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrgId, user_id: user.id, role: "owner", status: "active" });
       if (memberError) {
         console.error("Erreur d'ajout comme propriétaire", memberError);
-        alert("Impossible de créer ton espace pour le moment. Réessaie dans un instant.");
+        alert(`Impossible de créer ton espace (${memberError.message || "erreur inconnue"}). Réessaie dans un instant.`);
         return;
       }
-      await switchOrganization(newOrg.id);
+      await switchOrganization(newOrgId);
     } finally {
       setCreatingOwnOrg(false);
     }
