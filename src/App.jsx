@@ -340,19 +340,28 @@ function getRevisionCountryInfo(country) {
   return REVISION_COUNTRY_INFO[country] || { currency: null, indexHint: "", authority: "l'organisme national de statistiques de ton pays" };
 }
 
-// Construit le lien le plus direct possible vers la source officielle
-// d'un indice, à partir de son symbole et du pays — précis quand on
-// connaît le vrai site (Maroc), sinon une recherche ciblée vers
-// l'organisme déjà identifié pour ce pays (toujours mieux que rien,
-// et ne dépend jamais d'un accès automatisé côté serveur).
+// Construit un lien de recherche vers la source officielle d'un
+// indice — toujours une recherche (jamais une URL directe devinée),
+// pour ne jamais tomber sur une erreur 404 : la structure exacte des
+// sites officiels varie trop d'un pays à l'autre pour la deviner de
+// façon fiable, et une recherche tolère les petites variations dans
+// ce que la personne a tapé (casse, espaces...). L'opérateur "site:"
+// cible directement le bon site quand on le connaît avec certitude.
 function buildIndexSourceUrl(country, symbole) {
-  const code = encodeURIComponent((symbole || "").trim());
+  const code = (symbole || "").trim();
   if (!code) return null;
-  if (country === "🇲🇦 MA") return `https://index.ma/index/${code}`;
-  if (country === "🇫🇷 FR") return `https://www.insee.fr/fr/recherche/resultats?q=${code}`;
-  const info = getRevisionCountryInfo(country);
-  const authority = info.authority && info.authority !== "l'organisme national de statistiques de ton pays" ? info.authority : "";
-  return `https://www.google.com/search?q=${code}+${encodeURIComponent(authority || "indice révision prix construction " + (country || ""))}`;
+  let query;
+  if (country === "🇲🇦 MA") {
+    query = `${code} site:index.ma`;
+  } else if (country === "🇫🇷 FR") {
+    query = `${code} site:insee.fr indice BT TP construction`;
+  } else {
+    const info = getRevisionCountryInfo(country);
+    const authority = info.authority && info.authority !== "l'organisme national de statistiques de ton pays" ? info.authority : "";
+    const countryCode = (country || "").replace(/[^\x00-\x7F]/g, "").trim(); // retire le drapeau, garde le code (ex: "BE")
+    query = `${code} ${authority || "indice révision prix construction " + countryCode}`;
+  }
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
 }
 
 // Listes de formules/indices officiels vérifiés directement auprès des
@@ -1509,7 +1518,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
 });
 
 export default function DeviFactApp() {
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState(() => (typeof window !== "undefined" && sessionStorage.getItem("devifact_lastView")) || "dashboard");
   const [documents, setDocuments] = useState([]);
   const [clients, setClients] = useState([]);
   const [prestations, setPrestations] = useState([]);
@@ -1521,7 +1530,7 @@ export default function DeviFactApp() {
   const [savingClients, setSavingClients] = useState(false);
   const [savingPrestations, setSavingPrestations] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
-  const [activeId, setActiveId] = useState(null);
+  const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && sessionStorage.getItem("devifact_lastActiveId")) || null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("tous");
   const [revisionCountry, setRevisionCountry] = useState("🇫🇷 FR");
@@ -1657,6 +1666,13 @@ export default function DeviFactApp() {
     setCompanyProfile(emptyCompanyProfile());
     setPrestations([]);
     setActiveId(null);
+    // Efface aussi la position mémorisée (vue + document actif) : sans
+    // ça, un autre compte se connectant dans le même onglet pourrait
+    // se retrouver ramené sur un document qui ne lui appartient pas.
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem("devifact_lastView");
+      sessionStorage.removeItem("devifact_lastActiveId");
+    }
   }
 
   // Change l'organisation actuellement affichée, parmi celles dont la
@@ -1757,6 +1773,19 @@ export default function DeviFactApp() {
     });
     return () => authListener?.subscription?.unsubscribe();
   }, []);
+
+  // Mémorise en continu la vue et le document actuellement ouverts —
+  // ainsi, si le navigateur recharge la page toute seule (mise en
+  // veille d'un onglet inactif pour économiser la mémoire, fréquente
+  // en changeant de fenêtre), la personne retrouve exactement où elle
+  // en était plutôt que d'être ramenée au tableau de bord.
+  useEffect(() => {
+    if (typeof window === "undefined" || !account) return;
+    if (view && view !== "dashboard") sessionStorage.setItem("devifact_lastView", view);
+    else sessionStorage.removeItem("devifact_lastView");
+    if (activeId) sessionStorage.setItem("devifact_lastActiveId", activeId);
+    else sessionStorage.removeItem("devifact_lastActiveId");
+  }, [view, activeId, account]);
 
   async function updatePlanPrice(planId, field, value) {
     setSavingPlanSettings(true);
