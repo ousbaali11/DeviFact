@@ -340,6 +340,21 @@ function getRevisionCountryInfo(country) {
   return REVISION_COUNTRY_INFO[country] || { currency: null, indexHint: "", authority: "l'organisme national de statistiques de ton pays" };
 }
 
+// Construit le lien le plus direct possible vers la source officielle
+// d'un indice, à partir de son symbole et du pays — précis quand on
+// connaît le vrai site (Maroc), sinon une recherche ciblée vers
+// l'organisme déjà identifié pour ce pays (toujours mieux que rien,
+// et ne dépend jamais d'un accès automatisé côté serveur).
+function buildIndexSourceUrl(country, symbole) {
+  const code = encodeURIComponent((symbole || "").trim());
+  if (!code) return null;
+  if (country === "🇲🇦 MA") return `https://index.ma/index/${code}`;
+  if (country === "🇫🇷 FR") return `https://www.insee.fr/fr/recherche/resultats?q=${code}`;
+  const info = getRevisionCountryInfo(country);
+  const authority = info.authority && info.authority !== "l'organisme national de statistiques de ton pays" ? info.authority : "";
+  return `https://www.google.com/search?q=${code}+${encodeURIComponent(authority || "indice révision prix construction " + (country || ""))}`;
+}
+
 // Listes de formules/indices officiels vérifiés directement auprès des
 // sources nationales — uniquement pour les pays où j'ai pu confirmer
 // la liste complète (pas de code deviné). Pour les autres pays, on
@@ -1622,85 +1637,6 @@ export default function DeviFactApp() {
     setSavingSiteSettings(false);
   }
 
-  // Indices officiels de révision des prix (Maroc : saisie manuelle
-  // par l'admin ; France : synchronisation automatique via l'INSEE).
-  // Chargés une fois pour toute l'application — utilisés à la fois
-  // dans l'Admin et dans le formulaire de révision pour l'auto-remplissage.
-  const [trackedIndices, setTrackedIndices] = useState([]);
-  const [officialIndexValues, setOfficialIndexValues] = useState([]);
-  const [savingIndices, setSavingIndices] = useState(false);
-  const [syncingIndices, setSyncingIndices] = useState(false);
-
-  async function loadOfficialIndices() {
-    const { data: tracked, error: trackedError } = await db.from("tracked_indices").select("*").order("country").order("code");
-    if (trackedError) { console.error("Erreur de chargement des indices suivis", trackedError); return; }
-    setTrackedIndices(tracked || []);
-    const { data: values, error: valuesError } = await db.from("official_indices").select("*").order("period_year", { ascending: false }).order("period_month", { ascending: false });
-    if (valuesError) { console.error("Erreur de chargement des valeurs d'indices", valuesError); return; }
-    setOfficialIndexValues(values || []);
-  }
-
-  // Dernière valeur connue pour un indice suivi donné.
-  function getLatestIndexValue(trackedIndexId) {
-    return officialIndexValues.find((v) => v.tracked_index_id === trackedIndexId) || null;
-  }
-  function getTrackedIndex(country, code) {
-    return trackedIndices.find((t) => t.country === country && t.code?.toLowerCase() === (code || "").toLowerCase()) || null;
-  }
-
-  async function upsertOfficialIndexValue(trackedIndexId, { value, periodYear, periodMonth, status }) {
-    setSavingIndices(true);
-    const { data: { user } } = await db.auth.getUser();
-    const { error } = await db.from("official_indices").upsert({
-      tracked_index_id: trackedIndexId, value, period_year: periodYear, period_month: periodMonth,
-      status: status || "definitive", updated_by: user?.id || null, updated_at: new Date().toISOString(),
-    }, { onConflict: "tracked_index_id,period_year,period_month" });
-    if (error) console.error("Erreur d'enregistrement de la valeur d'indice", error);
-    await loadOfficialIndices();
-    setSavingIndices(false);
-  }
-
-  async function addTrackedIndex(fields) {
-    setSavingIndices(true);
-    const { error } = await db.from("tracked_indices").insert(fields);
-    if (error) console.error("Erreur d'ajout de l'indice suivi", error);
-    await loadOfficialIndices();
-    setSavingIndices(false);
-  }
-  async function removeTrackedIndex(id) {
-    setSavingIndices(true);
-    const { error } = await db.from("tracked_indices").delete().eq("id", id);
-    if (error) console.error("Erreur de suppression de l'indice suivi", error);
-    await loadOfficialIndices();
-    setSavingIndices(false);
-  }
-
-  async function triggerFranceSync() {
-    setSyncingIndices(true);
-    try {
-      const { data: result, error: fnError } = await db.functions.invoke("sync-indices-france", { body: {} });
-      if (fnError || result?.error) {
-        alert(`Erreur de synchronisation : ${result?.error || fnError?.message || "erreur inconnue"}`);
-      } else {
-        let msg = `Synchronisation terminée : ${result.updated}/${result.total} indice(s) mis à jour.`;
-        if (result.errors?.length) {
-          msg += `\n\nDétail :\n${result.errors.join("\n")}`;
-          if (result.xmlSample) {
-            console.log("Extrait du XML reçu de l'INSEE (pour diagnostic) :", result.xmlSample);
-            msg += "\n\n(Un extrait des données brutes reçues a été affiché dans la console du navigateur — F12 — pour diagnostic.)";
-          }
-        }
-        alert(msg);
-        await loadOfficialIndices();
-      }
-    } catch (err) {
-      console.error("Erreur de synchronisation France", err);
-      alert("Impossible de lancer la synchronisation. Réessaie dans un instant.");
-    } finally {
-      setSyncingIndices(false);
-    }
-  }
-
   async function loadUserData() {
     const [docsRes, clientsRes, companyRes, prestationsRes] = await Promise.allSettled([
       window.storage.get("documents", false),
@@ -1774,7 +1710,7 @@ export default function DeviFactApp() {
 
   useEffect(() => {
     (async () => {
-      await Promise.all([loadPlans(), loadSiteSettings(), loadOfficialIndices()]);
+      await Promise.all([loadPlans(), loadSiteSettings()]);
     })();
 
     // Seule source de vérité pour les données propres à l'utilisateur :
@@ -1785,6 +1721,17 @@ export default function DeviFactApp() {
       try {
         if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
         if (session?.user) {
+          // Important : ne recharger (et donc vider l'écran en cours)
+          // que pour une vraie nouvelle connexion — pas pour les
+          // autres événements avec session valide (ex: TOKEN_REFRESHED,
+          // qui se déclenche notamment quand on revient sur l'onglet
+          // après l'avoir laissé en arrière-plan). Sinon, la personne
+          // se retrouve renvoyée au tableau de bord juste en changeant
+          // de fenêtre, alors que rien n'a réellement changé.
+          if (_event !== "SIGNED_IN" && _event !== "INITIAL_SESSION") {
+            setLoading(false);
+            return;
+          }
           // Vider d'abord toute donnée encore en mémoire (d'un compte
           // précédent) avant de charger celles de cette connexion —
           // même précaution que switchOrganization, pour ne jamais
@@ -2450,8 +2397,6 @@ export default function DeviFactApp() {
         onBack={backToDashboard}
         onSaveClient={upsertClient}
         onGoToPricing={() => setView("pricing")}
-        trackedIndices={trackedIndices}
-        officialIndexValues={officialIndexValues}
       />
     );
   }
@@ -2727,14 +2672,6 @@ export default function DeviFactApp() {
           siteSettings={siteSettings}
           savingSiteSettings={savingSiteSettings}
           onUpdateSiteSettings={updateSiteSettings}
-          trackedIndices={trackedIndices}
-          officialIndexValues={officialIndexValues}
-          savingIndices={savingIndices}
-          syncingIndices={syncingIndices}
-          onUpsertIndexValue={upsertOfficialIndexValue}
-          onAddTrackedIndex={addTrackedIndex}
-          onRemoveTrackedIndex={removeTrackedIndex}
-          onTriggerFranceSync={triggerFranceSync}
         />
       </div>
     );
@@ -3776,17 +3713,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
   );
 });
 
-function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onSaveClient, onGoToPricing, trackedIndices = [], officialIndexValues = [] }) {
-  // Retrouve, pour le pays du document, un indice officiel dont le
-  // code correspond au symbole tapé — et sa dernière valeur connue,
-  // qu'elle soit saisie à la main (Maroc) ou synchronisée (France).
-  function findOfficialIndex(symbole) {
-    if (!symbole) return null;
-    const t = trackedIndices.find((ti) => ti.country === doc.country && ti.code?.toLowerCase() === symbole.trim().toLowerCase());
-    if (!t) return null;
-    const latest = officialIndexValues.find((v) => v.tracked_index_id === t.id);
-    return latest ? { tracked: t, latest } : { tracked: t, latest: null };
-  }
+function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onSaveClient, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   useEffect(() => setLocalDoc(doc), [doc.id]);
@@ -4171,29 +4098,19 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                               <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.poids} onChange={(e) => patchTerm(sec.id, t.id, { poids: e.target.value })} />
                             </div>
                             <div>
-                              <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Valeur de base</label>
-                              <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.indexBase} onChange={(e) => patchTerm(sec.id, t.id, { indexBase: e.target.value })} onBlur={() => propagateTermBaseValue(sec.id, t.id)} />
-                              {(() => {
-                                const officiel = findOfficialIndex(t.symbole);
-                                if (!officiel) return null;
-                                if (!officiel.latest) {
+                              <div className="mb-1 flex items-center justify-between">
+                                <label className="block text-xs" style={{ color: colors.inkSoft }}>Valeur de base</label>
+                                {t.symbole && (() => {
+                                  const url = buildIndexSourceUrl(localDoc.country, t.symbole);
+                                  if (!url) return null;
                                   return (
-                                    <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>
-                                      "{officiel.tracked.code}" reconnu, mais aucune valeur enregistrée pour l'instant (Admin → Indices officiels).
-                                    </p>
+                                    <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brassDark }} title={`Aller chercher la valeur de "${t.symbole}" pour ${localDoc.country || "ce pays"}`}>
+                                      <TrendingUp size={11} /> Voir la source ↗
+                                    </a>
                                   );
-                                }
-                                return (
-                                  <button
-                                    onClick={() => { patchTerm(sec.id, t.id, { indexBase: officiel.latest.value }); propagateTermBaseValue(sec.id, t.id); }}
-                                    className="mt-1 flex items-center gap-1 text-left text-xs"
-                                    style={{ color: colors.moss }}
-                                    title="Renseignée par l'admin ou synchronisée automatiquement (voir Admin → Indices officiels)"
-                                  >
-                                    <TrendingUp size={11} /> Utiliser {officiel.latest.value} ({String(officiel.latest.period_month).padStart(2, "0")}/{officiel.latest.period_year})
-                                  </button>
-                                );
-                              })()}
+                                })()}
+                              </div>
+                              <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.indexBase} onChange={(e) => patchTerm(sec.id, t.id, { indexBase: e.target.value })} onBlur={() => propagateTermBaseValue(sec.id, t.id)} />
                             </div>
                           </div>
                           {!sec.useDecomptes && (
@@ -7114,111 +7031,6 @@ function PaypalIdField({ label, value, onSave }) {
   );
 }
 
-function OfficialIndicesSettings({ trackedIndices, officialIndexValues, saving, syncing, onUpsertValue, onAddTracked, onRemoveTracked, onTriggerFranceSync }) {
-  const [newIndex, setNewIndex] = useState({ country: "🇲🇦 MA", code: "", name: "", category: "", reference_url: "" });
-  const [draftValues, setDraftValues] = useState({}); // { [trackedIndexId]: { value, periodYear, periodMonth } }
-
-  function getLatest(trackedIndexId) {
-    return officialIndexValues.find((v) => v.tracked_index_id === trackedIndexId) || null;
-  }
-  function draftFor(t) {
-    if (draftValues[t.id]) return draftValues[t.id];
-    const today = new Date();
-    return { value: "", periodYear: today.getFullYear(), periodMonth: today.getMonth() + 1 };
-  }
-  function patchDraft(id, p) {
-    setDraftValues((prev) => ({ ...prev, [id]: { ...draftFor({ id }), ...prev[id], ...p } }));
-  }
-
-  const byCountry = trackedIndices.reduce((acc, t) => {
-    (acc[t.country] = acc[t.country] || []).push(t);
-    return acc;
-  }, {});
-
-  return (
-    <div className="mb-6 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-      <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
-        <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Indices officiels — révision des prix</span>
-        {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={13} className="animate-spin" /> Enregistrement</span>}
-      </div>
-      <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-        Le Maroc n'a pas de source officielle accessible automatiquement (le site du Ministère et index.ma bloquent tous les deux les accès automatisés) — les valeurs se saisissent ici à la main, avec un lien direct pour aller les chercher. La France se synchronise automatiquement chaque mois via l'API publique de l'INSEE, et peut aussi être forcée manuellement ci-dessous.
-      </p>
-
-      {Object.entries(byCountry).map(([country, items]) => (
-        <div key={country} className="border-b" style={{ borderColor: colors.line }}>
-          <div className="flex items-center justify-between px-4 py-2" style={{ background: colors.paper }}>
-            <span className="text-sm font-semibold">{country}</span>
-            {country === "🇫🇷 FR" && (
-              <button onClick={onTriggerFranceSync} disabled={syncing} className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-white" style={{ background: colors.moss, opacity: syncing ? 0.7 : 1 }}>
-                {syncing ? <Loader2 size={12} className="animate-spin" /> : <ArrowRightLeft size={12} />} {syncing ? "Synchronisation…" : "Synchroniser maintenant"}
-              </button>
-            )}
-          </div>
-          {items.map((t) => {
-            const latest = getLatest(t.id);
-            const d = draftFor(t);
-            return (
-              <div key={t.id} className="flex flex-wrap items-center gap-3 border-t px-4 py-3" style={{ borderColor: colors.line }}>
-                <div className="min-w-[10rem] grow">
-                  <div className="text-sm font-medium">{t.code} <span className="font-normal" style={{ color: colors.inkSoft }}>— {t.name}</span></div>
-                  <div className="text-xs" style={{ color: colors.inkSoft }}>{t.category}</div>
-                </div>
-                <div className="text-xs" style={{ color: colors.inkSoft }}>
-                  {latest ? (
-                    <span>Dernière valeur : <strong className="df-mono" style={{ color: colors.ink }}>{latest.value}</strong> ({String(latest.period_month).padStart(2, "0")}/{latest.period_year}) {latest.updated_by === null && <span className="rounded-full px-1.5 py-0.5" style={{ background: `${colors.moss}18`, color: colors.moss }}>auto</span>}</span>
-                  ) : <span>Aucune valeur enregistrée</span>}
-                </div>
-                {t.reference_url && (
-                  <a href={t.reference_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brassDark }}>
-                    Voir la source ↗
-                  </a>
-                )}
-                {!t.auto_sync && (
-                  <div className="flex items-center gap-1.5">
-                    <input type="number" step="0.01" placeholder="Valeur" className="df-input df-mono w-20 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.value} onChange={(e) => patchDraft(t.id, { value: e.target.value })} />
-                    <input type="number" placeholder="Mois" min="1" max="12" className="df-input df-mono w-14 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.periodMonth} onChange={(e) => patchDraft(t.id, { periodMonth: e.target.value })} />
-                    <input type="number" placeholder="Année" className="df-input df-mono w-20 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.periodYear} onChange={(e) => patchDraft(t.id, { periodYear: e.target.value })} />
-                    <button
-                      onClick={() => { if (d.value) onUpsertValue(t.id, { value: Number(d.value), periodYear: Number(d.periodYear), periodMonth: Number(d.periodMonth) }); }}
-                      className="rounded-md px-2 py-1 text-xs font-medium text-white"
-                      style={{ background: colors.ink }}
-                    >
-                      Enregistrer
-                    </button>
-                  </div>
-                )}
-                <button onClick={() => onRemoveTracked(t.id)} title="Retirer cet indice" style={{ color: colors.brick }}><Trash2 size={14} /></button>
-              </div>
-            );
-          })}
-        </div>
-      ))}
-
-      <div className="px-4 py-4">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Ajouter un indice à suivre</div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
-          <select className="df-select rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={newIndex.country} onChange={(e) => setNewIndex({ ...newIndex, country: e.target.value })}>
-            <option value="🇲🇦 MA">🇲🇦 Maroc</option>
-            <option value="🇫🇷 FR">🇫🇷 France</option>
-          </select>
-          <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Code (ex: BAT2)" value={newIndex.code} onChange={(e) => setNewIndex({ ...newIndex, code: e.target.value })} />
-          <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={newIndex.name} onChange={(e) => setNewIndex({ ...newIndex, name: e.target.value })} />
-          <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Catégorie" value={newIndex.category} onChange={(e) => setNewIndex({ ...newIndex, category: e.target.value })} />
-          <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Lien source (optionnel)" value={newIndex.reference_url} onChange={(e) => setNewIndex({ ...newIndex, reference_url: e.target.value })} />
-        </div>
-        <button
-          onClick={() => { if (newIndex.code) { onAddTracked(newIndex); setNewIndex({ country: newIndex.country, code: "", name: "", category: "", reference_url: "" }); } }}
-          className="mt-2 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white"
-          style={{ background: colors.brassDark }}
-        >
-          <Plus size={13} /> Ajouter
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function ServicesVisibilitySettings({ siteSettings, saving, onSave }) {
   const current = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
   function toggle(id) {
@@ -7352,7 +7164,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, trackedIndices, officialIndexValues, savingIndices, syncingIndices, onUpsertIndexValue, onAddTrackedIndex, onRemoveTrackedIndex, onTriggerFranceSync }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + (
@@ -7368,7 +7180,6 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
     { id: "apercu", label: "Vue d'ensemble", icon: LayoutDashboard },
     { id: "identite", label: "Identité du site", icon: Building2 },
     { id: "services", label: "Services", icon: Menu },
-    { id: "indices", label: "Indices officiels", icon: TrendingUp },
     { id: "forfaits", label: "Forfaits & tarifs", icon: CreditCard },
     { id: "paiement", label: "Paiement (PayPal)", icon: KeyRound },
     { id: "compte", label: "Mon compte", icon: Users },
@@ -7414,19 +7225,6 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
 
       {tab === "services" && (
         <ServicesVisibilitySettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
-      )}
-
-      {tab === "indices" && (
-        <OfficialIndicesSettings
-          trackedIndices={trackedIndices}
-          officialIndexValues={officialIndexValues}
-          saving={savingIndices}
-          syncing={syncingIndices}
-          onUpsertValue={onUpsertIndexValue}
-          onAddTracked={onAddTrackedIndex}
-          onRemoveTracked={onRemoveTrackedIndex}
-          onTriggerFranceSync={onTriggerFranceSync}
-        />
       )}
 
       {tab === "compte" && (
