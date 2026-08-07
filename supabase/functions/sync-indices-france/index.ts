@@ -27,34 +27,61 @@ const corsHeaders = {
 };
 
 // Extrait, pour chaque idbank, la dernière observation (période +
-// valeur) du XML SDMX-ML renvoyé par l'INSEE. Écrit de façon tolérante
-// (plusieurs variantes de balises possibles selon la version du
-// service) plutôt que de dépendre d'un schéma XML strict.
+// valeur) du XML renvoyé par l'INSEE.
+//
+// Important : par défaut, l'INSEE répond au format "StructureSpecificData"
+// (confirmé par la documentation officielle du service SDMX) — les
+// données sont portées par des ATTRIBUTS XML directement sur les
+// balises <Series IDBANK="..."> et <Obs TIME_PERIOD="..." OBS_VALUE="..."/>,
+// PAS par des éléments enfants imbriqués (ça, c'est l'autre format
+// possible, "GenericData", qui n'est utilisé que si explicitement
+// demandé). Les deux sont gérés ici, au cas où.
 function parseLatestObservations(xml: string): Record<string, { period: string; value: number }> {
   const results: Record<string, { period: string; value: number }> = {};
-  // Découpe approximative par série (bloc <Series ...>...</Series> ou
-  // <generic:Series>...</generic:Series>).
-  const seriesBlocks = xml.split(/<(?:generic:)?Series[ >]/i).slice(1);
-  for (const block of seriesBlocks) {
-    const idbankMatch = block.match(/IDBANK[^>]*value="([^"]+)"/i);
-    if (!idbankMatch) continue;
-    const idbank = idbankMatch[1];
-    // Toutes les observations du bloc, on garde la dernière (la plus récente).
-    const obsMatches = [...block.matchAll(/<(?:generic:)?Obs\b[\s\S]*?<\/(?:generic:)?Obs>/gi)];
-    if (!obsMatches.length) continue;
+  const seriesRegex = /<(?:\w+:)?Series\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?Series>/g;
+  let seriesMatch: RegExpExecArray | null;
+  while ((seriesMatch = seriesRegex.exec(xml)) !== null) {
+    const attrsStr = seriesMatch[1];
+    const body = seriesMatch[2];
+
+    // Format StructureSpecificData (par défaut) : IDBANK en attribut
+    // direct sur <Series>. Sinon, on retente au format GenericData
+    // (<SeriesKey><Value id="IDBANK" value="..."/></SeriesKey>).
+    let idbank = (attrsStr.match(/IDBANK="([^"]+)"/) || [])[1];
+    if (!idbank) {
+      idbank = (body.match(/<(?:\w+:)?Value\s+id="IDBANK"\s+value="([^"]+)"/) || [])[1];
+    }
+    if (!idbank) continue;
+
     let bestPeriod = "";
     let bestValue: number | null = null;
-    for (const obsMatch of obsMatches) {
-      const obsXml = obsMatch[0];
-      const periodMatch = obsXml.match(/TIME_PERIOD[^>]*value="([^"]+)"|<(?:generic:)?Time>([^<]+)</i);
-      const valueMatch = obsXml.match(/OBS_VALUE[^>]*value="([^"]+)"|<(?:generic:)?ObsValue[^>]*value="([^"]+)"/i);
-      const period = periodMatch ? (periodMatch[1] || periodMatch[2]) : null;
-      const value = valueMatch ? parseFloat(valueMatch[1] || valueMatch[2]) : null;
-      if (period && value !== null && (!bestPeriod || period > bestPeriod)) {
-        bestPeriod = period;
-        bestValue = value;
+
+    // Format StructureSpecificData : <Obs TIME_PERIOD="..." OBS_VALUE="..."/>
+    const obsAttrRegex = /<(?:\w+:)?Obs\b([^>]*)\/?>/g;
+    let obsMatch: RegExpExecArray | null;
+    while ((obsMatch = obsAttrRegex.exec(body)) !== null) {
+      const obsAttrs = obsMatch[1];
+      const period = (obsAttrs.match(/TIME_PERIOD="([^"]+)"/) || [])[1];
+      const valueStr = (obsAttrs.match(/OBS_VALUE="([^"]+)"/) || [])[1];
+      if (period && valueStr !== undefined) {
+        const value = parseFloat(valueStr);
+        if (!Number.isNaN(value) && (!bestPeriod || period > bestPeriod)) { bestPeriod = period; bestValue = value; }
       }
     }
+
+    // Format GenericData (au cas où) : <ObsDimension value="..."/> + <ObsValue value="..."/>
+    if (!bestPeriod) {
+      const obsBlocks = [...body.matchAll(/<(?:\w+:)?Obs\b[\s\S]*?<\/(?:\w+:)?Obs>/gi)];
+      for (const ob of obsBlocks) {
+        const period = (ob[0].match(/ObsDimension\s+value="([^"]+)"/) || [])[1];
+        const valueStr = (ob[0].match(/ObsValue\s+value="([^"]+)"/) || [])[1];
+        if (period && valueStr !== undefined) {
+          const value = parseFloat(valueStr);
+          if (!Number.isNaN(value) && (!bestPeriod || period > bestPeriod)) { bestPeriod = period; bestValue = value; }
+        }
+      }
+    }
+
     if (bestPeriod && bestValue !== null) {
       results[idbank] = { period: bestPeriod, value: bestValue };
     }
@@ -121,7 +148,16 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ success: true, updated, total: tracked.length, errors }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({
+      success: true,
+      updated,
+      total: tracked.length,
+      errors,
+      // Extrait du XML brut reçu, uniquement si quelque chose n'a pas
+      // été trouvé — pour diagnostiquer immédiatement le format réel
+      // si jamais l'INSEE a changé quelque chose, sans avoir à deviner.
+      xmlSample: errors.length ? xml.slice(0, 1500) : undefined,
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("Erreur de synchronisation des indices français :", err);
     return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });

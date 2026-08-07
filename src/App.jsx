@@ -1682,7 +1682,15 @@ export default function DeviFactApp() {
       if (fnError || result?.error) {
         alert(`Erreur de synchronisation : ${result?.error || fnError?.message || "erreur inconnue"}`);
       } else {
-        alert(`Synchronisation terminée : ${result.updated}/${result.total} indice(s) mis à jour.`);
+        let msg = `Synchronisation terminée : ${result.updated}/${result.total} indice(s) mis à jour.`;
+        if (result.errors?.length) {
+          msg += `\n\nDétail :\n${result.errors.join("\n")}`;
+          if (result.xmlSample) {
+            console.log("Extrait du XML reçu de l'INSEE (pour diagnostic) :", result.xmlSample);
+            msg += "\n\n(Un extrait des données brutes reçues a été affiché dans la console du navigateur — F12 — pour diagnostic.)";
+          }
+        }
+        alert(msg);
         await loadOfficialIndices();
       }
     } catch (err) {
@@ -4167,7 +4175,14 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                               <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.indexBase} onChange={(e) => patchTerm(sec.id, t.id, { indexBase: e.target.value })} onBlur={() => propagateTermBaseValue(sec.id, t.id)} />
                               {(() => {
                                 const officiel = findOfficialIndex(t.symbole);
-                                if (!officiel || !officiel.latest) return null;
+                                if (!officiel) return null;
+                                if (!officiel.latest) {
+                                  return (
+                                    <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>
+                                      "{officiel.tracked.code}" reconnu, mais aucune valeur enregistrée pour l'instant (Admin → Indices officiels).
+                                    </p>
+                                  );
+                                }
                                 return (
                                   <button
                                     onClick={() => { patchTerm(sec.id, t.id, { indexBase: officiel.latest.value }); propagateTermBaseValue(sec.id, t.id); }}
