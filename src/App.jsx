@@ -4496,7 +4496,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <div>
                       <label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>% avancement cumulé</label>
-                      <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.avancementPct} onChange={(e) => patchLine(l.id, { avancementPct: e.target.value })} />
+                      <input type="number" step="0.1" min="0" max="100" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.avancementPct} onChange={(e) => patchLine(l.id, { avancementPct: e.target.value })} />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>Déjà facturé</label>
