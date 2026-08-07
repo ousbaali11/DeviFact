@@ -3250,7 +3250,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           ) : (
           <div className="space-y-3">
             {mode === "signup" && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Prénom</label>
                   <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={firstName} onChange={(e) => setFirstName(e.target.value)} onKeyDown={onEnterKey} placeholder="Jean" />
@@ -3399,7 +3399,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                   {orgMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
-                      <div className="absolute right-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                      <div className="absolute right-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
                         {memberships.map((m) => (
                           <button
                             key={m.organizationId}
@@ -3458,7 +3458,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           {servicesMenuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setServicesMenuOpen(false)} />
-              <div className="absolute right-0 top-full z-20 mt-1 max-h-96 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+              <div className="absolute right-0 top-full z-20 mt-1 max-h-96 w-72 overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
                 <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Tous les services</div>
                 {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
                   const SIcon = s.icon;
@@ -4010,7 +4010,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                     <button onClick={() => patchSector(sec.id, { useDecomptes: true, decomptes: sec.decomptes?.length ? sec.decomptes : [emptyDecompte()] })} className="grow rounded-md py-1.5 text-xs font-medium" style={{ background: sec.useDecomptes ? colors.ink : "transparent", color: sec.useDecomptes ? "white" : colors.inkSoft }}>Plusieurs décomptes (chantier en plusieurs paiements)</button>
                   </div>
 
-                  <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+                  <div className="mb-3 grid grid-cols-3 gap-3">
                     <div>
                       <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date de base (soumission / origine)</label>
                       <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={sec.dateBase} onChange={(e) => patchSector(sec.id, { dateBase: e.target.value })} />
@@ -4066,7 +4066,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                           {getRevisionIndexOptions(localDoc.country) && !getRevisionIndexOptions(localDoc.country).includes(t.symbole) && (
                             <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Précise le symbole (ex: S, ChTp...)" value={t.symbole} onChange={(e) => patchTerm(sec.id, t.id, { symbole: e.target.value })} />
                           )}
-                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <div className="grid grid-cols-2 gap-2">
                             <div>
                               <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Poids dans la formule</label>
                               <input type="number" step="0.01" min="0" max="1" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.poids} onChange={(e) => patchTerm(sec.id, t.id, { poids: e.target.value })} />
@@ -4130,7 +4130,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                                   <button onClick={() => removeDecompte(sec.id, d.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                                 )}
                               </div>
-                              <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                              <div className="mb-3 grid grid-cols-2 gap-2">
                                 <div>
                                   <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Date du décompte</label>
                                   <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={d.dateDecompte} onChange={(e) => patchDecompte(sec.id, d.id, { dateDecompte: e.target.value })} />
@@ -4487,13 +4487,13 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                     <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation du poste" value={l.designation} onChange={(e) => patchLine(l.id, { designation: e.target.value })} />
                     {localDoc.items.length > 1 && <button onClick={() => removeLine(l.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>}
                   </div>
-                  <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="mb-2 grid grid-cols-4 gap-2">
                     <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>Qté</label><input type="number" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.qty} onChange={(e) => patchLine(l.id, { qty: e.target.value })} /></div>
                     <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>PU HT</label><input type="number" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.unitPrice} onChange={(e) => patchLine(l.id, { unitPrice: e.target.value })} /></div>
                     <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>TVA %</label><input type="number" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.tva} onChange={(e) => patchLine(l.id, { tva: e.target.value })} /></div>
                     <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>Montant marché</label><div className="df-mono rounded-md px-2 py-1 text-xs" style={{ background: colors.surface }}>{formatMoney(cl.montantMarche, localDoc.currency)}</div></div>
                   </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>% avancement cumulé</label>
                       <input type="number" step="0.1" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.avancementPct} onChange={(e) => patchLine(l.id, { avancementPct: e.target.value })} />
@@ -4512,7 +4512,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
             })}
           </div>
 
-          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="mb-6 grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Retenue de garantie (%)</label>
               <input type="number" step="0.5" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.retenueGarantiePct} onChange={(e) => patch({ retenueGarantiePct: e.target.value })} />
@@ -4816,7 +4816,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
                       <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Description de la réserve" value={r.description} onChange={(e) => patchReserve(r.id, { description: e.target.value })} />
                       <button onClick={() => removeReserve(r.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                     </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <div className="grid grid-cols-3 gap-2">
                       <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Localisation" value={r.localisation} onChange={(e) => patchReserve(r.id, { localisation: e.target.value })} />
                       <input type="number" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Délai (jours)" value={r.delaiJours} onChange={(e) => patchReserve(r.id, { delaiJours: e.target.value })} />
                       <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}>
@@ -5953,7 +5953,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
                     <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${info.color}18`, color: info.color }}>{info.label}</span>
                     {(localDoc.taches || []).length > 1 && <button onClick={() => removeTache(t.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="grid grid-cols-4 gap-2">
                     <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Corps de métier" value={t.corpsMetier} onChange={(e) => patchTache(t.id, { corpsMetier: e.target.value })} />
                     <input type="date" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.dateDebut} onChange={(e) => patchTache(t.id, { dateDebut: e.target.value })} />
                     <input type="date" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.dateFin} onChange={(e) => patchTache(t.id, { dateFin: e.target.value })} />
@@ -7874,7 +7874,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-2 text-sm">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <label className="self-center text-right" style={{ color: colors.inkSoft }}>Émis le</label>
               <input type="date" className="df-input df-mono rounded-md px-2 py-1" style={inputStyle} value={localDoc.issueDate} onChange={(e) => patch({ issueDate: e.target.value })} />
               {localDoc.type !== "facture" ? (
@@ -8237,7 +8237,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                     {hasPro ? <Library size={13} /> : <Lock size={13} />} Depuis la bibliothèque
                   </button>
                   {libraryOpen && hasPro && (
-                    <div className="absolute right-0 z-10 mt-1 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md shadow-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                    <div className="absolute right-0 z-10 mt-1 w-72 overflow-hidden rounded-md shadow-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
                       <input autoFocus className="df-input w-full border-0 border-b px-3 py-2 text-sm" style={{ borderColor: colors.line }} placeholder="Rechercher..." value={libraryQuery} onChange={(e) => setLibraryQuery(e.target.value)} />
                       <div className="max-h-64 overflow-y-auto">
                         {prestations.filter((p) => p.designation.toLowerCase().includes(libraryQuery.toLowerCase())).map((p) => (
