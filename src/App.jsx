@@ -6977,7 +6977,17 @@ function StripeCheckoutButton({ planId, billingCycle, organizationId }) {
         body: { planId, billingCycle, organizationId, successUrl: `${window.location.origin}/?paiement=succes`, cancelUrl: `${window.location.origin}/?paiement=annule` },
       });
       if (error || !data?.url) {
-        alert(`Impossible d'ouvrir la page de paiement : ${data?.error || error?.message || "erreur inconnue"}`);
+        // En cas d'erreur HTTP (statut non-2xx), le client Supabase ne
+        // lit pas automatiquement le corps de la réponse — il faut
+        // aller le chercher soi-même pour voir la vraie raison que la
+        // fonction a renvoyée, sinon on ne voit que le message
+        // générique "Edge Function returned a non-2xx status code".
+        let realMessage = data?.error;
+        if (!realMessage && error?.context?.json) {
+          try { realMessage = (await error.context.json())?.error; } catch { /* corps non-JSON, tant pis */ }
+        }
+        console.error("Erreur de création de session Stripe (détail)", { data, error, realMessage });
+        alert(`Impossible d'ouvrir la page de paiement : ${realMessage || error?.message || "erreur inconnue"}`);
         return;
       }
       window.location.href = data.url;
