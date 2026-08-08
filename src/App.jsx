@@ -1522,6 +1522,15 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
 });
 
 export default function DeviFactApp() {
+  // Repère de diagnostic temporaire : affiche dans la console (F12)
+  // l'heure exacte à laquelle l'application démarre. Si cette ligne
+  // réapparaît avec une NOUVELLE heure après être revenu sur l'onglet,
+  // ça prouve qu'un vrai rechargement de page a eu lieu. Si elle ne
+  // réapparaît pas, la page n'a pas rechargé — la cause est ailleurs.
+  useEffect(() => {
+    console.log(`%c🔵 DeviFact démarré à ${new Date().toLocaleTimeString("fr-FR")}`, "background:#1B2A33;color:white;padding:4px 8px;border-radius:4px;font-weight:bold;");
+  }, []);
+
   const [view, setView] = useState(() => (typeof window !== "undefined" && sessionStorage.getItem("devifact_lastView")) || "dashboard");
   const [documents, setDocuments] = useState([]);
   const [clients, setClients] = useState([]);
@@ -4138,7 +4147,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                                   if (!url) return null;
                                   return (
                                     <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brassDark }} title={`Aller chercher la valeur de "${t.symbole}" pour ${localDoc.country || "ce pays"}`}>
-                                      <TrendingUp size={11} /> 🔴 TEST-DEPLOY-OK 🔴
+                                      <TrendingUp size={11} /> Voir la source ↗
                                     </a>
                                   );
                                 })()}
