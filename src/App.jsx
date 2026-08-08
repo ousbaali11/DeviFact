@@ -1531,7 +1531,14 @@ export default function DeviFactApp() {
     console.log(`%c🔵 DeviFact démarré à ${new Date().toLocaleTimeString("fr-FR")}`, "background:#1B2A33;color:white;padding:4px 8px;border-radius:4px;font-weight:bold;");
   }, []);
 
-  const [view, setView] = useState(() => (typeof window !== "undefined" && sessionStorage.getItem("devifact_lastView")) || "dashboard");
+  const [view, setView] = useState(() => {
+    if (typeof window === "undefined") return "dashboard";
+    // Priorité absolue : si on revient d'un paiement Stripe, toujours
+    // atterrir sur la page Tarifs (pour voir la confirmation), même si
+    // une autre page était mémorisée avant de partir payer.
+    if (new URLSearchParams(window.location.search).get("paiement")) return "pricing";
+    return sessionStorage.getItem("devifact_lastView") || "dashboard";
+  });
   const [documents, setDocuments] = useState([]);
   const [clients, setClients] = useState([]);
   const [prestations, setPrestations] = useState([]);
@@ -1625,16 +1632,49 @@ export default function DeviFactApp() {
         hidden: !row.is_visible,
         paypalPlanIdMonthly: row.paypal_plan_id_monthly || "",
         paypalPlanIdAnnual: row.paypal_plan_id_annual || "",
+        stripePriceIdMonthly: row.stripe_price_id_monthly || "",
+        stripePriceIdAnnual: row.stripe_price_id_annual || "",
+        cardPaymentEnabled: row.card_payment_enabled ?? true,
         watermarkEnabled: row.watermark_enabled ?? true,
       };
     });
     setPlans(merged);
   }
+
+  // Liste de tous les utilisateurs du site — lecture seule, réservée
+  // à l'Admin (voir migration_admin_voir_utilisateurs.sql pour la
+  // règle de sécurité qui permet cette lecture élargie).
+  const [allUsers, setAllUsers] = useState([]);
+  async function loadAllUsers() {
+    const { data, error } = await db.from("profiles").select("id, email, first_name, last_name, company_name, is_admin, created_at").order("created_at", { ascending: false });
+    if (error) { console.error("Erreur de chargement de la liste des utilisateurs", error); return; }
+    setAllUsers(data || []);
+  }
+  useEffect(() => {
+    if (view === "admin" && account?.isAdmin) loadAllUsers();
+  }, [view, account?.isAdmin]);
   async function updatePlanPaypalId(planId, field, value) {
     setSavingPlanSettings(true);
     const column = field === "monthly" ? "paypal_plan_id_monthly" : "paypal_plan_id_annual";
     const { error } = await db.from("plans").update({ [column]: value || null }).eq("id", planId);
     if (error) console.error("Erreur de mise à jour de l'identifiant PayPal (droits admin requis)", error);
+    await loadPlans();
+    setSavingPlanSettings(false);
+  }
+
+  async function updatePlanStripeId(planId, field, value) {
+    setSavingPlanSettings(true);
+    const column = field === "monthly" ? "stripe_price_id_monthly" : "stripe_price_id_annual";
+    const { error } = await db.from("plans").update({ [column]: value || null }).eq("id", planId);
+    if (error) console.error("Erreur de mise à jour de l'identifiant Stripe (droits admin requis)", error);
+    await loadPlans();
+    setSavingPlanSettings(false);
+  }
+  async function toggleCardPayment(planId) {
+    setSavingPlanSettings(true);
+    const plan = plans.find((p) => p.id === planId);
+    const { error } = await db.from("plans").update({ card_payment_enabled: !(plan?.cardPaymentEnabled ?? true) }).eq("id", planId);
+    if (error) console.error("Erreur de mise à jour de l'affichage du paiement par carte (droits admin requis)", error);
     await loadPlans();
     setSavingPlanSettings(false);
   }
@@ -2718,11 +2758,14 @@ export default function DeviFactApp() {
           onUpdatePlanPrice={updatePlanPrice}
           onUpdatePlanLimit={updatePlanLimit}
           onUpdatePlanPaypalId={updatePlanPaypalId}
+          onUpdatePlanStripeId={updatePlanStripeId}
+          onToggleCardPayment={toggleCardPayment}
           onTogglePayment={togglePaymentStatus}
           onDeleteAccount={deleteCurrentAccount}
           siteSettings={siteSettings}
           savingSiteSettings={savingSiteSettings}
           onUpdateSiteSettings={updateSiteSettings}
+          allUsers={allUsers}
         />
       </div>
     );
@@ -6910,6 +6953,38 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
   );
 }
 
+// Redirige vers une page de paiement Stripe séparée (Stripe Checkout,
+// hébergée par Stripe) — la fonction serveur crée la session, le
+// navigateur est ensuite redirigé dessus. C'est Stripe qui confirme
+// le paiement au serveur ensuite (voir functions/stripe-webhook), pas
+// ce bouton.
+function StripeCheckoutButton({ planId, billingCycle, organizationId }) {
+  const [loading, setLoading] = useState(false);
+  async function handleClick() {
+    setLoading(true);
+    try {
+      const { data, error } = await db.functions.invoke("create-checkout-session", {
+        body: { planId, billingCycle, organizationId, successUrl: `${window.location.origin}/?paiement=succes`, cancelUrl: `${window.location.origin}/?paiement=annule` },
+      });
+      if (error || !data?.url) {
+        alert(`Impossible d'ouvrir la page de paiement : ${data?.error || error?.message || "erreur inconnue"}`);
+        return;
+      }
+      window.location.href = data.url;
+    } catch (err) {
+      console.error("Erreur d'ouverture du paiement Stripe", err);
+      alert("Impossible d'ouvrir la page de paiement. Réessaie dans un instant.");
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <button onClick={handleClick} disabled={loading} className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium text-white" style={{ background: colors.ink, opacity: loading ? 0.7 : 1 }}>
+      {loading ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />} {loading ? "Ouverture…" : "Payer par carte"}
+    </button>
+  );
+}
+
 function PayPalButton({ planId, organizationId, onApproved }) {
   const containerRef = useRef(null);
   const [sdkReady, setSdkReady] = useState(false);
@@ -6943,6 +7018,17 @@ function PayPalButton({ planId, organizationId, onApproved }) {
 function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNotice, documentCount }) {
   const [billing, setBilling] = useState(account?.billing || "mensuel");
   const [approvedMsg, setApprovedMsg] = useState(false);
+  const [stripeReturnMsg, setStripeReturnMsg] = useState(null); // "succes" | "annule" | null
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paiement = params.get("paiement");
+    if (paiement === "succes" || paiement === "annule") {
+      setStripeReturnMsg(paiement);
+      params.delete("paiement");
+      const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : "");
+      window.history.replaceState({}, "", newUrl);
+    }
+  }, []);
   const visiblePlans = plans.filter((p) => !p.hidden);
 
   return (
@@ -6955,6 +7041,16 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
       {limitNotice && (
         <div className="mx-auto mb-6 max-w-lg rounded-xl p-3 text-center text-sm" style={{ background: `${colors.brick}15`, color: colors.brick, border: `1px solid ${colors.brick}40` }}>
           Le forfait Gratuit est limité à {plans.find((p) => p.id === "gratuit")?.limit ?? 3} devis/factures ({documentCount} déjà créés). Passe à un forfait payant pour continuer.
+        </div>
+      )}
+      {stripeReturnMsg === "succes" && (
+        <div className="mx-auto mb-6 max-w-lg rounded-xl p-3 text-center text-sm" style={{ background: `${colors.moss}15`, color: colors.moss, border: `1px solid ${colors.moss}40` }}>
+          Merci ! Ton paiement par carte a été confirmé par Stripe. L'activation du forfait peut prendre quelques instants — recharge la page si besoin.
+        </div>
+      )}
+      {stripeReturnMsg === "annule" && (
+        <div className="mx-auto mb-6 max-w-lg rounded-xl p-3 text-center text-sm" style={{ background: `${colors.brick}12`, color: colors.brick, border: `1px solid ${colors.brick}40` }}>
+          Paiement annulé — aucun montant n'a été prélevé. Tu peux réessayer quand tu veux.
         </div>
       )}
       {approvedMsg && (
@@ -6977,6 +7073,9 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
           const isCurrent = account?.plan === plan.id;
           const price = billing === "annuel" ? plan.annual : plan.monthly;
           const paypalPlanId = billing === "annuel" ? plan.paypalPlanIdAnnual : plan.paypalPlanIdMonthly;
+          const stripePriceId = billing === "annuel" ? plan.stripePriceIdAnnual : plan.stripePriceIdMonthly;
+          const showCard = plan.cardPaymentEnabled && !!stripePriceId;
+          const showPaypal = !!paypalPlanId;
           return (
             <div key={plan.id} className="flex flex-col overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
               <div style={{ height: "6px", background: planAccentColor(plan.id) }} />
@@ -7008,8 +7107,11 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
                 <a href="mailto:contact@devifact.fr?subject=Forfait%20Entreprise" className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Nous contacter</a>
               ) : price === 0 ? (
                 <button onClick={() => onChooseZeroPrice(plan.id, billing)} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Activer (0€)</button>
-              ) : paypalPlanId ? (
-                <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => setApprovedMsg(true)} />
+              ) : showCard || showPaypal ? (
+                <div className="flex flex-col gap-2">
+                  {showCard && <StripeCheckoutButton planId={plan.id} billingCycle={billing} organizationId={account?.organizationId} />}
+                  {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => setApprovedMsg(true)} />}
+                </div>
               ) : (
                 <p className="rounded-lg py-2 text-center text-xs" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible</p>
               )}
@@ -7074,6 +7176,40 @@ function PaypalIdField({ label, value, onSave }) {
       {label}
       <div className="mt-0.5 flex items-center gap-1">
         <input type="text" placeholder="P-XXXXXXXX" className="df-input block w-32 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <button onClick={() => { onSave(draft); setEditing(false); }} title="Enregistrer" className="rounded-md px-1.5 py-1 text-xs font-medium text-white" style={{ background: colors.slate }}>
+          <Check size={12} />
+        </button>
+      </div>
+    </label>
+  );
+}
+
+function StripeIdField({ label, value, onSave }) {
+  const [editing, setEditing] = useState(!value);
+  const [draft, setDraft] = useState(value || "");
+
+  useEffect(() => {
+    if (value) setEditing(false);
+  }, [value]);
+
+  if (!editing && value) {
+    return (
+      <div className="text-xs" style={{ color: colors.inkSoft }}>
+        <div className="mb-0.5">{label}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="flex items-center gap-1 rounded-md px-2 py-1" style={{ background: `${colors.moss}15`, color: colors.moss }}>
+            <Check size={11} /> Configuré
+          </span>
+          <button onClick={() => { setDraft(value); setEditing(true); }} className="underline" style={{ color: colors.slate }}>Modifier</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <label className="text-xs" style={{ color: colors.inkSoft }}>
+      {label}
+      <div className="mt-0.5 flex items-center gap-1">
+        <input type="text" placeholder="price_XXXXXXXX" className="df-input block w-36 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={draft} onChange={(e) => setDraft(e.target.value)} />
         <button onClick={() => { onSave(draft); setEditing(false); }} title="Enregistrer" className="rounded-md px-1.5 py-1 text-xs font-medium text-white" style={{ background: colors.slate }}>
           <Check size={12} />
         </button>
@@ -7215,7 +7351,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [] }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + (
@@ -7231,6 +7367,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
     { id: "apercu", label: "Vue d'ensemble", icon: LayoutDashboard },
     { id: "identite", label: "Identité du site", icon: Building2 },
     { id: "services", label: "Services", icon: Menu },
+    { id: "utilisateurs", label: "Utilisateurs", icon: Users },
     { id: "forfaits", label: "Forfaits & tarifs", icon: CreditCard },
     { id: "paiement", label: "Paiement (PayPal)", icon: KeyRound },
     { id: "compte", label: "Mon compte", icon: Users },
@@ -7276,6 +7413,44 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
 
       {tab === "services" && (
         <ServicesVisibilitySettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
+      )}
+
+      {tab === "utilisateurs" && (
+        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tous les utilisateurs du site</span>
+            <span className="text-xs" style={{ color: colors.inkSoft }}>{allUsers.length} compte(s)</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: colors.paper }}>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Email</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Nom</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Inscrit le</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {allUsers.map((u, idx) => (
+                  <tr key={u.id} style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
+                    <td className="px-4 py-2.5">{u.email}</td>
+                    <td className="px-4 py-2.5">{[u.first_name, u.last_name].filter(Boolean).join(" ") || <span style={{ color: colors.inkSoft }}>—</span>}</td>
+                    <td className="px-4 py-2.5">{u.company_name || <span style={{ color: colors.inkSoft }}>—</span>}</td>
+                    <td className="df-mono px-4 py-2.5 text-xs" style={{ color: colors.inkSoft }}>{u.created_at ? fr(u.created_at) : "—"}</td>
+                    <td className="px-4 py-2.5">
+                      {u.is_admin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
+                    </td>
+                  </tr>
+                ))}
+                {allUsers.length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-sm" style={{ color: colors.inkSoft }}>Aucun utilisateur pour l'instant.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {tab === "compte" && (
@@ -7370,21 +7545,50 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
       )}
 
       {tab === "paiement" && (
-        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
-            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Paiement — identifiants PayPal</span>
-            {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
-          </div>
-          <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-            Colle ici l'identifiant du plan créé côté PayPal pour chaque forfait — obligatoire pour que le bouton d'abonnement fonctionne. Le prix facturé est celui défini dans PayPal, pas celui de l'onglet "Forfaits & tarifs".
-          </p>
-          {plans.filter((p) => p.monthly !== null).map((plan) => (
-            <div key={plan.id} className="flex flex-wrap items-center gap-4 border-b px-4 py-3" style={{ borderColor: colors.line }}>
-              <div className="min-w-0 basis-28 shrink-0 text-sm font-medium">{plan.name}</div>
-              <PaypalIdField label="ID forfait PayPal (mensuel)" value={plan.paypalPlanIdMonthly} onSave={(v) => onUpdatePlanPaypalId(plan.id, "monthly", v)} />
-              <PaypalIdField label="ID forfait PayPal (annuel)" value={plan.paypalPlanIdAnnual} onSave={(v) => onUpdatePlanPaypalId(plan.id, "annual", v)} />
+        <div className="space-y-4">
+          <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+              <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Paiement — identifiants PayPal</span>
+              {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
             </div>
-          ))}
+            <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+              Colle ici l'identifiant du plan créé côté PayPal pour chaque forfait — obligatoire pour que le bouton d'abonnement fonctionne. Le prix facturé est celui défini dans PayPal, pas celui de l'onglet "Forfaits & tarifs".
+            </p>
+            {plans.filter((p) => p.monthly !== null).map((plan) => (
+              <div key={plan.id} className="flex flex-wrap items-center gap-4 border-b px-4 py-3" style={{ borderColor: colors.line }}>
+                <div className="min-w-0 basis-28 shrink-0 text-sm font-medium">{plan.name}</div>
+                <PaypalIdField label="ID forfait PayPal (mensuel)" value={plan.paypalPlanIdMonthly} onSave={(v) => onUpdatePlanPaypalId(plan.id, "monthly", v)} />
+                <PaypalIdField label="ID forfait PayPal (annuel)" value={plan.paypalPlanIdAnnual} onSave={(v) => onUpdatePlanPaypalId(plan.id, "annual", v)} />
+              </div>
+            ))}
+          </div>
+
+          <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+              <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Paiement — carte bancaire (Stripe)</span>
+              {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+            </div>
+            <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+              Colle ici l'identifiant de prix Stripe ("price_...") créé pour chaque forfait — le bouton "Payer par carte" n'apparaît que si un identifiant est renseigné ET que l'affichage est activé ci-dessous.
+            </p>
+            {plans.filter((p) => p.monthly !== null).map((plan) => (
+              <div key={plan.id} className="flex flex-wrap items-center gap-4 border-b px-4 py-3" style={{ borderColor: colors.line }}>
+                <div className="min-w-0 basis-28 shrink-0 text-sm font-medium">{plan.name}</div>
+                <StripeIdField label="ID prix Stripe (mensuel)" value={plan.stripePriceIdMonthly} onSave={(v) => onUpdatePlanStripeId(plan.id, "monthly", v)} />
+                <StripeIdField label="ID prix Stripe (annuel)" value={plan.stripePriceIdAnnual} onSave={(v) => onUpdatePlanStripeId(plan.id, "annual", v)} />
+                <div className="ml-auto flex items-center gap-1.5">
+                  <span className="text-xs font-medium" style={{ color: plan.cardPaymentEnabled ? colors.moss : colors.inkSoft }}>{plan.cardPaymentEnabled ? "Affiché" : "Masqué"}</span>
+                  <button
+                    onClick={() => onToggleCardPayment(plan.id)}
+                    title={plan.cardPaymentEnabled ? "Masquer le paiement par carte pour ce forfait" : "Afficher le paiement par carte pour ce forfait"}
+                    style={{ color: plan.cardPaymentEnabled ? colors.moss : colors.line }}
+                  >
+                    {plan.cardPaymentEnabled ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
