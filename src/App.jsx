@@ -348,8 +348,12 @@ function getRevisionCountryInfo(country) {
 // ce que la personne a tapé (casse, espaces...). L'opérateur "site:"
 // cible directement le bon site quand on le connaît avec certitude.
 function buildIndexSourceUrl(country, symbole) {
-  const code = (symbole || "").trim();
-  if (!code) return null;
+  // Les listes vérifiées (REVISION_INDEX_OPTIONS) stockent le symbole
+  // au format "CODE - Description complète" — on ne garde que le code
+  // pour la recherche, sinon la requête devient un paragraphe entier.
+  const raw = (symbole || "").trim();
+  if (!raw) return null;
+  const code = raw.split(" - ")[0].trim();
   let query;
   if (country === "🇲🇦 MA") {
     query = `${code} site:index.ma`;
@@ -4134,7 +4138,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                                   if (!url) return null;
                                   return (
                                     <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brassDark }} title={`Aller chercher la valeur de "${t.symbole}" pour ${localDoc.country || "ce pays"}`}>
-                                      <TrendingUp size={11} /> Voir la source ↗
+                                      <TrendingUp size={11} /> 🔴 TEST-DEPLOY-OK 🔴
                                     </a>
                                   );
                                 })()}
