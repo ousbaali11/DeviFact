@@ -1635,6 +1635,7 @@ export default function DeviFactApp() {
         stripePriceIdMonthly: row.stripe_price_id_monthly || "",
         stripePriceIdAnnual: row.stripe_price_id_annual || "",
         cardPaymentEnabled: row.card_payment_enabled ?? true,
+        paypalPaymentEnabled: row.paypal_payment_enabled ?? true,
         watermarkEnabled: row.watermark_enabled ?? true,
       };
     });
@@ -1675,6 +1676,14 @@ export default function DeviFactApp() {
     const plan = plans.find((p) => p.id === planId);
     const { error } = await db.from("plans").update({ card_payment_enabled: !(plan?.cardPaymentEnabled ?? true) }).eq("id", planId);
     if (error) console.error("Erreur de mise à jour de l'affichage du paiement par carte (droits admin requis)", error);
+    await loadPlans();
+    setSavingPlanSettings(false);
+  }
+  async function togglePaypalPayment(planId) {
+    setSavingPlanSettings(true);
+    const plan = plans.find((p) => p.id === planId);
+    const { error } = await db.from("plans").update({ paypal_payment_enabled: !(plan?.paypalPaymentEnabled ?? true) }).eq("id", planId);
+    if (error) console.error("Erreur de mise à jour de l'affichage de PayPal (droits admin requis)", error);
     await loadPlans();
     setSavingPlanSettings(false);
   }
@@ -2760,6 +2769,7 @@ export default function DeviFactApp() {
           onUpdatePlanPaypalId={updatePlanPaypalId}
           onUpdatePlanStripeId={updatePlanStripeId}
           onToggleCardPayment={toggleCardPayment}
+          onTogglePaypalPayment={togglePaypalPayment}
           onTogglePayment={togglePaymentStatus}
           onDeleteAccount={deleteCurrentAccount}
           siteSettings={siteSettings}
@@ -7012,7 +7022,15 @@ function PayPalButton({ planId, organizationId, onApproved }) {
   }, [sdkReady, planId, organizationId]);
 
   if (sdkError) return <p className="text-xs" style={{ color: colors.brick }}>Configuration PayPal manquante côté site (VITE_PAYPAL_CLIENT_ID).</p>;
-  return <div ref={containerRef} />;
+  return (
+    // Hauteur limitée à celle du bouton lui-même (height: 40 ci-dessus,
+    // + une petite marge) : PayPal insère parfois un texte
+    // promotionnel sous le bouton qu'on ne peut pas retirer par
+    // configuration — le couper visuellement est le seul moyen fiable.
+    <div style={{ maxHeight: "44px", overflow: "hidden" }}>
+      <div ref={containerRef} />
+    </div>
+  );
 }
 
 function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNotice, documentCount }) {
@@ -7075,7 +7093,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
           const paypalPlanId = billing === "annuel" ? plan.paypalPlanIdAnnual : plan.paypalPlanIdMonthly;
           const stripePriceId = billing === "annuel" ? plan.stripePriceIdAnnual : plan.stripePriceIdMonthly;
           const showCard = plan.cardPaymentEnabled && !!stripePriceId;
-          const showPaypal = !!paypalPlanId;
+          const showPaypal = !!paypalPlanId && plan.paypalPaymentEnabled;
           return (
             <div key={plan.id} className="flex flex-col overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
               <div style={{ height: "6px", background: planAccentColor(plan.id) }} />
@@ -7351,7 +7369,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [] }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [] }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + (
@@ -7559,6 +7577,16 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                 <div className="min-w-0 basis-28 shrink-0 text-sm font-medium">{plan.name}</div>
                 <PaypalIdField label="ID forfait PayPal (mensuel)" value={plan.paypalPlanIdMonthly} onSave={(v) => onUpdatePlanPaypalId(plan.id, "monthly", v)} />
                 <PaypalIdField label="ID forfait PayPal (annuel)" value={plan.paypalPlanIdAnnual} onSave={(v) => onUpdatePlanPaypalId(plan.id, "annual", v)} />
+                <div className="ml-auto flex items-center gap-1.5">
+                  <span className="text-xs font-medium" style={{ color: plan.paypalPaymentEnabled ? colors.moss : colors.inkSoft }}>{plan.paypalPaymentEnabled ? "Affiché" : "Masqué"}</span>
+                  <button
+                    onClick={() => onTogglePaypalPayment(plan.id)}
+                    title={plan.paypalPaymentEnabled ? "Masquer PayPal pour ce forfait" : "Afficher PayPal pour ce forfait"}
+                    style={{ color: plan.paypalPaymentEnabled ? colors.moss : colors.line }}
+                  >
+                    {plan.paypalPaymentEnabled ? <ToggleRight size={22} /> : <ToggleLeft size={22} />}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
