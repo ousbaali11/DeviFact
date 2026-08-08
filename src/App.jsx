@@ -1544,6 +1544,11 @@ export default function DeviFactApp() {
   const [savingPrestations, setSavingPrestations] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
   const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && sessionStorage.getItem("devifact_lastActiveId")) || null);
+  // Garde en mémoire l'identifiant de la personne dont les données sont
+  // actuellement chargées — permet de savoir, dans le gestionnaire de
+  // connexion, si un événement concerne vraiment un changement de
+  // compte ou juste une revalidation de la même session.
+  const currentUserIdRef = useRef(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("tous");
   const [revisionCountry, setRevisionCountry] = useState("🇫🇷 FR");
@@ -1750,17 +1755,20 @@ export default function DeviFactApp() {
       try {
         if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
         if (session?.user) {
-          // Important : ne recharger (et donc vider l'écran en cours)
-          // que pour une vraie nouvelle connexion — pas pour les
-          // autres événements avec session valide (ex: TOKEN_REFRESHED,
-          // qui se déclenche notamment quand on revient sur l'onglet
-          // après l'avoir laissé en arrière-plan). Sinon, la personne
-          // se retrouve renvoyée au tableau de bord juste en changeant
-          // de fenêtre, alors que rien n'a réellement changé.
-          if (_event !== "SIGNED_IN" && _event !== "INITIAL_SESSION") {
+          // Important : ne recharger (et donc vider l'écran en cours) que
+          // si c'est vraiment une personne DIFFÉRENTE qui vient de se
+          // connecter — jamais en se basant sur le type d'événement
+          // (SIGNED_IN, TOKEN_REFRESHED...), car le comportement exact
+          // varie et n'est pas garanti d'un cas à l'autre. Ici, si
+          // l'identifiant de la personne est le même que celui déjà
+          // chargé, on ne touche à rien — ça couvre aussi bien le retour
+          // sur l'onglet après une mise en veille que le rafraîchissement
+          // automatique du jeton de session.
+          if (currentUserIdRef.current === session.user.id) {
             setLoading(false);
             return;
           }
+          currentUserIdRef.current = session.user.id;
           // Vider d'abord toute donnée encore en mémoire (d'un compte
           // précédent) avant de charger celles de cette connexion —
           // même précaution que switchOrganization, pour ne jamais
@@ -1772,6 +1780,7 @@ export default function DeviFactApp() {
           await loadUserData();
           setAccount(profile);
         } else {
+          currentUserIdRef.current = null;
           clearUserData();
           setAccount(null);
         }
