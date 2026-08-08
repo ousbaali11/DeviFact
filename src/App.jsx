@@ -6982,11 +6982,19 @@ function StripeCheckoutButton({ planId, billingCycle, organizationId }) {
         // aller le chercher soi-même pour voir la vraie raison que la
         // fonction a renvoyée, sinon on ne voit que le message
         // générique "Edge Function returned a non-2xx status code".
+        // Le corps du flux ne peut être lu qu'une seule fois, donc on
+        // essaie plusieurs façons de l'atteindre, dans l'ordre.
         let realMessage = data?.error;
-        if (!realMessage && error?.context?.json) {
-          try { realMessage = (await error.context.json())?.error; } catch { /* corps non-JSON, tant pis */ }
+        if (!realMessage && error?.context) {
+          try { realMessage = (await new Response(error.context.body).json())?.error; } catch { /* ignore, on tente autre chose */ }
+          if (!realMessage) {
+            try { realMessage = (await error.context.clone().json())?.error; } catch { /* ignore */ }
+          }
+          if (!realMessage) {
+            try { realMessage = await error.context.clone().text(); } catch { /* ignore */ }
+          }
         }
-        console.error("Erreur de création de session Stripe (détail)", { data, error, realMessage });
+        console.error("Erreur de création de session Stripe (détail complet)", { data, error, realMessage, context: error?.context });
         alert(`Impossible d'ouvrir la page de paiement : ${realMessage || error?.message || "erreur inconnue"}`);
         return;
       }
