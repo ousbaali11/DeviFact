@@ -1584,12 +1584,37 @@ export default function DeviFactApp() {
     const { data: profile } = await db.from("profiles").select("*").eq("id", userId).maybeSingle();
     if (!profile) return null;
 
-    const { data: memberships } = await db
+    let { data: memberships } = await db
       .from("organization_members")
       .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
       .eq("user_id", userId)
       .eq("status", "active")
       .order("created_at", { ascending: true });
+
+    // Auto-réparation : un compte sans AUCUNE organisation est un état
+    // cassé (ne devrait jamais arriver, mais un souci passager à
+    // l'inscription — ou une ancienne remise à zéro de la base — a pu
+    // en laisser certains dans cet état). Plutôt que de laisser la
+    // personne bloquée sans le comprendre, on lui crée son espace ici,
+    // silencieusement, dès la prochaine connexion.
+    if (!memberships || memberships.length === 0) {
+      console.warn("Compte sans organisation détecté — création automatique d'un espace de secours.");
+      const { data: newOrg, error: orgError } = await db.from("organizations").insert({ name: profile.company_name || email }).select("id").single();
+      if (!orgError && newOrg) {
+        const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: userId, role: "owner", status: "active" });
+        if (!memberError) {
+          const { data: retried } = await db
+            .from("organization_members")
+            .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
+            .eq("user_id", userId)
+            .eq("status", "active")
+            .order("created_at", { ascending: true });
+          memberships = retried;
+        }
+      } else {
+        console.error("Échec de la création automatique de l'espace de secours", orgError);
+      }
+    }
 
     const list = memberships || [];
     // Choix déterministe de l'organisation active — jamais au hasard,
@@ -3390,11 +3415,29 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           // Crée l'organisation du nouvel inscrit, dont il devient
           // aussitôt propriétaire — c'est elle qui portera l'abonnement
           // et les données, éventuellement partagées avec une équipe plus tard.
-          const { data: newOrg, error: orgError } = await db.from("organizations").insert({ name: companyName.trim() }).select("id").single();
-          if (orgError) {
-            console.error("Erreur de création de l'organisation", orgError);
-          } else {
-            await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: data.user.id, role: "owner", status: "active" });
+          // Important : si ça échoue, on ne laisse JAMAIS l'inscription
+          // "réussir" silencieusement — sans organisation, rien ne
+          // fonctionne ensuite (impossible d'activer un forfait, de
+          // créer un document...) et la personne se retrouve bloquée
+          // sans le savoir. On réessaie une fois, puis on prévient
+          // clairement si ça persiste.
+          async function createOrgForNewUser() {
+            const { data: newOrg, error: orgError } = await db.from("organizations").insert({ name: companyName.trim() || cleanEmail }).select("id").single();
+            if (orgError || !newOrg) return { ok: false, error: orgError };
+            const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: data.user.id, role: "owner", status: "active" });
+            if (memberError) return { ok: false, error: memberError };
+            return { ok: true };
+          }
+          let orgResult = await createOrgForNewUser();
+          if (!orgResult.ok) {
+            console.error("Erreur de création de l'organisation (1ère tentative)", orgResult.error);
+            orgResult = await createOrgForNewUser(); // une seconde chance, en cas de souci passager
+          }
+          if (!orgResult.ok) {
+            console.error("Erreur de création de l'organisation (2ème tentative)", orgResult.error);
+            setError("Ton compte a été créé, mais la mise en place de ton espace a rencontré un souci. Déconnecte-toi puis reconnecte-toi pour réessayer automatiquement — si ça persiste, contacte-nous.");
+            setBusy(false);
+            return;
           }
           // Le compte fonctionne tout de suite (confirmation par email
           // désactivée côté Supabase), mais on envoie quand même un
