@@ -1655,7 +1655,7 @@ export default function DeviFactApp() {
   const [allUsers, setAllUsers] = useState([]);
   const [allUsersError, setAllUsersError] = useState("");
   async function loadAllUsers() {
-    const { data, error } = await db.from("profiles").select("id, email, first_name, last_name, company_name, is_admin, created_at").order("created_at", { ascending: false });
+    const { data, error } = await db.from("profiles").select("id, email, first_name, last_name, company_name, is_admin, created_at, confirmed_at, last_confirmation_sent_at").order("created_at", { ascending: false });
     if (error) {
       console.error("Erreur de chargement de la liste des utilisateurs", error);
       setAllUsersError(error.message || "Erreur inconnue");
@@ -1667,6 +1667,24 @@ export default function DeviFactApp() {
   useEffect(() => {
     if (view === "admin" && account?.isAdmin) loadAllUsers();
   }, [view, account?.isAdmin]);
+  const [resendingConfirmationId, setResendingConfirmationId] = useState(null);
+  async function resendConfirmation(userId) {
+    setResendingConfirmationId(userId);
+    try {
+      const { data, error } = await db.functions.invoke("send-confirmation-email", { body: { userId } });
+      if (error || data?.error) {
+        alert(`Impossible d'envoyer l'email : ${data?.error || error?.message || "erreur inconnue"}`);
+      } else {
+        alert("Email de confirmation renvoyé.");
+        await loadAllUsers();
+      }
+    } catch (err) {
+      console.error("Erreur de relance de confirmation", err);
+      alert("Impossible d'envoyer l'email. Réessaie dans un instant.");
+    } finally {
+      setResendingConfirmationId(null);
+    }
+  }
   async function updatePlanPaypalId(planId, field, value) {
     setSavingPlanSettings(true);
     const column = field === "monthly" ? "paypal_plan_id_monthly" : "paypal_plan_id_annual";
@@ -1859,6 +1877,26 @@ export default function DeviFactApp() {
     return () => authListener?.subscription?.unsubscribe();
   }, []);
 
+  // Détecte un lien de confirmation ("?confirm=...") dans l'adresse —
+  // fonctionne que la personne soit connectée ou non sur cet appareil
+  // (elle clique depuis sa boîte mail, pas forcément depuis la même
+  // session). Voir migration_confirmation_8_semaines.sql.
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("confirm");
+    if (!token) return;
+    (async () => {
+      const { data: ok, error } = await db.rpc("confirm_account", { token });
+      if (error || !ok) {
+        alert("Ce lien de confirmation n'est plus valide (déjà utilisé, ou expiré).");
+      } else {
+        alert("Ton adresse email est confirmée. Merci !");
+      }
+      const params = new URLSearchParams(window.location.search);
+      params.delete("confirm");
+      window.history.replaceState({}, "", window.location.pathname + (params.toString() ? `?${params.toString()}` : ""));
+    })();
+  }, []);
+
   // Mémorise en continu la vue et le document actuellement ouverts —
   // ainsi, si le navigateur recharge la page toute seule (mise en
   // veille d'un onglet inactif pour économiser la mémoire, fréquente
@@ -1940,7 +1978,11 @@ export default function DeviFactApp() {
   async function chooseZeroPricePlan(planId, billingCycle) {
     if (!account?.organizationId) return;
     const { error } = await db.from("organizations").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", account.organizationId);
-    if (error) { console.error("Erreur d'activation du forfait à 0€", error); return; }
+    if (error) {
+      console.error("Erreur d'activation du forfait à 0€", error);
+      alert(`Impossible d'activer ce forfait : ${error.message || "erreur inconnue"}`);
+      return;
+    }
     setAccount((prev) => ({ ...prev, plan: planId, billing: billingCycle, paymentStatus: "payé" }));
   }
   async function togglePaymentStatus() {
@@ -2792,6 +2834,8 @@ export default function DeviFactApp() {
           onUpdateSiteSettings={updateSiteSettings}
           allUsers={allUsers}
           allUsersError={allUsersError}
+          onResendConfirmation={resendConfirmation}
+          resendingConfirmationId={resendingConfirmationId}
         />
       </div>
     );
@@ -3334,6 +3378,11 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           } else {
             await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: data.user.id, role: "owner", status: "active" });
           }
+          // Le compte fonctionne tout de suite (confirmation par email
+          // désactivée côté Supabase), mais on envoie quand même un
+          // email de confirmation "maison" — 8 semaines pour cliquer,
+          // sinon suppression automatique (voir Admin → Utilisateurs).
+          db.functions.invoke("send-confirmation-email", { body: { userId: data.user.id } }).catch((e) => console.error("Erreur d'envoi de l'email de confirmation", e));
         }
         if (!data.session) {
           // Si la confirmation par email est activée côté serveur, pas de
@@ -7423,7 +7472,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "" }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + (
@@ -7506,23 +7555,47 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Nom</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Inscrit le</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Confirmation</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}></th>
                 </tr>
               </thead>
               <tbody>
-                {allUsers.map((u, idx) => (
-                  <tr key={u.id} style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
-                    <td className="px-4 py-2.5">{u.email}</td>
-                    <td className="px-4 py-2.5">{[u.first_name, u.last_name].filter(Boolean).join(" ") || <span style={{ color: colors.inkSoft }}>—</span>}</td>
-                    <td className="px-4 py-2.5">{u.company_name || <span style={{ color: colors.inkSoft }}>—</span>}</td>
-                    <td className="df-mono px-4 py-2.5 text-xs" style={{ color: colors.inkSoft }}>{u.created_at ? fr(u.created_at) : "—"}</td>
-                    <td className="px-4 py-2.5">
-                      {u.is_admin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
-                    </td>
-                  </tr>
-                ))}
+                {allUsers.map((u, idx) => {
+                  const deadline = u.created_at ? new Date(new Date(u.created_at).getTime() + 8 * 7 * 24 * 60 * 60 * 1000) : null;
+                  return (
+                    <tr key={u.id} style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
+                      <td className="px-4 py-2.5">{u.email}</td>
+                      <td className="px-4 py-2.5">{[u.first_name, u.last_name].filter(Boolean).join(" ") || <span style={{ color: colors.inkSoft }}>—</span>}</td>
+                      <td className="px-4 py-2.5">{u.company_name || <span style={{ color: colors.inkSoft }}>—</span>}</td>
+                      <td className="df-mono px-4 py-2.5 text-xs" style={{ color: colors.inkSoft }}>{u.created_at ? fr(u.created_at) : "—"}</td>
+                      <td className="px-4 py-2.5">
+                        {u.confirmed_at ? (
+                          <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.moss }}><Check size={13} /> Confirmé</span>
+                        ) : (
+                          <div>
+                            <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brick }}><AlertTriangle size={13} /> Non confirmé</span>
+                            {deadline && <span className="text-xs" style={{ color: colors.inkSoft }}>Suppression auto le {fr(deadline)}</span>}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {u.is_admin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
+                        {!u.confirmed_at && (
+                          <button
+                            onClick={() => onResendConfirmation(u.id)}
+                            disabled={resendingConfirmationId === u.id}
+                            className="ml-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white"
+                            style={{ background: colors.slate, opacity: resendingConfirmationId === u.id ? 0.7 : 1 }}
+                          >
+                            {resendingConfirmationId === u.id ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} Relancer
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {allUsers.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center text-sm" style={{ color: colors.inkSoft }}>Aucun utilisateur pour l'instant.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-6 text-center text-sm" style={{ color: colors.inkSoft }}>Aucun utilisateur pour l'instant.</td></tr>
                 )}
               </tbody>
             </table>
