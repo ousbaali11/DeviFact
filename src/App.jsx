@@ -1599,20 +1599,49 @@ export default function DeviFactApp() {
     // silencieusement, dès la prochaine connexion.
     if (!memberships || memberships.length === 0) {
       console.warn("Compte sans organisation détecté — création automatique d'un espace de secours.");
-      const { data: newOrg, error: orgError } = await db.from("organizations").insert({ name: profile.company_name || email }).select("id").single();
-      if (!orgError && newOrg) {
-        const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: userId, role: "owner", status: "active" });
-        if (!memberError) {
-          const { data: retried } = await db
-            .from("organization_members")
-            .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
-            .eq("user_id", userId)
-            .eq("status", "active")
-            .order("created_at", { ascending: true });
-          memberships = retried;
+
+      // S'assure que la session est bien pleinement établie avant
+      // d'agir — appelée juste après une connexion, cette fonction
+      // peut sinon s'exécuter une fraction de seconde trop tôt,
+      // avant que les requêtes suivantes soient correctement
+      // authentifiées, ce qui ferait échouer les règles de sécurité
+      // même si elles sont correctement configurées.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data: sessionData } = await db.auth.getSession();
+        if (sessionData?.session?.access_token) break;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+
+      let healed = false;
+      for (let attempt = 0; attempt < 2 && !healed; attempt++) {
+        if (attempt > 0) {
+          console.warn(`Nouvelle tentative de réparation automatique (essai ${attempt + 1})...`);
+          await new Promise((r) => setTimeout(r, 500));
         }
-      } else {
-        console.error("Échec de la création automatique de l'espace de secours", orgError);
+        // Identifiant généré ici plutôt que par la base : évite d'avoir
+        // à relire la ligne juste après l'avoir créée, ce que la règle
+        // de lecture bloquerait tant qu'on n'est pas encore membre de
+        // cette organisation (même principe que "Créer mon propre espace").
+        const newOrgId = crypto.randomUUID();
+        const { error: orgError } = await db.from("organizations").insert({ id: newOrgId, name: profile.company_name || email });
+        if (orgError) {
+          console.error(`Échec de la création automatique de l'espace de secours (essai ${attempt + 1})`, orgError);
+          continue;
+        }
+        const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrgId, user_id: userId, role: "owner", status: "active" });
+        if (memberError) {
+          console.error(`Échec de l'ajout comme propriétaire de l'espace de secours (essai ${attempt + 1})`, memberError);
+          continue;
+        }
+        const { data: retried } = await db
+          .from("organization_members")
+          .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
+          .eq("user_id", userId)
+          .eq("status", "active")
+          .order("created_at", { ascending: true });
+        memberships = retried;
+        healed = true;
+        console.warn("Espace de secours créé avec succès.");
       }
     }
 
