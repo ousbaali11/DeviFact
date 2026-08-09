@@ -1966,8 +1966,9 @@ export default function DeviFactApp() {
   }
   async function chooseFreePlan() {
     if (!account?.organizationId) return;
-    const { error } = await db.from("organizations").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", account.organizationId);
-    if (error) { console.error("Erreur de passage au forfait gratuit", error); return; }
+    const { data, error } = await db.from("organizations").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", account.organizationId).select();
+    if (error) { console.error("Erreur de passage au forfait gratuit", error); alert(`Impossible de changer de forfait : ${error.message || "erreur inconnue"}`); return; }
+    if (!data || data.length === 0) { console.error("Aucune ligne modifiée (passage au forfait gratuit) — probablement bloqué par une règle de sécurité."); alert("Impossible de changer de forfait : la mise à jour a été bloquée."); return; }
     setAccount((prev) => ({ ...prev, plan: "gratuit", paymentStatus: "gratuit" }));
   }
   // Active directement un forfait payant dont le prix est à 0€, sans passer
@@ -1976,20 +1977,37 @@ export default function DeviFactApp() {
   // peut modifier (RLS) — un utilisateur ne peut pas déclencher ceci en
   // falsifiant un prix depuis son navigateur.
   async function chooseZeroPricePlan(planId, billingCycle) {
-    if (!account?.organizationId) return;
-    const { error } = await db.from("organizations").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", account.organizationId);
-    if (error) {
-      console.error("Erreur d'activation du forfait à 0€", error);
-      alert(`Impossible d'activer ce forfait : ${error.message || "erreur inconnue"}`);
-      return;
+    console.log("[Activer 0€] Démarrage — planId:", planId, "billingCycle:", billingCycle, "organizationId:", account?.organizationId);
+    if (!account?.organizationId) {
+      console.error("[Activer 0€] ARRÊT : aucune organisation active sur ce compte.");
+      alert("Impossible d'activer ce forfait : aucune organisation active sur ce compte. Reconnecte-toi et réessaie.");
+      return false;
     }
+    // .select() ajouté exprès : sans lui, une mise à jour bloquée par une
+    // règle de sécurité (RLS) peut renvoyer "succès" tout en n'ayant
+    // modifié aucune ligne, sans la moindre erreur — invisible sinon.
+    const { data, error } = await db.from("organizations").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", account.organizationId).select();
+    console.log("[Activer 0€] Réponse de la base — data:", data, "error:", error);
+    if (error) {
+      console.error("[Activer 0€] Erreur d'activation du forfait à 0€", error);
+      alert(`Impossible d'activer ce forfait : ${error.message || "erreur inconnue"}`);
+      return false;
+    }
+    if (!data || data.length === 0) {
+      console.error("[Activer 0€] Aucune ligne modifiée — probablement bloqué par une règle de sécurité (RLS) sur la table organizations.");
+      alert("Impossible d'activer ce forfait : la mise à jour a été bloquée (probablement un droit d'accès insuffisant). Regarde la console (F12) pour le détail, et signale ce message.");
+      return false;
+    }
+    console.log("[Activer 0€] Succès — nouvelle ligne organizations :", data[0]);
     setAccount((prev) => ({ ...prev, plan: planId, billing: billingCycle, paymentStatus: "payé" }));
+    return true;
   }
   async function togglePaymentStatus() {
     if (!account?.organizationId) return;
     const nextStatus = account.paymentStatus === "payé" ? "impayé" : "payé";
-    const { error } = await db.from("organizations").update({ payment_status: nextStatus }).eq("id", account.organizationId);
-    if (error) { console.error("Erreur de mise à jour du statut de paiement", error); return; }
+    const { data, error } = await db.from("organizations").update({ payment_status: nextStatus }).eq("id", account.organizationId).select();
+    if (error) { console.error("Erreur de mise à jour du statut de paiement", error); alert(`Impossible de mettre à jour le statut : ${error.message || "erreur inconnue"}`); return; }
+    if (!data || data.length === 0) { console.error("Aucune ligne modifiée (statut de paiement) — probablement bloqué par une règle de sécurité."); alert("Impossible de mettre à jour le statut : la mise à jour a été bloquée."); return; }
     setAccount({ ...account, paymentStatus: nextStatus });
   }
   async function deleteCurrentAccount() {
@@ -2798,7 +2816,7 @@ export default function DeviFactApp() {
           account={account}
           plans={plans}
           onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); setView("dashboard"); }}
-          onChooseZeroPrice={async (planId, billingCycle) => { await chooseZeroPricePlan(planId, billingCycle); setLimitNotice(false); setView("dashboard"); }}
+          onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) { setLimitNotice(false); setView("dashboard"); } }}
           limitNotice={limitNotice}
           documentCount={documents.length}
           siteSettings={siteSettings}
@@ -6793,14 +6811,16 @@ function TeamView({ account }) {
   }
 
   async function changeRole(memberId, newRole) {
-    const { error: updateError } = await db.from("organization_members").update({ role: newRole }).eq("id", memberId);
-    if (updateError) { console.error("Erreur de changement de rôle", updateError); return; }
+    const { data, error: updateError } = await db.from("organization_members").update({ role: newRole }).eq("id", memberId).select();
+    if (updateError) { console.error("Erreur de changement de rôle", updateError); alert(`Impossible de changer ce rôle : ${updateError.message || "erreur inconnue"}`); return; }
+    if (!data || data.length === 0) { console.error("Aucune ligne modifiée (changement de rôle) — probablement bloqué par une règle de sécurité."); alert("Impossible de changer ce rôle : la mise à jour a été bloquée."); return; }
     await loadMembers();
   }
 
   async function removeMember(memberId) {
-    const { error: deleteError } = await db.from("organization_members").delete().eq("id", memberId);
-    if (deleteError) { console.error("Erreur de suppression du membre", deleteError); return; }
+    const { data, error: deleteError } = await db.from("organization_members").delete().eq("id", memberId).select();
+    if (deleteError) { console.error("Erreur de suppression du membre", deleteError); alert(`Impossible de retirer ce membre : ${deleteError.message || "erreur inconnue"}`); return; }
+    if (!data || data.length === 0) { console.error("Aucune ligne supprimée (retrait de membre) — probablement bloqué par une règle de sécurité."); alert("Impossible de retirer ce membre : l'action a été bloquée."); return; }
     await loadMembers();
   }
 
