@@ -3250,9 +3250,24 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
 
     setBusy(true);
     try {
+      // Vérifie d'abord si un compte existe pour cet email — décision
+      // assumée de révéler cette information (voir la migration SQL
+      // pour le compromis de sécurité que ça représente).
+      const { data: exists, error: checkError } = await db.rpc("email_has_account", { check_email: cleanEmail });
+      if (checkError) {
+        console.error("Erreur de vérification de l'email", checkError);
+        setError("Une erreur est survenue. Réessaie.");
+        setBusy(false);
+        return;
+      }
+      if (!exists) {
+        setError("Aucun compte n'est associé à cette adresse email.");
+        setBusy(false);
+        return;
+      }
       const { error: resetError } = await db.auth.resetPasswordForEmail(cleanEmail, { redirectTo: window.location.origin });
       if (resetError) { setError(resetError.message); setBusy(false); return; }
-      setInfo("Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé. Vérifie ta boîte mail (et les spams).");
+      setInfo("Un lien de réinitialisation vient d'être envoyé à cette adresse. Vérifie ta boîte mail (et les spams).");
       setBusy(false);
     } catch (err) {
       console.error(err);
