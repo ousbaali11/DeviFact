@@ -3639,6 +3639,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
 function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType }) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "clients", label: "Clients", icon: Users },
@@ -3796,12 +3797,36 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           <LogOut size={15} />
         </button>
       </div>
-      <div className="flex w-full items-center gap-1 overflow-x-auto lg:hidden" style={{ WebkitOverflowScrolling: "touch" }}>
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button key={id} onClick={() => setView(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
-            <Icon size={13} /> {label}
-          </button>
-        ))}
+      <div className="relative w-full lg:hidden">
+        <button
+          onClick={() => setMobileNavOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm font-medium"
+          style={{ background: "rgba(255,255,255,0.1)", color: "white" }}
+        >
+          <span className="flex items-center gap-2">
+            {(() => { const Current = tabs.find((t) => t.id === view)?.icon || LayoutDashboard; return <Current size={15} />; })()}
+            {tabs.find((t) => t.id === view)?.label || "Menu"}
+          </span>
+          {mobileNavOpen ? <X size={16} /> : <Menu size={16} />}
+        </button>
+        {mobileNavOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setMobileNavOpen(false)} />
+            <div className="absolute left-0 top-full z-20 mt-1 w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+              {tabs.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => { setView(id); setMobileNavOpen(false); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm"
+                  style={{ background: view === id ? colors.paper : "transparent", color: colors.ink, fontWeight: view === id ? 600 : 400 }}
+                >
+                  <Icon size={15} style={{ color: view === id ? colors.brassDark : colors.inkSoft }} /> {label}
+                  {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} className="ml-auto" />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
