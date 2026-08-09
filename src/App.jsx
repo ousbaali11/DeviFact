@@ -1937,9 +1937,11 @@ export default function DeviFactApp() {
   // session). Voir migration_confirmation_8_semaines.sql.
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("confirm");
+    console.log("[Confirmation email] Token détecté dans l'adresse :", token);
     if (!token) return;
     (async () => {
       const { data: ok, error } = await db.rpc("confirm_account", { token });
+      console.log("[Confirmation email] Réponse de confirm_account — ok:", ok, "error:", error);
       if (error || !ok) {
         alert("Ce lien de confirmation n'est plus valide (déjà utilisé, ou expiré).");
       } else {
@@ -3451,9 +3453,16 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           // sans le savoir. On réessaie une fois, puis on prévient
           // clairement si ça persiste.
           async function createOrgForNewUser() {
-            const { data: newOrg, error: orgError } = await db.from("organizations").insert({ name: companyName.trim() || cleanEmail }).select("id").single();
-            if (orgError || !newOrg) return { ok: false, error: orgError };
-            const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrg.id, user_id: data.user.id, role: "owner", status: "active" });
+            // Identifiant généré ici plutôt que par la base : évite
+            // d'avoir à relire la ligne juste après l'avoir créée
+            // (.select().single()), ce que la règle de lecture bloque
+            // tant qu'on n'est pas encore membre de cette organisation
+            // — exactement le bug qu'on a identifié et corrigé pour la
+            // réparation automatique (voir loadProfile).
+            const newOrgId = crypto.randomUUID();
+            const { error: orgError } = await db.from("organizations").insert({ id: newOrgId, name: companyName.trim() || cleanEmail });
+            if (orgError) return { ok: false, error: orgError };
+            const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrgId, user_id: data.user.id, role: "owner", status: "active" });
             if (memberError) return { ok: false, error: memberError };
             return { ok: true };
           }
@@ -3472,7 +3481,9 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           // désactivée côté Supabase), mais on envoie quand même un
           // email de confirmation "maison" — 8 semaines pour cliquer,
           // sinon suppression automatique (voir Admin → Utilisateurs).
-          db.functions.invoke("send-confirmation-email", { body: { userId: data.user.id } }).catch((e) => console.error("Erreur d'envoi de l'email de confirmation", e));
+          db.functions.invoke("send-confirmation-email", { body: { userId: data.user.id } })
+            .then((res) => console.log("[Confirmation email] Envoi à l'inscription — résultat :", res))
+            .catch((e) => console.error("Erreur d'envoi de l'email de confirmation", e));
         }
         if (!data.session) {
           // Si la confirmation par email est activée côté serveur, pas de
