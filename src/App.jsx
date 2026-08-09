@@ -7126,7 +7126,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-wrap justify-center gap-4">
         {visiblePlans.map((plan) => {
           const isCurrent = account?.plan === plan.id;
           const price = billing === "annuel" ? plan.annual : plan.monthly;
@@ -7135,7 +7135,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
           const showCard = plan.cardPaymentEnabled && !!stripePriceId;
           const showPaypal = !!paypalPlanId && plan.paypalPaymentEnabled;
           return (
-            <div key={plan.id} className="flex flex-col overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
+            <div key={plan.id} className="flex w-full flex-col overflow-hidden rounded-2xl sm:w-[calc(50%-0.5rem)] lg:w-[calc(25%-0.75rem)]" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
               <div style={{ height: "6px", background: planAccentColor(plan.id) }} />
               <div className="flex grow flex-col p-5">
               {plan.id === "essentiel" && (
