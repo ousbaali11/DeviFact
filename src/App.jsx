@@ -1570,6 +1570,13 @@ export default function DeviFactApp() {
   const [siteSettings, setSiteSettings] = useState({ name: "DeviFact", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA" });
   const [savingSiteSettings, setSavingSiteSettings] = useState(false);
   const [authMode, setAuthMode] = useState("signup");
+  // Le titre affiché dans l'onglet du navigateur vient du fichier
+  // index.html (figé une fois pour toutes) — on le remplace ici
+  // dynamiquement dès que le vrai nom du site est chargé, pour qu'il
+  // reste toujours synchronisé avec ce qui est configuré dans Admin.
+  useEffect(() => {
+    if (siteSettings?.name) document.title = siteSettings.name;
+  }, [siteSettings?.name]);
 
   const [plans, setPlans] = useState(PLANS);
 
@@ -3172,7 +3179,7 @@ function ResetPasswordScreen({ siteSettings, onDone }) {
       onDone();
     } catch (err) {
       console.error(err);
-      setError("Une erreur est survenue. Réessaie.");
+      setError((err && typeof err === "object" && err.message) ? err.message : "Une erreur est survenue. Réessaie.");
       setBusy(false);
     }
   }
@@ -3256,7 +3263,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
       const { data: exists, error: checkError } = await db.rpc("email_has_account", { check_email: cleanEmail });
       if (checkError) {
         console.error("Erreur de vérification de l'email", checkError);
-        setError("Une erreur est survenue. Réessaie.");
+        setError((err && typeof err === "object" && err.message) ? err.message : "Une erreur est survenue. Réessaie.");
         setBusy(false);
         return;
       }
@@ -3271,7 +3278,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
       setBusy(false);
     } catch (err) {
       console.error(err);
-      setError("Une erreur est survenue. Réessaie.");
+      setError((err && typeof err === "object" && err.message) ? err.message : "Une erreur est survenue. Réessaie.");
       setBusy(false);
     }
   }
@@ -3336,7 +3343,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
       }
     } catch (err) {
       console.error(err);
-      setError("Une erreur est survenue. Réessaie.");
+      setError((err && typeof err === "object" && err.message) ? err.message : "Une erreur est survenue. Réessaie.");
       setBusy(false);
     }
   }
@@ -6553,7 +6560,7 @@ function ApiView({ account }) {
       await loadKeys();
     } catch (err) {
       console.error(err);
-      setError("Une erreur est survenue. Réessaie.");
+      setError((err && typeof err === "object" && err.message) ? err.message : "Une erreur est survenue. Réessaie.");
     } finally {
       setCreating(false);
     }
@@ -6721,7 +6728,7 @@ function TeamView({ account }) {
       }
     } catch (err) {
       console.error(err);
-      setError("Une erreur est survenue. Réessaie.");
+      setError((err && typeof err === "object" && err.message) ? err.message : "Une erreur est survenue. Réessaie.");
     } finally {
       setInviting(false);
     }
