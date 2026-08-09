@@ -1567,7 +1567,7 @@ export default function DeviFactApp() {
   const [splitNotice, setSplitNotice] = useState(null);
   const [savingPlanSettings, setSavingPlanSettings] = useState(false);
   const [preAuthView, setPreAuthView] = useState("landing"); // landing | auth
-  const [siteSettings, setSiteSettings] = useState({ name: "DeviFact", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA" });
+  const [siteSettings, setSiteSettings] = useState({ name: "DeviFact", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr" });
   const [savingSiteSettings, setSavingSiteSettings] = useState(false);
   const [authMode, setAuthMode] = useState("signup");
   // Le titre affiché dans l'onglet du navigateur vient du fichier
@@ -1653,9 +1653,15 @@ export default function DeviFactApp() {
   // à l'Admin (voir migration_admin_voir_utilisateurs.sql pour la
   // règle de sécurité qui permet cette lecture élargie).
   const [allUsers, setAllUsers] = useState([]);
+  const [allUsersError, setAllUsersError] = useState("");
   async function loadAllUsers() {
     const { data, error } = await db.from("profiles").select("id, email, first_name, last_name, company_name, is_admin, created_at").order("created_at", { ascending: false });
-    if (error) { console.error("Erreur de chargement de la liste des utilisateurs", error); return; }
+    if (error) {
+      console.error("Erreur de chargement de la liste des utilisateurs", error);
+      setAllUsersError(error.message || "Erreur inconnue");
+      return;
+    }
+    setAllUsersError("");
     setAllUsers(data || []);
   }
   useEffect(() => {
@@ -1707,11 +1713,12 @@ export default function DeviFactApp() {
       pdfHeaderColor: data.pdf_header_color || "#1B2A33",
       pdfBlockColor: data.pdf_block_color || "#F1F0EA",
       visibleServices: data.visible_services || null,
+      contactEmail: data.contact_email || "contact@chantiflow.fr",
     });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -2752,6 +2759,7 @@ export default function DeviFactApp() {
           onChooseZeroPrice={async (planId, billingCycle) => { await chooseZeroPricePlan(planId, billingCycle); setLimitNotice(false); setView("dashboard"); }}
           limitNotice={limitNotice}
           documentCount={documents.length}
+          siteSettings={siteSettings}
         />
       </div>
     );
@@ -2783,6 +2791,7 @@ export default function DeviFactApp() {
           savingSiteSettings={savingSiteSettings}
           onUpdateSiteSettings={updateSiteSettings}
           allUsers={allUsers}
+          allUsersError={allUsersError}
         />
       </div>
     );
@@ -3157,7 +3166,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
       </section>
 
       <footer className="border-t px-6 py-8 text-center text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-        © 2026 {siteSettings.name} — <a href="mailto:contact@devifact.fr">contact@devifact.fr</a>
+        © 2026 {siteSettings.name} — <a href={`mailto:${siteSettings.contactEmail || "contact@chantiflow.fr"}`}>{siteSettings.contactEmail || "contact@chantiflow.fr"}</a>
       </footer>
     </div>
   );
@@ -7073,7 +7082,7 @@ function PayPalButton({ planId, organizationId, onApproved }) {
   );
 }
 
-function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNotice, documentCount }) {
+function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNotice, documentCount, siteSettings }) {
   const [billing, setBilling] = useState(account?.billing || "mensuel");
   const [approvedMsg, setApprovedMsg] = useState(false);
   const [stripeReturnMsg, setStripeReturnMsg] = useState(null); // "succes" | "annule" | null
@@ -7162,7 +7171,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
               ) : plan.id === "gratuit" ? (
                 <button onClick={onChooseFree} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Choisir ce forfait</button>
               ) : plan.id === "entreprise" ? (
-                <a href="mailto:contact@devifact.fr?subject=Forfait%20Entreprise" className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Nous contacter</a>
+                <a href={`mailto:${siteSettings?.contactEmail || "contact@chantiflow.fr"}?subject=Forfait%20Entreprise`} className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Nous contacter</a>
               ) : price === 0 ? (
                 <button onClick={() => onChooseZeroPrice(plan.id, billing)} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Activer (0€)</button>
               ) : showCard || showPaypal ? (
@@ -7350,6 +7359,11 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
           <input className="df-input w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.name} onChange={(e) => patch({ name: e.target.value })} />
         </div>
         <div>
+          <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Email de contact</label>
+          <input type="email" className="df-input w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="contact@tondomaine.fr" value={local.contactEmail || ""} onChange={(e) => patch({ contactEmail: e.target.value })} />
+          <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Utilisé pour le bouton "Nous contacter" du forfait Entreprise et le pied de page du site.</p>
+        </div>
+        <div>
           <label className="mb-2 block text-xs font-medium" style={{ color: colors.inkSoft }}>Logo du site</label>
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center justify-center overflow-hidden rounded-lg" style={{ width: local.logoWidth, height: local.logoHeight, background: local.logo ? "transparent" : colors.brass, color: "white" }}>
@@ -7409,7 +7423,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [] }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "" }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + (
@@ -7479,6 +7493,11 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tous les utilisateurs du site</span>
             <span className="text-xs" style={{ color: colors.inkSoft }}>{allUsers.length} compte(s)</span>
           </div>
+          {allUsersError && (
+            <div className="border-b px-4 py-3 text-sm" style={{ borderColor: colors.line, background: `${colors.brick}0D`, color: colors.brick }}>
+              Impossible de charger la liste ({allUsersError}). La migration migration_admin_voir_utilisateurs.sql a-t-elle bien été lancée dans Supabase ?
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
