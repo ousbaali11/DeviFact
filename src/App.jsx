@@ -3460,6 +3460,24 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           if (companyName.trim() || firstName.trim() || lastName.trim()) {
             await db.from("profiles").update({ company_name: companyName.trim(), first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", data.user.id);
           }
+          // Force la confirmation côté Supabase EN PREMIER, avant tout
+          // le reste — pour que la connexion ne dépende JAMAIS du
+          // réglage "Confirm email" du tableau de bord (fragile), même
+          // si une étape suivante (création de l'organisation) échoue.
+          // Sans ça, un échec plus loin empêchait cette étape de
+          // s'exécuter, laissant le compte durablement bloqué.
+          const { data: confirmData, error: confirmError } = await db.functions.invoke("auto-confirm-user", { body: { userId: data.user.id } });
+          if (confirmError) {
+            let realMessage = confirmData?.error;
+            if (!realMessage && confirmError?.context) {
+              try { realMessage = (await new Response(confirmError.context.body).json())?.error; } catch { /* ignore */ }
+              if (!realMessage) { try { realMessage = await confirmError.context.clone().text(); } catch { /* ignore */ } }
+            }
+            console.error("[Confirmation forcée] ÉCHEC — détail complet :", { confirmData, confirmError, realMessage });
+          } else {
+            console.log("[Confirmation forcée] Succès à l'inscription :", confirmData);
+          }
+
           // Crée l'organisation du nouvel inscrit, dont il devient
           // aussitôt propriétaire — c'est elle qui portera l'abonnement
           // et les données, éventuellement partagées avec une équipe plus tard.
@@ -3493,23 +3511,6 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
             setError("Ton compte a été créé, mais la mise en place de ton espace a rencontré un souci. Déconnecte-toi puis reconnecte-toi pour réessayer automatiquement — si ça persiste, contacte-nous.");
             setBusy(false);
             return;
-          }
-          // Force la confirmation côté Supabase immédiatement — pour
-          // que la connexion ne dépende JAMAIS du réglage "Confirm
-          // email" du tableau de bord (fragile, peut être mal réglé
-          // ou changer sans qu'on s'en aperçoive). Attendu ici :
-          // c'est justement ce qui doit se passer AVANT que la
-          // personne tente de se connecter la première fois.
-          const { data: confirmData, error: confirmError } = await db.functions.invoke("auto-confirm-user", { body: { userId: data.user.id } });
-          if (confirmError) {
-            let realMessage = confirmData?.error;
-            if (!realMessage && confirmError?.context) {
-              try { realMessage = (await new Response(confirmError.context.body).json())?.error; } catch { /* ignore */ }
-              if (!realMessage) { try { realMessage = await confirmError.context.clone().text(); } catch { /* ignore */ } }
-            }
-            console.error("[Confirmation forcée] ÉCHEC — détail complet :", { confirmData, confirmError, realMessage });
-          } else {
-            console.log("[Confirmation forcée] Succès à l'inscription :", confirmData);
           }
 
           // Le compte fonctionne tout de suite (confirmation par email
