@@ -3494,6 +3494,15 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
             setBusy(false);
             return;
           }
+          // Force la confirmation côté Supabase immédiatement — pour
+          // que la connexion ne dépende JAMAIS du réglage "Confirm
+          // email" du tableau de bord (fragile, peut être mal réglé
+          // ou changer sans qu'on s'en aperçoive). Attendu ici :
+          // c'est justement ce qui doit se passer AVANT que la
+          // personne tente de se connecter la première fois.
+          const { error: confirmError } = await db.functions.invoke("auto-confirm-user", { body: { userId: data.user.id } });
+          if (confirmError) console.error("Erreur de confirmation forcée à l'inscription", confirmError);
+
           // Le compte fonctionne tout de suite (confirmation par email
           // désactivée côté Supabase), mais on envoie quand même un
           // email de confirmation "maison" — 8 semaines pour cliquer,
@@ -3514,7 +3523,23 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
         // dans le composant principal prend le relais automatiquement.
       } else {
         const { error: signInError } = await db.auth.signInWithPassword({ email: cleanEmail, password });
-        if (signInError) { setError("Email ou mot de passe incorrect."); setBusy(false); return; }
+        if (signInError) {
+          console.error("[Connexion] Erreur exacte de Supabase :", signInError);
+          // Message précis selon la vraie cause plutôt qu'un message
+          // générique qui masquerait des situations très différentes
+          // (mot de passe faux, email jamais confirmé si jamais ce
+          // réglage venait à être réactivé côté Supabase, etc.).
+          const code = signInError.message || "";
+          if (code.toLowerCase().includes("email not confirmed")) {
+            setError("Ce compte n'est pas encore confirmé côté Supabase (réglage \"Confirm email\"). Vérifie que ce réglage est bien désactivé dans Authentication → Providers → Email.");
+          } else if (code.toLowerCase().includes("invalid login credentials")) {
+            setError("Email ou mot de passe incorrect.");
+          } else {
+            setError(`Impossible de se connecter : ${code || "erreur inconnue"}`);
+          }
+          setBusy(false);
+          return;
+        }
         setBusy(false);
       }
     } catch (err) {
