@@ -3690,7 +3690,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                     value=""
                     onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
                     onClick={() => setView("company")}
-                    className="df-select appearance-none rounded-lg py-1.5 pl-8 pr-3 text-sm font-medium"
+                    className="df-select appearance-none rounded-lg py-1.5 pl-8 pr-3 text-xs font-medium"
                     style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)", border: "none" }}
                     title="Mon entreprise"
                   >
@@ -3701,7 +3701,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                   <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: view === id ? "white" : "rgba(255,255,255,0.65)" }} />
                 </div>
               ) : (
-                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
                   <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} />}
                 </button>
               )
@@ -3758,7 +3758,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             })()}
             <div className="flex items-center gap-1">
               {rightTabs.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
                   <Icon size={15} /> {label}
                 </button>
               ))}
@@ -3767,20 +3767,20 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={onNewDevis} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
+        <button onClick={onNewDevis} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: colors.brass, color: colors.ink }}>
           <Plus size={15} /> Devis
         </button>
-        <button onClick={onNewFacture} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
+        <button onClick={onNewFacture} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white" style={{ background: colors.slate }}>
           <Plus size={15} /> Facture
         </button>
-        <button onClick={onNewProforma} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
+        <button onClick={onNewProforma} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
           <Plus size={15} /> Proforma
         </button>
-        <button onClick={onNewRevision} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.slate, color: "white" }} title="Nouvelle révision des prix">
+        <button onClick={onNewRevision} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: colors.slate, color: "white" }} title="Nouvelle révision des prix">
           <TrendingUp size={15} /> Révision des prix
         </button>
         <div className="relative">
-          <button onClick={() => setServicesMenuOpen((v) => !v)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-medium" style={{ background: "rgba(255,255,255,0.1)", color: "white" }} title="Tous les services">
+          <button onClick={() => setServicesMenuOpen((v) => !v)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium" style={{ background: "rgba(255,255,255,0.1)", color: "white" }} title="Tous les services">
             <Menu size={16} />
           </button>
           {servicesMenuOpen && (
