@@ -2924,6 +2924,7 @@ export default function DeviFactApp() {
           onUpdateSiteSettings={updateSiteSettings}
           allUsers={allUsers}
           allUsersError={allUsersError}
+          onRefreshUsers={loadAllUsers}
           onResendConfirmation={resendConfirmation}
           resendingConfirmationId={resendingConfirmationId}
         />
@@ -3708,53 +3709,6 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             )}
           </div>
           <div className="flex items-center gap-2">
-            {(() => {
-              const memberships = account?.memberships || [];
-              const hasOwnOrg = memberships.some((m) => m.role === "owner");
-              return (
-                <div className="relative">
-                  <button
-                    onClick={() => setOrgMenuOpen((v) => !v)}
-                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium"
-                    style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
-                    title="Changer d'organisation"
-                  >
-                    <Building2 size={13} /> Organisations
-                    <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
-                    <ChevronDown size={12} />
-                  </button>
-                  {orgMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
-                      <div className="absolute right-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                        {memberships.map((m) => (
-                          <button
-                            key={m.organizationId}
-                            onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }}
-                            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
-                            style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}
-                          >
-                            <span className="truncate">{m.name || "Organisation"}</span>
-                            <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
-                          </button>
-                        ))}
-                        {!hasOwnOrg && (
-                          <button
-                            onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }}
-                            disabled={creatingOwnOrg}
-                            className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium"
-                            style={{ borderColor: colors.line, color: colors.brassDark }}
-                          >
-                            {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-                            {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })()}
             <div className="flex items-center gap-1">
               {rightTabs.map(({ id, label, icon: Icon }) => (
                 <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
@@ -3808,6 +3762,51 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             </>
           )}
         </div>
+        {(() => {
+          const memberships = account?.memberships || [];
+          const hasOwnOrg = memberships.some((m) => m.role === "owner");
+          return (
+            <div className="relative">
+              <button
+                onClick={() => setOrgMenuOpen((v) => !v)}
+                className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium"
+                style={{ color: "rgba(255,255,255,0.65)" }}
+                title="Organisations"
+              >
+                <Building2 size={15} />
+              </button>
+              {orgMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
+                  <div className="absolute right-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                    {memberships.map((m) => (
+                      <button
+                        key={m.organizationId}
+                        onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
+                        style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}
+                      >
+                        <span className="truncate">{m.name || "Organisation"}</span>
+                        <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
+                      </button>
+                    ))}
+                    {!hasOwnOrg && (
+                      <button
+                        onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }}
+                        disabled={creatingOwnOrg}
+                        className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium"
+                        style={{ borderColor: colors.line, color: colors.brassDark }}
+                      >
+                        {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                        {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
         {account?.isAdmin && (
           <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "admin" ? "white" : "rgba(255,255,255,0.65)", background: view === "admin" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Admin">
             <Shield size={15} />
@@ -7623,7 +7622,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + (
@@ -7691,7 +7690,12 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tous les utilisateurs du site</span>
-            <span className="text-xs" style={{ color: colors.inkSoft }}>{allUsers.length} compte(s)</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs" style={{ color: colors.inkSoft }}>{allUsers.length} compte(s)</span>
+              <button onClick={onRefreshUsers} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.paper, color: colors.slate }} title="Recharger la liste">
+                <RotateCcw size={12} /> Rafraîchir
+              </button>
+            </div>
           </div>
           {allUsersError && (
             <div className="border-b px-4 py-3 text-sm" style={{ borderColor: colors.line, background: `${colors.brick}0D`, color: colors.brick }}>
