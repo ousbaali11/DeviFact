@@ -3500,8 +3500,17 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           // ou changer sans qu'on s'en aperçoive). Attendu ici :
           // c'est justement ce qui doit se passer AVANT que la
           // personne tente de se connecter la première fois.
-          const { error: confirmError } = await db.functions.invoke("auto-confirm-user", { body: { userId: data.user.id } });
-          if (confirmError) console.error("Erreur de confirmation forcée à l'inscription", confirmError);
+          const { data: confirmData, error: confirmError } = await db.functions.invoke("auto-confirm-user", { body: { userId: data.user.id } });
+          if (confirmError) {
+            let realMessage = confirmData?.error;
+            if (!realMessage && confirmError?.context) {
+              try { realMessage = (await new Response(confirmError.context.body).json())?.error; } catch { /* ignore */ }
+              if (!realMessage) { try { realMessage = await confirmError.context.clone().text(); } catch { /* ignore */ } }
+            }
+            console.error("[Confirmation forcée] ÉCHEC — détail complet :", { confirmData, confirmError, realMessage });
+          } else {
+            console.log("[Confirmation forcée] Succès à l'inscription :", confirmData);
+          }
 
           // Le compte fonctionne tout de suite (confirmation par email
           // désactivée côté Supabase), mais on envoie quand même un
