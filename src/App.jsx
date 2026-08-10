@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, forwardRef } from "react";
+import { useState, useEffect, useRef, useMemo, forwardRef, Fragment } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { db } from "./client.js";
@@ -3701,6 +3701,59 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                   </select>
                   <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: view === id ? "white" : "rgba(255,255,255,0.65)" }} />
                 </div>
+              ) : id === "team" ? (
+                <Fragment key={id}>
+                  <button onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                    <Icon size={15} /> {label}
+                  </button>
+                  {(() => {
+                    const memberships = account?.memberships || [];
+                    const hasOwnOrg = memberships.some((m) => m.role === "owner");
+                    return (
+                      <div className="relative">
+                        <button
+                          onClick={() => setOrgMenuOpen((v) => !v)}
+                          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium"
+                          style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
+                          title="Changer d'organisation"
+                        >
+                          <Building2 size={13} /> <span className="max-w-[9rem] truncate">{account.organizationName || "Organisation"}</span>
+                          <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
+                          <ChevronDown size={12} />
+                        </button>
+                        {orgMenuOpen && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
+                            <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                              {memberships.map((m) => (
+                                <button
+                                  key={m.organizationId}
+                                  onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }}
+                                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
+                                  style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}
+                                >
+                                  <span className="truncate">{m.name || "Organisation"}</span>
+                                  <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
+                                </button>
+                              ))}
+                              {!hasOwnOrg && (
+                                <button
+                                  onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }}
+                                  disabled={creatingOwnOrg}
+                                  className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium"
+                                  style={{ borderColor: colors.line, color: colors.brassDark }}
+                                >
+                                  {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                                  {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </Fragment>
               ) : (
                 <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
                   <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} />}
@@ -3762,59 +3815,11 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             </>
           )}
         </div>
-        {(() => {
-          const memberships = account?.memberships || [];
-          const hasOwnOrg = memberships.some((m) => m.role === "owner");
-          return (
-            <div className="relative">
-              <button
-                onClick={() => setOrgMenuOpen((v) => !v)}
-                className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium"
-                style={{ color: "rgba(255,255,255,0.65)" }}
-                title="Organisations"
-              >
-                <Building2 size={15} />
-              </button>
-              {orgMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
-                  <div className="absolute right-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                    {memberships.map((m) => (
-                      <button
-                        key={m.organizationId}
-                        onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }}
-                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
-                        style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}
-                      >
-                        <span className="truncate">{m.name || "Organisation"}</span>
-                        <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
-                      </button>
-                    ))}
-                    {!hasOwnOrg && (
-                      <button
-                        onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }}
-                        disabled={creatingOwnOrg}
-                        className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium"
-                        style={{ borderColor: colors.line, color: colors.brassDark }}
-                      >
-                        {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-                        {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })()}
         {account?.isAdmin && (
           <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "admin" ? "white" : "rgba(255,255,255,0.65)", background: view === "admin" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Admin">
             <Shield size={15} />
           </button>
         )}
-        <button onClick={() => setView("account")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "account" ? "white" : "rgba(255,255,255,0.65)", background: view === "account" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Mon compte">
-          <UserCircle size={15} />
-        </button>
         <button onClick={onLogout} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Se déconnecter">
           <LogOut size={15} />
         </button>
