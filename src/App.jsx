@@ -1594,61 +1594,21 @@ export default function DeviFactApp() {
     // Auto-réparation : un compte sans AUCUNE organisation est un état
     // cassé (ne devrait jamais arriver, mais un souci passager à
     // l'inscription — ou une ancienne remise à zéro de la base — a pu
-    // en laisser certains dans cet état). Plutôt que de laisser la
-    // personne bloquée sans le comprendre, on lui crée son espace ici,
-    // silencieusement, dès la prochaine connexion.
+    // en laisser certains dans cet état). ensure_user_has_organization
+    // garantit qu'aucun doublon n'est jamais créé, même en cas
+    // d'appels simultanés (verrou côté base de données — voir
+    // migration_organisation_atomique.sql), contrairement à l'ancienne
+    // vérification côté site qui pouvait encore, dans de rares cas,
+    // laisser passer deux créations presque simultanées.
     if (!memberships || memberships.length === 0) {
-      console.warn("Compte sans organisation détecté — création automatique d'un espace de secours.");
-
-      // S'assure que la session est bien pleinement établie avant
-      // d'agir — appelée juste après une connexion, cette fonction
-      // peut sinon s'exécuter une fraction de seconde trop tôt,
-      // avant que les requêtes suivantes soient correctement
-      // authentifiées, ce qui ferait échouer les règles de sécurité
-      // même si elles sont correctement configurées.
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const { data: sessionData } = await db.auth.getSession();
-        if (sessionData?.session?.access_token) break;
-        await new Promise((r) => setTimeout(r, 300));
-      }
-
-      let healed = false;
-      for (let attempt = 0; attempt < 2 && !healed; attempt++) {
-        if (attempt > 0) {
-          console.warn(`Nouvelle tentative de réparation automatique (essai ${attempt + 1})...`);
-          await new Promise((r) => setTimeout(r, 500));
-        }
-        // Revérifie juste avant d'agir : si un autre appel concurrent
-        // (ex: deux onglets, ou une reconnexion rapprochée) a déjà
-        // réparé le compte entre-temps, on s'arrête là plutôt que de
-        // créer une deuxième organisation en double.
-        const { data: recheck } = await db
-          .from("organization_members")
-          .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
-          .eq("user_id", userId)
-          .eq("status", "active")
-          .order("created_at", { ascending: true });
-        if (recheck && recheck.length > 0) {
-          console.warn("Un espace existe déjà (créé entre-temps) — pas besoin d'en créer un autre.");
-          memberships = recheck;
-          healed = true;
-          break;
-        }
-        // Identifiant généré ici plutôt que par la base : évite d'avoir
-        // à relire la ligne juste après l'avoir créée, ce que la règle
-        // de lecture bloquerait tant qu'on n'est pas encore membre de
-        // cette organisation (même principe que "Créer mon propre espace").
-        const newOrgId = crypto.randomUUID();
-        const { error: orgError } = await db.from("organizations").insert({ id: newOrgId, name: profile.company_name || email });
-        if (orgError) {
-          console.error(`Échec de la création automatique de l'espace de secours (essai ${attempt + 1})`, orgError);
-          continue;
-        }
-        const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrgId, user_id: userId, role: "owner", status: "active" });
-        if (memberError) {
-          console.error(`Échec de l'ajout comme propriétaire de l'espace de secours (essai ${attempt + 1})`, memberError);
-          continue;
-        }
+      console.warn("Compte sans organisation détecté — réparation automatique.");
+      const { error: ensureError } = await db.rpc("ensure_user_has_organization", {
+        target_user_id: userId,
+        fallback_name: profile.company_name || email,
+      });
+      if (ensureError) {
+        console.error("Échec de la réparation automatique", ensureError);
+      } else {
         const { data: retried } = await db
           .from("organization_members")
           .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
@@ -1656,8 +1616,7 @@ export default function DeviFactApp() {
           .eq("status", "active")
           .order("created_at", { ascending: true });
         memberships = retried;
-        healed = true;
-        console.warn("Espace de secours créé avec succès.");
+        console.warn("Espace de secours prêt.");
       }
     }
 
@@ -3481,33 +3440,18 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           // Crée l'organisation du nouvel inscrit, dont il devient
           // aussitôt propriétaire — c'est elle qui portera l'abonnement
           // et les données, éventuellement partagées avec une équipe plus tard.
-          // Important : si ça échoue, on ne laisse JAMAIS l'inscription
-          // "réussir" silencieusement — sans organisation, rien ne
-          // fonctionne ensuite (impossible d'activer un forfait, de
-          // créer un document...) et la personne se retrouve bloquée
-          // sans le savoir. On réessaie une fois, puis on prévient
-          // clairement si ça persiste.
-          async function createOrgForNewUser() {
-            // Identifiant généré ici plutôt que par la base : évite
-            // d'avoir à relire la ligne juste après l'avoir créée
-            // (.select().single()), ce que la règle de lecture bloque
-            // tant qu'on n'est pas encore membre de cette organisation
-            // — exactement le bug qu'on a identifié et corrigé pour la
-            // réparation automatique (voir loadProfile).
-            const newOrgId = crypto.randomUUID();
-            const { error: orgError } = await db.from("organizations").insert({ id: newOrgId, name: companyName.trim() || cleanEmail });
-            if (orgError) return { ok: false, error: orgError };
-            const { error: memberError } = await db.from("organization_members").insert({ organization_id: newOrgId, user_id: data.user.id, role: "owner", status: "active" });
-            if (memberError) return { ok: false, error: memberError };
-            return { ok: true };
-          }
-          let orgResult = await createOrgForNewUser();
-          if (!orgResult.ok) {
-            console.error("Erreur de création de l'organisation (1ère tentative)", orgResult.error);
-            orgResult = await createOrgForNewUser(); // une seconde chance, en cas de souci passager
-          }
-          if (!orgResult.ok) {
-            console.error("Erreur de création de l'organisation (2ème tentative)", orgResult.error);
+          // ensure_user_has_organization garantit qu'aucun doublon
+          // n'est jamais créé, même en cas de tentatives rapprochées
+          // (verrou côté base de données — voir
+          // migration_organisation_atomique.sql). Important : si ça
+          // échoue malgré tout, on ne laisse jamais l'inscription
+          // "réussir" silencieusement.
+          const { error: orgError } = await db.rpc("ensure_user_has_organization", {
+            target_user_id: data.user.id,
+            fallback_name: companyName.trim() || cleanEmail,
+          });
+          if (orgError) {
+            console.error("Erreur de création de l'organisation", orgError);
             setError("Ton compte a été créé, mais la mise en place de ton espace a rencontré un souci. Déconnecte-toi puis reconnecte-toi pour réessayer automatiquement — si ça persiste, contacte-nous.");
             setBusy(false);
             return;
