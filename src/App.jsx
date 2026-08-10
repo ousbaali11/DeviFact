@@ -3446,6 +3446,17 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           // migration_organisation_atomique.sql). Important : si ça
           // échoue malgré tout, on ne laisse jamais l'inscription
           // "réussir" silencieusement.
+          //
+          // S'assure d'abord que la session est bien pleinement établie
+          // — juste après signUp(), il peut y avoir un très bref
+          // instant où elle n'est pas encore attachée aux appels
+          // suivants, ce qui ferait échouer cet appel avec un 401 même
+          // si tout est par ailleurs correctement configuré.
+          for (let attempt = 0; attempt < 5; attempt++) {
+            const { data: sessionCheck } = await db.auth.getSession();
+            if (sessionCheck?.session?.access_token) break;
+            await new Promise((r) => setTimeout(r, 200));
+          }
           const { error: orgError } = await db.rpc("ensure_user_has_organization", {
             target_user_id: data.user.id,
             fallback_name: companyName.trim() || cleanEmail,
