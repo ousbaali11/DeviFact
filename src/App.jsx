@@ -1618,6 +1618,22 @@ export default function DeviFactApp() {
           console.warn(`Nouvelle tentative de réparation automatique (essai ${attempt + 1})...`);
           await new Promise((r) => setTimeout(r, 500));
         }
+        // Revérifie juste avant d'agir : si un autre appel concurrent
+        // (ex: deux onglets, ou une reconnexion rapprochée) a déjà
+        // réparé le compte entre-temps, on s'arrête là plutôt que de
+        // créer une deuxième organisation en double.
+        const { data: recheck } = await db
+          .from("organization_members")
+          .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
+          .eq("user_id", userId)
+          .eq("status", "active")
+          .order("created_at", { ascending: true });
+        if (recheck && recheck.length > 0) {
+          console.warn("Un espace existe déjà (créé entre-temps) — pas besoin d'en créer un autre.");
+          memberships = recheck;
+          healed = true;
+          break;
+        }
         // Identifiant généré ici plutôt que par la base : évite d'avoir
         // à relire la ligne juste après l'avoir créée, ce que la règle
         // de lecture bloquerait tant qu'on n'est pas encore membre de
@@ -3704,7 +3720,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                     style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
                     title="Changer d'organisation"
                   >
-                    <Building2 size={13} /> <span className="max-w-[9rem] truncate">{account.organizationName || "Organisation"}</span>
+                    <Building2 size={13} /> Organisations
                     <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
                     <ChevronDown size={12} />
                   </button>
@@ -3793,6 +3809,14 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             </>
           )}
         </div>
+        {account?.isAdmin && (
+          <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "admin" ? "white" : "rgba(255,255,255,0.65)", background: view === "admin" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Admin">
+            <Shield size={15} />
+          </button>
+        )}
+        <button onClick={() => setView("account")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "account" ? "white" : "rgba(255,255,255,0.65)", background: view === "account" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Mon compte">
+          <UserCircle size={15} />
+        </button>
         <button onClick={onLogout} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Se déconnecter">
           <LogOut size={15} />
         </button>
