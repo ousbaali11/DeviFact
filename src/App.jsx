@@ -3717,7 +3717,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                           style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
                           title="Changer d'organisation"
                         >
-                          <Building2 size={13} /> <span className="max-w-[9rem] truncate">{account.organizationName || "Organisation"}</span>
+                          <Building2 size={13} /> Organisations
                           <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
                           <ChevronDown size={12} />
                         </button>
