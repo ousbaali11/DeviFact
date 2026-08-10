@@ -3711,7 +3711,6 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             {(() => {
               const memberships = account?.memberships || [];
               const hasOwnOrg = memberships.some((m) => m.role === "owner");
-              if (memberships.length <= 1 && hasOwnOrg) return null;
               return (
                 <div className="relative">
                   <button
