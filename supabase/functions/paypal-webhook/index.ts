@@ -92,6 +92,12 @@ serve(async (req) => {
       billing_cycle: billingCycle,
       payment_status: "payé",
       paypal_subscription_id: resource.id,
+      // Vrai paiement confirmé par PayPal : retire le marqueur
+      // "activation gratuite", même si ce compte avait auparavant
+      // utilisé le bouton "Activer (0€)" — il ne doit plus jamais être
+      // redemandé de régulariser après ça (voir RegularizationScreen
+      // côté site).
+      activated_via_free_button: false,
     }).eq("id", organizationId);
   }
 

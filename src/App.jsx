@@ -1705,8 +1705,27 @@ export default function DeviFactApp() {
       setAllUsersError(error.message || "Erreur inconnue");
       return;
     }
+    // Récupère, pour chaque utilisateur, l'organisation dont il est
+    // propriétaire (celle qui porte son forfait) — requête séparée
+    // plutôt qu'une jointure complexe, plus simple à maintenir.
+    const { data: ownedOrgs, error: orgsError } = await db
+      .from("organization_members")
+      .select("user_id, organizations ( id, plan, payment_status, paid_at, expires_at )")
+      .eq("role", "owner")
+      .eq("status", "active");
+    if (orgsError) console.error("Erreur de chargement des forfaits utilisateurs", orgsError);
+    const orgByUser = {};
+    (ownedOrgs || []).forEach((row) => { orgByUser[row.user_id] = row.organizations; });
+
     setAllUsersError("");
-    setAllUsers(data || []);
+    setAllUsers((data || []).map((u) => ({
+      ...u,
+      organizationId: orgByUser[u.id]?.id || null,
+      plan: orgByUser[u.id]?.plan || "gratuit",
+      paymentStatus: orgByUser[u.id]?.payment_status || "gratuit",
+      paidAt: orgByUser[u.id]?.paid_at || null,
+      expiresAt: orgByUser[u.id]?.expires_at || null,
+    })));
   }
   useEffect(() => {
     if (view === "admin" && account?.isAdmin) loadAllUsers();
@@ -1729,6 +1748,40 @@ export default function DeviFactApp() {
       setResendingConfirmationId(null);
     }
   }
+
+  // Gestion manuelle du forfait d'un utilisateur par l'Admin — pour
+  // offrir un forfait à un proche, ou corriger une situation. Modifie
+  // directement l'organisation dont cette personne est propriétaire.
+  const [savingUserPlanId, setSavingUserPlanId] = useState(null);
+  async function adminUpdateUserOrg(organizationId, patch) {
+    if (!organizationId) { alert("Cette personne n'a pas d'organisation à modifier."); return; }
+    setSavingUserPlanId(organizationId);
+    const { error } = await db.from("organizations").update(patch).eq("id", organizationId);
+    if (error) {
+      console.error("Erreur de mise à jour du forfait par l'admin", error);
+      alert(`Impossible de mettre à jour : ${error.message || "erreur inconnue"}`);
+    } else {
+      await loadAllUsers();
+    }
+    setSavingUserPlanId(null);
+  }
+  async function adminSetUserPlan(organizationId, planId) {
+    // En changeant le forfait manuellement, on marque aussi le
+    // paiement comme actif (sinon le forfait ne donnerait accès à
+    // rien, voir hasAccess) — sauf en repassant à "gratuit".
+    await adminUpdateUserOrg(organizationId, {
+      plan: planId,
+      payment_status: planId === "gratuit" ? "gratuit" : "payé",
+      paid_at: planId === "gratuit" ? null : new Date().toISOString(),
+    });
+  }
+  async function adminSetUserPaidAt(organizationId, dateStr) {
+    await adminUpdateUserOrg(organizationId, { paid_at: dateStr ? new Date(dateStr).toISOString() : null });
+  }
+  async function adminSetUserExpiresAt(organizationId, dateStr) {
+    await adminUpdateUserOrg(organizationId, { expires_at: dateStr ? new Date(dateStr).toISOString() : null });
+  }
+
   async function updatePlanPaypalId(planId, field, value) {
     setSavingPlanSettings(true);
     const column = field === "monthly" ? "paypal_plan_id_monthly" : "paypal_plan_id_annual";
@@ -2919,6 +2972,10 @@ export default function DeviFactApp() {
           allUsers={allUsers}
           allUsersError={allUsersError}
           onRefreshUsers={loadAllUsers}
+          onSetUserPlan={adminSetUserPlan}
+          onSetUserPaidAt={adminSetUserPaidAt}
+          onSetUserExpiresAt={adminSetUserExpiresAt}
+          savingUserPlanId={savingUserPlanId}
           onResendConfirmation={resendConfirmation}
           resendingConfirmationId={resendingConfirmationId}
         />
@@ -7703,7 +7760,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + (
@@ -7789,8 +7846,9 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                 <tr style={{ background: colors.paper }}>
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Email</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Nom</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Inscrit le</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Forfait</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Payé le</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Expire le</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Confirmation</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}></th>
                 </tr>
@@ -7798,12 +7856,58 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
               <tbody>
                 {allUsers.map((u, idx) => {
                   const deadline = u.created_at ? new Date(new Date(u.created_at).getTime() + 8 * 7 * 24 * 60 * 60 * 1000) : null;
+                  const expired = u.expiresAt && new Date(u.expiresAt) < new Date();
                   return (
                     <tr key={u.id} style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
-                      <td className="px-4 py-2.5">{u.email}</td>
+                      <td className="px-4 py-2.5">
+                        {u.email}
+                        <div className="text-xs" style={{ color: colors.inkSoft }}>{u.company_name || ""}</div>
+                      </td>
                       <td className="px-4 py-2.5">{[u.first_name, u.last_name].filter(Boolean).join(" ") || <span style={{ color: colors.inkSoft }}>—</span>}</td>
-                      <td className="px-4 py-2.5">{u.company_name || <span style={{ color: colors.inkSoft }}>—</span>}</td>
-                      <td className="df-mono px-4 py-2.5 text-xs" style={{ color: colors.inkSoft }}>{u.created_at ? fr(u.created_at) : "—"}</td>
+                      <td className="px-4 py-2.5">
+                        {u.organizationId ? (
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              value={u.plan}
+                              onChange={(e) => onSetUserPlan(u.organizationId, e.target.value)}
+                              disabled={savingUserPlanId === u.organizationId}
+                              className="df-select rounded-md px-2 py-1 text-xs"
+                              style={{ border: `1px solid ${colors.line}` }}
+                            >
+                              {PLANS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                            {savingUserPlanId === u.organizationId && <Loader2 size={12} className="animate-spin" style={{ color: colors.inkSoft }} />}
+                            {u.plan !== "gratuit" && (
+                              <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: u.paymentStatus === "payé" ? `${colors.moss}18` : `${colors.brick}18`, color: u.paymentStatus === "payé" ? colors.moss : colors.brick }}>
+                                {u.paymentStatus === "payé" ? "Payé" : "Impayé"}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs" style={{ color: colors.inkSoft }}>Aucune organisation</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <input
+                          type="date"
+                          className="df-input df-mono rounded-md px-2 py-1 text-xs"
+                          style={{ border: `1px solid ${colors.line}`, width: "9.5rem" }}
+                          value={u.paidAt ? u.paidAt.slice(0, 10) : ""}
+                          disabled={!u.organizationId}
+                          onChange={(e) => onSetUserPaidAt(u.organizationId, e.target.value)}
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <input
+                          type="date"
+                          className="df-input df-mono rounded-md px-2 py-1 text-xs"
+                          style={{ border: `1px solid ${expired ? colors.brick : colors.line}`, width: "9.5rem", color: expired ? colors.brick : colors.ink }}
+                          value={u.expiresAt ? u.expiresAt.slice(0, 10) : ""}
+                          disabled={!u.organizationId}
+                          onChange={(e) => onSetUserExpiresAt(u.organizationId, e.target.value)}
+                        />
+                        {expired && <div className="text-xs font-medium" style={{ color: colors.brick }}>Expiré</div>}
+                      </td>
                       <td className="px-4 py-2.5">
                         {u.confirmed_at ? (
                           <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.moss }}><Check size={13} /> Confirmé</span>
@@ -7831,7 +7935,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                   );
                 })}
                 {allUsers.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-6 text-center text-sm" style={{ color: colors.inkSoft }}>Aucun utilisateur pour l'instant.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-6 text-center text-sm" style={{ color: colors.inkSoft }}>Aucun utilisateur pour l'instant.</td></tr>
                 )}
               </tbody>
             </table>
