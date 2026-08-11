@@ -1586,7 +1586,7 @@ export default function DeviFactApp() {
 
     let { data: memberships } = await db
       .from("organization_members")
-      .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
+      .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status, activated_via_free_button )")
       .eq("user_id", userId)
       .eq("status", "active")
       .order("created_at", { ascending: true });
@@ -1611,7 +1611,7 @@ export default function DeviFactApp() {
       } else {
         const { data: retried } = await db
           .from("organization_members")
-          .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status )")
+          .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status, activated_via_free_button )")
           .eq("user_id", userId)
           .eq("status", "active")
           .order("created_at", { ascending: true });
@@ -1635,6 +1635,20 @@ export default function DeviFactApp() {
 
     const org = membership?.organizations;
 
+    // Si ce compte a activé via le bouton "Activer (0€)" (pas un vrai
+    // paiement) et que le prix de ce forfait n'est plus à 0€
+    // aujourd'hui, il doit régulariser — sauf s'il a depuis vraiment
+    // payé (Stripe/PayPal mettent alors activated_via_free_button à
+    // false). Requête ciblée et fraîche plutôt que de dépendre de
+    // l'état "plans" déjà chargé en mémoire, qui pourrait ne pas
+    // encore l'être à ce moment précis.
+    let needsRegularization = false;
+    if (org?.activated_via_free_button && org?.plan && org.plan !== "gratuit") {
+      const { data: currentPlanRow } = await db.from("plans").select("monthly_price, annual_price").eq("id", org.plan).maybeSingle();
+      const currentPrice = org.billing_cycle === "annuel" ? currentPlanRow?.annual_price : currentPlanRow?.monthly_price;
+      if (currentPrice && Number(currentPrice) > 0) needsRegularization = true;
+    }
+
     return {
       id: userId,
       email,
@@ -1650,6 +1664,7 @@ export default function DeviFactApp() {
       plan: org?.plan || "gratuit",
       billing: org?.billing_cycle || "mensuel",
       paymentStatus: org?.payment_status || "gratuit",
+      needsRegularization,
     };
   }
   async function loadPlans() {
@@ -2017,7 +2032,12 @@ export default function DeviFactApp() {
     // .select() ajouté exprès : sans lui, une mise à jour bloquée par une
     // règle de sécurité (RLS) peut renvoyer "succès" tout en n'ayant
     // modifié aucune ligne, sans la moindre erreur — invisible sinon.
-    const { data, error } = await db.from("organizations").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé" }).eq("id", account.organizationId).select();
+    // activated_via_free_button: true — marque explicitement que ce
+    // n'est PAS un vrai paiement. Si l'admin fixe un prix réel plus
+    // tard pour ce forfait, ce compte devra régulariser (voir
+    // needsRegularization plus bas) — contrairement à un compte ayant
+    // vraiment payé via Stripe/PayPal, qui ne sera jamais affecté.
+    const { data, error } = await db.from("organizations").update({ plan: planId, billing_cycle: billingCycle, payment_status: "payé", activated_via_free_button: true }).eq("id", account.organizationId).select();
     console.log("[Activer 0€] Réponse de la base — data:", data, "error:", error);
     if (error) {
       console.error("[Activer 0€] Erreur d'activation du forfait à 0€", error);
@@ -2554,6 +2574,21 @@ export default function DeviFactApp() {
       );
     }
     return <AuthScreen initialMode={authMode} onBack={() => setPreAuthView("landing")} siteSettings={siteSettings} />;
+  }
+
+  // Le prix de son forfait est passé de 0€ à un prix réel depuis son
+  // activation gratuite — bloque l'accès jusqu'à ce qu'elle régularise
+  // (choix mensuel/annuel, paiement réel). Ne s'applique jamais à un
+  // vrai paiement déjà effectué (Stripe/PayPal), ni à l'admin lui-même.
+  if (account.needsRegularization && !account.isAdmin) {
+    return (
+      <RegularizationScreen
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        onLogout={logout}
+      />
+    );
   }
 
   const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
@@ -3334,6 +3369,57 @@ function ResetPasswordScreen({ siteSettings, onDone }) {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Affiché à la place du site normal quand le forfait d'un compte,
+// activé gratuitement via "Activer (0€)", a depuis reçu un vrai prix
+// — la personne doit régulariser (choisir mensuel/annuel, payer
+// réellement) pour continuer. Ne s'affiche jamais pour un vrai
+// paiement déjà effectué.
+function RegularizationScreen({ account, plans, siteSettings, onLogout }) {
+  const [billing, setBilling] = useState(account.billing || "mensuel");
+  const plan = plans.find((p) => p.id === account.plan);
+  const price = billing === "annuel" ? plan?.annual : plan?.monthly;
+  const paypalPlanId = billing === "annuel" ? plan?.paypalPlanIdAnnual : plan?.paypalPlanIdMonthly;
+  const stripePriceId = billing === "annuel" ? plan?.stripePriceIdAnnual : plan?.stripePriceIdMonthly;
+  const showCard = plan?.cardPaymentEnabled && !!stripePriceId;
+  const showPaypal = !!paypalPlanId && plan?.paypalPaymentEnabled;
+
+  return (
+    <div className="flex min-h-full w-full items-center justify-center px-4 py-12" style={{ background: colors.paper }}>
+      <GlobalStyle />
+      <div className="w-full max-w-md rounded-2xl p-6" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        <div className="mb-4 flex items-center gap-2" style={{ color: colors.brick }}>
+          <AlertTriangle size={20} />
+          <h1 className="df-display text-lg font-semibold">Mise à jour du tarif</h1>
+        </div>
+        <p className="mb-5 text-sm" style={{ color: colors.inkSoft }}>
+          Le forfait <strong>{plan?.name || account.plan}</strong> que tu utilises était gratuit au moment où tu l'as activé — il a depuis un vrai tarif. Pour continuer à l'utiliser, merci de régulariser ton abonnement.
+        </p>
+
+        <div className="mb-4 flex rounded-lg p-1" style={{ background: colors.paper }}>
+          <button onClick={() => setBilling("mensuel")} className="flex-1 rounded-md py-1.5 text-xs font-medium" style={{ background: billing === "mensuel" ? colors.surface : "transparent", boxShadow: billing === "mensuel" ? "0 1px 2px rgba(0,0,0,0.08)" : "none" }}>Mensuel</button>
+          <button onClick={() => setBilling("annuel")} className="flex-1 rounded-md py-1.5 text-xs font-medium" style={{ background: billing === "annuel" ? colors.surface : "transparent", boxShadow: billing === "annuel" ? "0 1px 2px rgba(0,0,0,0.08)" : "none" }}>Annuel</button>
+        </div>
+
+        <div className="mb-5 text-center">
+          <span className="df-display text-2xl font-bold">{price}€</span>
+          <span className="text-sm" style={{ color: colors.inkSoft }}> / {billing === "annuel" ? "an" : "mois"}</span>
+        </div>
+
+        {showCard || showPaypal ? (
+          <div className="flex flex-col gap-2">
+            {showCard && <StripeCheckoutButton planId={plan.id} billingCycle={billing} organizationId={account.organizationId} />}
+            {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account.organizationId} onApproved={() => window.location.reload()} />}
+          </div>
+        ) : (
+          <p className="rounded-lg py-2 text-center text-xs" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible — contacte-nous en attendant.</p>
+        )}
+
+        <button onClick={onLogout} className="mt-4 w-full text-center text-xs underline" style={{ color: colors.inkSoft }}>Se déconnecter</button>
       </div>
     </div>
   );

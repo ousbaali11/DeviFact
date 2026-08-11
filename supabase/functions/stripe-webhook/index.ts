@@ -46,6 +46,7 @@ serve(async (req) => {
           plan: planId,
           billing_cycle: billingCycle || "mensuel",
           payment_status: "payé",
+          activated_via_free_button: false,
           stripe_subscription_id: session.subscription || null,
           stripe_customer_id: session.customer || null,
         }).eq("id", organizationId);
