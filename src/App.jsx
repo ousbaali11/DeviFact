@@ -11,22 +11,76 @@ import {
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
-  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu,
+  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
 
+// Chaque couleur pointe vers une variable CSS (définie par le thème
+// actif, voir THEMES et ThemeStyleInjector) plutôt qu'une valeur figée
+// — ainsi, changer de thème depuis Admin met à jour tout le site
+// instantanément, sans devoir toucher aux centaines d'endroits qui
+// utilisent déjà "colors.xxx".
 const colors = {
-  ink: "#1B2A33",
-  inkSoft: "#4A5B63",
-  paper: "#E9EEEA",
-  surface: "#FFFFFF",
-  brass: "#B8763E",
-  brassDark: "#8F5C2E",
-  slate: "#3E5C6E",
-  moss: "#5B7A55",
-  brick: "#A6483B",
-  line: "#DAE1DC",
+  ink: "var(--df-ink, #1B2A33)",
+  inkSoft: "var(--df-ink-soft, #4A5B63)",
+  paper: "var(--df-paper, #E9EEEA)",
+  surface: "var(--df-surface, #FFFFFF)",
+  brass: "var(--df-brass, #B8763E)",
+  brassDark: "var(--df-brass-dark, #8F5C2E)",
+  slate: "var(--df-slate, #3E5C6E)",
+  moss: "var(--df-moss, #5B7A55)",
+  brick: "var(--df-brick, #A6483B)",
+  line: "var(--df-line, #DAE1DC)",
 };
+
+// Bibliothèque de thèmes — valeurs réelles utilisées par chaque
+// variable CSS ci-dessus. "classique" reprend exactement les couleurs
+// d'origine du site (rien ne change si l'admin ne touche à rien).
+const THEMES = {
+  classique: {
+    label: "Classique",
+    description: "Le style d'origine du site — encre marine et laiton.",
+    values: { ink: "#1B2A33", inkSoft: "#4A5B63", paper: "#E9EEEA", surface: "#FFFFFF", brass: "#B8763E", brassDark: "#8F5C2E", slate: "#3E5C6E", moss: "#5B7A55", brick: "#A6483B", line: "#DAE1DC" },
+  },
+  moderne: {
+    label: "Moderne",
+    description: "Épuré et contemporain — bleu ardoise et gris doux.",
+    values: { ink: "#111827", inkSoft: "#4B5563", paper: "#F1F4F8", surface: "#FFFFFF", brass: "#2563EB", brassDark: "#1D4ED8", slate: "#334155", moss: "#059669", brick: "#DC2626", line: "#E2E8F0" },
+  },
+  chantier: {
+    label: "Chantier",
+    description: "Inspiré des outils du métier — orange sécurité et béton.",
+    values: { ink: "#26241F", inkSoft: "#5C574C", paper: "#EFEBE3", surface: "#FFFFFF", brass: "#E0762A", brassDark: "#B85B1B", slate: "#4A5459", moss: "#6B8E4E", brick: "#C43D2E", line: "#E3DDCF" },
+  },
+  trousse: {
+    label: "Trousse",
+    description: "Papeterie et fournitures — bleu stylo et rouge règle.",
+    values: { ink: "#1E2A5E", inkSoft: "#4A5580", paper: "#EEF0F9", surface: "#FFFFFF", brass: "#C0392B", brassDark: "#962D21", slate: "#2E4C8A", moss: "#3F8358", brick: "#C0392B", line: "#DCE1F0" },
+  },
+  ardoise: {
+    label: "Ardoise",
+    description: "Sombre façon tableau noir/plan de chantier, à la craie.",
+    values: { ink: "#EAECEE", inkSoft: "#AEB6BE", paper: "#20262B", surface: "#262D33", brass: "#E0A868", brassDark: "#C98F4E", slate: "#7FA8C9", moss: "#8FBB7A", brick: "#D6766A", line: "#3A424A" },
+  },
+  batisseur: {
+    label: "Bâtisseur",
+    description: "Terre cuite et bois — chaleureux et artisanal.",
+    values: { ink: "#3A2A20", inkSoft: "#6B5645", paper: "#F2E9DD", surface: "#FFFDF9", brass: "#B0592E", brassDark: "#8A4322", slate: "#5C6B5C", moss: "#6E7F4C", brick: "#9C4632", line: "#E6D9C4" },
+  },
+};
+
+// Applique les variables CSS du thème actif directement sur la page —
+// depuis un seul endroit central (voir le useEffect dédié plus bas
+// dans le composant principal), ça couvre automatiquement tous les
+// écrans (chargement, connexion, tableau de bord...) sans avoir à
+// transmettre le thème à chacun des nombreux composants du site.
+function applyTheme(themeId) {
+  const theme = THEMES[themeId] || THEMES.classique;
+  Object.entries(theme.values).forEach(([k, v]) => {
+    const cssVarName = `--df-${k.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
+    document.documentElement.style.setProperty(cssVarName, v);
+  });
+}
 
 const TVA_RATES = [20, 10, 5.5, 2.1, 0];
 const UNITS = ["forfait", "heure", "jour", "m²", "m³", "ml", "pièce", "kg", "lot"];
@@ -1567,7 +1621,7 @@ export default function DeviFactApp() {
   const [splitNotice, setSplitNotice] = useState(null);
   const [savingPlanSettings, setSavingPlanSettings] = useState(false);
   const [preAuthView, setPreAuthView] = useState("landing"); // landing | auth
-  const [siteSettings, setSiteSettings] = useState({ name: "DeviFact", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr" });
+  const [siteSettings, setSiteSettings] = useState({ name: "DeviFact", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" });
   const [savingSiteSettings, setSavingSiteSettings] = useState(false);
   const [authMode, setAuthMode] = useState("signup");
   // Le titre affiché dans l'onglet du navigateur vient du fichier
@@ -1577,6 +1631,12 @@ export default function DeviFactApp() {
   useEffect(() => {
     if (siteSettings?.name) document.title = siteSettings.name;
   }, [siteSettings?.name]);
+  // Applique le thème choisi dans Admin → Apparence du site — à
+  // chaque changement, et dès le chargement initial (thème "classique"
+  // par défaut tant que les vrais paramètres n'ont pas encore chargé).
+  useEffect(() => {
+    applyTheme(siteSettings?.theme || "classique");
+  }, [siteSettings?.theme]);
 
   const [plans, setPlans] = useState(PLANS);
 
@@ -1829,11 +1889,12 @@ export default function DeviFactApp() {
       pdfBlockColor: data.pdf_block_color || "#F1F0EA",
       visibleServices: data.visible_services || null,
       contactEmail: data.contact_email || "contact@chantiflow.fr",
+      theme: data.theme || "classique",
     });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -7776,6 +7837,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
     { id: "apercu", label: "Vue d'ensemble", icon: LayoutDashboard },
     { id: "identite", label: "Identité du site", icon: Building2 },
     { id: "services", label: "Services", icon: Menu },
+    { id: "apparence", label: "Apparence du site", icon: Palette },
     { id: "utilisateurs", label: "Utilisateurs", icon: Users },
     { id: "forfaits", label: "Forfaits & tarifs", icon: CreditCard },
     { id: "paiement", label: "Paiement (PayPal)", icon: KeyRound },
@@ -7822,6 +7884,42 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
 
       {tab === "services" && (
         <ServicesVisibilitySettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
+      )}
+
+      {tab === "apparence" && (
+        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Apparence du site</span>
+            {savingSiteSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+          </div>
+          <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+            Choisis un thème de couleurs pour tout le site — le changement s'applique immédiatement pour tous les visiteurs.
+          </p>
+          <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Object.entries(THEMES).map(([id, theme]) => (
+              <button
+                key={id}
+                onClick={() => onUpdateSiteSettings({ theme: id })}
+                className="overflow-hidden rounded-xl text-left transition"
+                style={{ border: `2px solid ${siteSettings.theme === id ? theme.values.brass : colors.line}`, background: theme.values.surface }}
+              >
+                <div className="flex h-16" style={{ background: theme.values.paper }}>
+                  <div className="flex-1" style={{ background: theme.values.ink }} />
+                  <div className="flex-1" style={{ background: theme.values.brass }} />
+                  <div className="flex-1" style={{ background: theme.values.moss }} />
+                  <div className="flex-1" style={{ background: theme.values.brick }} />
+                </div>
+                <div className="p-3">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: theme.values.ink }}>
+                    {theme.label}
+                    {siteSettings.theme === id && <Check size={14} style={{ color: theme.values.brass }} />}
+                  </div>
+                  <p className="mt-0.5 text-xs" style={{ color: theme.values.inkSoft }}>{theme.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {tab === "utilisateurs" && (
