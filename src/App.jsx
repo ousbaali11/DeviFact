@@ -67,6 +67,42 @@ const THEMES = {
     description: "Terre cuite et bois — chaleureux et artisanal.",
     values: { ink: "#3A2A20", inkSoft: "#6B5645", paper: "#F2E9DD", surface: "#FFFDF9", brass: "#B0592E", brassDark: "#8A4322", slate: "#5C6B5C", moss: "#6E7F4C", brick: "#9C4632", line: "#E6D9C4" },
   },
+  plan_technique: {
+    label: "Plan technique",
+    description: "Comme un vrai plan de chantier — grille bleu nuit dessinée, façon plan d'architecte.",
+    values: { ink: "#E8EEF5", inkSoft: "#A9BAD0", paper: "#0F2A4A", surface: "#15335A", brass: "#7FC4E0", brassDark: "#5FA8C6", slate: "#7FC4E0", moss: "#7FD4B0", brick: "#E89494", line: "#264A73" },
+    pattern: "repeating-linear-gradient(0deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 32px), repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 32px)",
+  },
+  pastel: {
+    label: "Pastel",
+    description: "Doux et lumineux — menthe, lavande et corail léger.",
+    values: { ink: "#3D3852", inkSoft: "#79738F", paper: "#F7F3FB", surface: "#FFFFFF", brass: "#B79CE0", brassDark: "#9A7BC7", slate: "#8FA9D6", moss: "#8FCFB0", brick: "#F0A6A0", line: "#EAE1F5" },
+  },
+  sable: {
+    label: "Sable",
+    description: "Chaud et minéral — beige désert et terracotta clair.",
+    values: { ink: "#4A3E2E", inkSoft: "#7A6C58", paper: "#F5EDE0", surface: "#FFFBF4", brass: "#D19558", brassDark: "#AC7640", slate: "#7C8A7A", moss: "#8CA06A", brick: "#C4703F", line: "#EBDFCB" },
+  },
+  ocean: {
+    label: "Océan",
+    description: "Frais et clair — bleu lagon et blanc écume.",
+    values: { ink: "#0F2E38", inkSoft: "#4C7280", paper: "#EAF5F7", surface: "#FFFFFF", brass: "#2A9DB0", brassDark: "#1F7A8A", slate: "#3E6E85", moss: "#3FA07E", brick: "#D9705C", line: "#D3EBEE" },
+  },
+  foret: {
+    label: "Forêt",
+    description: "Naturel et apaisant — verts profonds et mousse.",
+    values: { ink: "#25321F", inkSoft: "#57654E", paper: "#EEF2E7", surface: "#FBFCF8", brass: "#7A9A4C", brassDark: "#5F7A3A", slate: "#4A6350", moss: "#5F8544", brick: "#B5583F", line: "#DDE6D2" },
+  },
+  minimal: {
+    label: "Minimal",
+    description: "Noir, blanc et gris — sobre, une seule touche de couleur.",
+    values: { ink: "#18181B", inkSoft: "#71717A", paper: "#F4F4F5", surface: "#FFFFFF", brass: "#18181B", brassDark: "#000000", slate: "#3F3F46", moss: "#16A34A", brick: "#DC2626", line: "#E4E4E7" },
+  },
+  vintage: {
+    label: "Vintage",
+    description: "Papier ancien et sépia — comme un vieux carnet de chantier.",
+    values: { ink: "#3E2F22", inkSoft: "#6E5A44", paper: "#EBE0C8", surface: "#F7F0DC", brass: "#8C6239", brassDark: "#6B4A29", slate: "#6B5D45", moss: "#77794A", brick: "#9E5236", line: "#DCCEA8" },
+  },
 };
 
 // Applique les variables CSS du thème actif directement sur la page —
@@ -80,6 +116,7 @@ function applyTheme(themeId) {
     const cssVarName = `--df-${k.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
     document.documentElement.style.setProperty(cssVarName, v);
   });
+  document.documentElement.style.setProperty("--df-bg-pattern", theme.pattern || "none");
 }
 
 const TVA_RATES = [20, 10, 5.5, 2.1, 0];
@@ -1281,7 +1318,7 @@ function computeTotals(doc) {
 const GlobalStyle = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-    .df-root { font-family: 'Inter', sans-serif; }
+    .df-root { font-family: 'Inter', sans-serif; background-image: var(--df-bg-pattern, none); background-attachment: fixed; }
     .df-display { font-family: 'Space Grotesk', sans-serif; }
     .df-mono { font-family: 'IBM Plex Mono', monospace; }
     .df-input:focus, .df-select:focus, .df-textarea:focus { outline: none; border-color: ${colors.brass} !important; box-shadow: 0 0 0 3px rgba(184,118,62,0.15); }
