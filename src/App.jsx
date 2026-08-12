@@ -1342,7 +1342,10 @@ function computeTotals(doc) {
 const GlobalStyle = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-    .df-root { font-family: 'Inter', sans-serif; background-image: var(--df-bg-pattern, none); background-attachment: fixed; }
+    .df-root { font-family: 'Inter', sans-serif; position: relative; }
+    .df-root::before { content: ''; position: fixed; inset: 0; background-image: var(--df-bg-pattern, none); pointer-events: none; z-index: 0; }
+    .df-root > * { position: relative; z-index: 1; }
+    button, [role="button"], a, .df-select, select, summary { cursor: pointer; }
     .df-display { font-family: 'Space Grotesk', sans-serif; }
     .df-mono { font-family: 'IBM Plex Mono', monospace; }
     .df-input:focus, .df-select:focus, .df-textarea:focus { outline: none; border-color: ${colors.brass} !important; box-shadow: 0 0 0 3px rgba(184,118,62,0.15); }
