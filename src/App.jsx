@@ -107,25 +107,25 @@ const THEMES = {
     label: "Stylos",
     description: "Des stylos et crayons dessinés en fond, encre bleu nuit.",
     values: { ink: "#1E2530", inkSoft: "#565F70", paper: "#EEF1F6", surface: "#FFFFFF", brass: "#3B5BA5", brassDark: "#2C4480", slate: "#455A80", moss: "#4C8568", brick: "#B24A3E", line: "#DCE2ED" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2280%22%20height%3D%2280%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.5%22%20fill%3D%22none%22%20opacity%3D%220.10%22%3E%3Cline%20x1%3D%2210%22%20y1%3D%2270%22%20x2%3D%2230%22%20y2%3D%2210%22/%3E%3Cpolygon%20points%3D%2228%2C16%2032%2C16%2030%2C10%22%20fill%3D%22%23000000%22/%3E%3Cline%20x1%3D%2255%22%20y1%3D%2275%22%20x2%3D%2270%22%20y2%3D%2235%22/%3E%3Cpolygon%20points%3D%2268%2C40%2072%2C40%2070%2C35%22%20fill%3D%22%23000000%22/%3E%3C/g%3E%3C/svg%3E")`,
+    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2280%22%20height%3D%2280%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.5%22%20fill%3D%22none%22%20opacity%3D%220.18%22%3E%3Cline%20x1%3D%2210%22%20y1%3D%2270%22%20x2%3D%2230%22%20y2%3D%2210%22/%3E%3Cpolygon%20points%3D%2228%2C16%2032%2C16%2030%2C10%22%20fill%3D%22%23000000%22/%3E%3Cline%20x1%3D%2255%22%20y1%3D%2275%22%20x2%3D%2270%22%20y2%3D%2235%22/%3E%3Cpolygon%20points%3D%2268%2C40%2072%2C40%2070%2C35%22%20fill%3D%22%23000000%22/%3E%3C/g%3E%3C/svg%3E")`,
   },
   equerre: {
     label: "Équerre & règle",
     description: "Équerre et graduations de règle dessinées — précis et technique.",
     values: { ink: "#20262B", inkSoft: "#576068", paper: "#EEF0F1", surface: "#FFFFFF", brass: "#4A7A8C", brassDark: "#365D6C", slate: "#3E5C6E", moss: "#5B8A6A", brick: "#B0503F", line: "#DEE3E5" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2290%22%20height%3D%2290%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.3%22%20fill%3D%22none%22%20opacity%3D%220.09%22%3E%3Cpolygon%20points%3D%2210%2C70%2010%2C20%2060%2C70%22/%3E%3Cline%20x1%3D%2215%22%20y1%3D%2220%22%20x2%3D%2215%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2220%22%20x2%3D%2220%22%20y2%3D%2226%22/%3E%3Cline%20x1%3D%2225%22%20y1%3D%2220%22%20x2%3D%2225%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2210%22%20x2%3D%2270%22%20y2%3D%2280%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2220%22%20x2%3D%2276%22%20y2%3D%2220%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2235%22%20x2%3D%2274%22%20y2%3D%2235%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2250%22%20x2%3D%2276%22%20y2%3D%2250%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2265%22%20x2%3D%2274%22%20y2%3D%2265%22/%3E%3C/g%3E%3C/svg%3E")`,
+    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2290%22%20height%3D%2290%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.3%22%20fill%3D%22none%22%20opacity%3D%220.16%22%3E%3Cpolygon%20points%3D%2210%2C70%2010%2C20%2060%2C70%22/%3E%3Cline%20x1%3D%2215%22%20y1%3D%2220%22%20x2%3D%2215%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2220%22%20x2%3D%2220%22%20y2%3D%2226%22/%3E%3Cline%20x1%3D%2225%22%20y1%3D%2220%22%20x2%3D%2225%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2210%22%20x2%3D%2270%22%20y2%3D%2280%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2220%22%20x2%3D%2276%22%20y2%3D%2220%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2235%22%20x2%3D%2274%22%20y2%3D%2235%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2250%22%20x2%3D%2276%22%20y2%3D%2250%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2265%22%20x2%3D%2274%22%20y2%3D%2265%22/%3E%3C/g%3E%3C/svg%3E")`,
   },
   compas: {
     label: "Compas",
     description: "Un compas de traçage dessiné en fond — précision d'architecte.",
     values: { ink: "#242030", inkSoft: "#615C74", paper: "#F0EEF5", surface: "#FFFFFF", brass: "#6B4FA0", brassDark: "#523B7C", slate: "#4F4570", moss: "#5B8A6A", brick: "#B0503F", line: "#E1DEEC" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2290%22%20height%3D%2290%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.4%22%20fill%3D%22none%22%20opacity%3D%220.10%22%3E%3Ccircle%20cx%3D%2245%22%20cy%3D%2265%22%20r%3D%222%22%20fill%3D%22%23000000%22/%3E%3Cline%20x1%3D%2245%22%20y1%3D%2265%22%20x2%3D%2220%22%20y2%3D%2215%22/%3E%3Cline%20x1%3D%2245%22%20y1%3D%2265%22%20x2%3D%2265%22%20y2%3D%2220%22/%3E%3Ccircle%20cx%3D%2245%22%20cy%3D%2265%22%20r%3D%2222%22%20stroke-dasharray%3D%222%2C3%22/%3E%3C/g%3E%3C/svg%3E")`,
+    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2290%22%20height%3D%2290%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.4%22%20fill%3D%22none%22%20opacity%3D%220.18%22%3E%3Ccircle%20cx%3D%2245%22%20cy%3D%2265%22%20r%3D%222%22%20fill%3D%22%23000000%22/%3E%3Cline%20x1%3D%2245%22%20y1%3D%2265%22%20x2%3D%2220%22%20y2%3D%2215%22/%3E%3Cline%20x1%3D%2245%22%20y1%3D%2265%22%20x2%3D%2265%22%20y2%3D%2220%22/%3E%3Ccircle%20cx%3D%2245%22%20cy%3D%2265%22%20r%3D%2222%22%20stroke-dasharray%3D%222%2C3%22/%3E%3C/g%3E%3C/svg%3E")`,
   },
   bureau: {
     label: "Bureau",
     description: "Petites feuilles de document dessinées en fond — administratif et propre.",
     values: { ink: "#2C2620", inkSoft: "#665C4E", paper: "#F1ECE2", surface: "#FFFFFF", brass: "#A07840", brassDark: "#7C5C2E", slate: "#5C6B5C", moss: "#6E7F4C", brick: "#A6483B", line: "#E5DDCC" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2270%22%20height%3D%2270%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.3%22%20fill%3D%22none%22%20opacity%3D%220.09%22%3E%3Cpath%20d%3D%22M15%2C10%20L40%2C10%20L50%2C20%20L50%2C60%20L15%2C60%20Z%22/%3E%3Cpath%20d%3D%22M40%2C10%20L40%2C20%20L50%2C20%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2230%22%20x2%3D%2245%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2238%22%20x2%3D%2245%22%20y2%3D%2238%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2246%22%20x2%3D%2238%22%20y2%3D%2246%22/%3E%3C/g%3E%3C/svg%3E")`,
+    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2270%22%20height%3D%2270%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.3%22%20fill%3D%22none%22%20opacity%3D%220.16%22%3E%3Cpath%20d%3D%22M15%2C10%20L40%2C10%20L50%2C20%20L50%2C60%20L15%2C60%20Z%22/%3E%3Cpath%20d%3D%22M40%2C10%20L40%2C20%20L50%2C20%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2230%22%20x2%3D%2245%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2238%22%20x2%3D%2245%22%20y2%3D%2238%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2246%22%20x2%3D%2238%22%20y2%3D%2246%22/%3E%3C/g%3E%3C/svg%3E")`,
   },
 };
 
@@ -1342,9 +1342,7 @@ function computeTotals(doc) {
 const GlobalStyle = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-    .df-root { font-family: 'Inter', sans-serif; position: relative; }
-    .df-root::before { content: ''; position: fixed; inset: 0; background-image: var(--df-bg-pattern, none); pointer-events: none; z-index: 0; }
-    .df-root > * { position: relative; z-index: 1; }
+    .df-root { font-family: 'Inter', sans-serif; background-image: var(--df-bg-pattern, none); }
     button, [role="button"], a, .df-select, select, summary { cursor: pointer; }
     .df-display { font-family: 'Space Grotesk', sans-serif; }
     .df-mono { font-family: 'IBM Plex Mono', monospace; }
@@ -2949,7 +2947,7 @@ export default function DeviFactApp() {
   if (view === "revision-sector") {
     const countryInfo = getRevisionCountryInfo(revisionCountry);
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
@@ -2996,7 +2994,7 @@ export default function DeviFactApp() {
 
   if (view === "clients") {
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} />
@@ -3006,7 +3004,7 @@ export default function DeviFactApp() {
 
   if (view === "company") {
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} />
@@ -3016,7 +3014,7 @@ export default function DeviFactApp() {
 
   if (view === "team") {
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         <TeamView account={account} />
@@ -3026,7 +3024,7 @@ export default function DeviFactApp() {
 
   if (view === "api") {
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         <ApiView account={account} />
@@ -3036,7 +3034,7 @@ export default function DeviFactApp() {
 
   if (view === "account") {
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         <AccountView account={account} />
@@ -3046,7 +3044,7 @@ export default function DeviFactApp() {
 
   if (view === "prestations") {
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         {hasAccess(account, "pro") ? (
@@ -3060,7 +3058,7 @@ export default function DeviFactApp() {
 
   if (view === "pricing") {
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         <PricingView
@@ -3078,7 +3076,7 @@ export default function DeviFactApp() {
 
   if (view === "admin" && account?.isAdmin) {
     return (
-      <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         <AdminView
@@ -3116,7 +3114,7 @@ export default function DeviFactApp() {
   }
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <TopNav {...navProps} />
 
@@ -3332,7 +3330,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
   ];
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
 
       <div className="relative w-full overflow-hidden py-2.5" style={{ background: colors.ink }}>
@@ -3512,7 +3510,7 @@ function ResetPasswordScreen({ siteSettings, onDone }) {
   }
 
   return (
-    <div className="df-root flex min-h-full w-full items-center justify-center px-4 py-16" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root flex min-h-full w-full items-center justify-center px-4 py-16" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="w-full max-w-sm">
         <div className="mb-6 flex items-center justify-center gap-3">
@@ -3793,7 +3791,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   }
 
   return (
-    <div className="df-root flex min-h-full w-full items-center justify-center px-4 py-16" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root flex min-h-full w-full items-center justify-center px-4 py-16" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="w-full max-w-sm">
         {onBack && (
@@ -4555,7 +4553,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   }
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
@@ -5045,7 +5043,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   }
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
@@ -5377,7 +5375,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
   }
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
@@ -5696,7 +5694,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
   }
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
@@ -5989,7 +5987,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
   }
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
@@ -6238,7 +6236,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
   }
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
@@ -6521,7 +6519,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
   }
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
@@ -8765,7 +8763,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
   const statuses = localDoc.type === "devis" ? DEVIS_STATUSES : localDoc.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
 
   return (
-    <div className="df-root min-h-full w-full" style={{ background: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
 
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
