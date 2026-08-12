@@ -1967,14 +1967,13 @@ export default function DeviFactApp() {
       visibleServices: data.visible_services || null,
       contactEmail: data.contact_email || "contact@chantiflow.fr",
       theme: data.theme || "classique",
-      desktopAppUrlWindows: data.desktop_app_url_windows || "",
-      desktopAppUrlMac: data.desktop_app_url_mac || "",
+      desktopAppUrl: data.desktop_app_url || "",
       desktopAppEnabled: data.desktop_app_enabled || false,
     });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrl: "desktop_app_url", desktopAppEnabled: "desktop_app_enabled" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -3936,7 +3935,6 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
   const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "clients", label: "Clients", icon: Users },
@@ -4095,34 +4093,10 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             </>
           )}
         </div>
-        {siteSettings?.desktopAppEnabled && (siteSettings?.desktopAppUrlWindows || siteSettings?.desktopAppUrlMac) && (
-          <div className="relative">
-            <button
-              onClick={() => setDesktopMenuOpen((v) => !v)}
-              className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium"
-              style={{ color: "rgba(255,255,255,0.65)" }}
-              title="Télécharger le logiciel de bureau"
-            >
-              <Monitor size={15} />
-            </button>
-            {desktopMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setDesktopMenuOpen(false)} />
-                <div className="absolute right-0 top-full z-20 mt-1 w-52 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                  {siteSettings.desktopAppUrlWindows && (
-                    <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: colors.ink }}>
-                      <Monitor size={15} /> Version Windows
-                    </a>
-                  )}
-                  {siteSettings.desktopAppUrlMac && (
-                    <a href={siteSettings.desktopAppUrlMac} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: colors.ink }}>
-                      <Monitor size={15} /> Version Mac
-                    </a>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+        {siteSettings?.desktopAppEnabled && siteSettings?.desktopAppUrl && (
+          <a href={siteSettings.desktopAppUrl} download className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Télécharger le logiciel de bureau">
+            <Monitor size={15} />
+          </a>
         )}
         {account?.isAdmin && (
           <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "admin" ? "white" : "rgba(255,255,255,0.65)", background: view === "admin" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Admin">
@@ -7936,94 +7910,6 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
-// Bloc pliable réutilisable pour Admin — replié par défaut, pour ne
-// pas surcharger la page. Un simple clic sur l'en-tête déplie/replie.
-function CollapsibleSection({ title, subtitle, icon: Icon, defaultOpen = false, children }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
-        <span className="flex items-center gap-2">
-          {Icon && <Icon size={15} style={{ color: colors.brassDark }} />}
-          <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>{title}</span>
-          {subtitle && <span className="text-xs" style={{ color: colors.inkSoft }}>— {subtitle}</span>}
-        </span>
-        <ChevronDown size={16} style={{ color: colors.inkSoft, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-      </button>
-      {open && <div className="border-t" style={{ borderColor: colors.line }}>{children}</div>}
-    </div>
-  );
-}
-
-// Champs Windows/Mac avec brouillon local — rien n'est envoyé à la
-// base tant que "Enregistrer" n'est pas cliqué, contrairement au
-// reste d'Admin qui sauvegarde au fil de l'eau.
-function DesktopAppSettings({ siteSettings, saving, onSave }) {
-  const [draftWindows, setDraftWindows] = useState(siteSettings.desktopAppUrlWindows || "");
-  const [draftMac, setDraftMac] = useState(siteSettings.desktopAppUrlMac || "");
-  const [dirty, setDirty] = useState(false);
-
-  useEffect(() => {
-    setDraftWindows(siteSettings.desktopAppUrlWindows || "");
-    setDraftMac(siteSettings.desktopAppUrlMac || "");
-    setDirty(false);
-  }, [siteSettings.desktopAppUrlWindows, siteSettings.desktopAppUrlMac]);
-
-  function handleSave() {
-    onSave({ desktopAppUrlWindows: draftWindows, desktopAppUrlMac: draftMac });
-    setDirty(false);
-  }
-
-  return (
-    <div className="space-y-3 p-4">
-      <p className="text-xs" style={{ color: colors.inkSoft }}>
-        Une fois les fichiers d'installation uploadés (voir le guide), colle leurs adresses ici. Le bouton de téléchargement (icône écran, à côté d'Admin) n'affiche que les versions renseignées, et seulement si "Affiché" est activé ci-dessous.
-      </p>
-      <div>
-        <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Adresse du fichier Windows (.exe)</label>
-        <input
-          type="url"
-          className="df-input w-full max-w-lg rounded-md px-3 py-2 text-sm"
-          style={{ border: `1px solid ${colors.line}` }}
-          placeholder="https://github.com/.../Chantiflow.Setup.exe"
-          value={draftWindows}
-          onChange={(e) => { setDraftWindows(e.target.value); setDirty(true); }}
-        />
-      </div>
-      <div>
-        <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Adresse du fichier Mac (.dmg)</label>
-        <input
-          type="url"
-          className="df-input w-full max-w-lg rounded-md px-3 py-2 text-sm"
-          style={{ border: `1px solid ${colors.line}` }}
-          placeholder="https://github.com/.../Chantiflow.dmg"
-          value={draftMac}
-          onChange={(e) => { setDraftMac(e.target.value); setDirty(true); }}
-        />
-      </div>
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => onSave({ desktopAppEnabled: !siteSettings.desktopAppEnabled })}
-          style={{ color: siteSettings.desktopAppEnabled ? colors.moss : colors.line }}
-        >
-          {siteSettings.desktopAppEnabled ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
-        </button>
-        <span className="text-sm font-medium" style={{ color: siteSettings.desktopAppEnabled ? colors.moss : colors.inkSoft }}>
-          {siteSettings.desktopAppEnabled ? "Affiché aux utilisateurs" : "Masqué"}
-        </span>
-        <button
-          onClick={handleSave}
-          disabled={!dirty || saving}
-          className="ml-auto flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium text-white"
-          style={{ background: dirty ? colors.brassDark : colors.line, opacity: saving ? 0.7 : 1 }}
-        >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Enregistrer
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
@@ -8090,41 +7976,74 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
       )}
 
       {tab === "apparence" && (
-        <div className="space-y-3">
-          <CollapsibleSection title="Apparence du site" subtitle={THEMES[siteSettings.theme]?.label} icon={Palette}>
-            <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-              Choisis un thème de couleurs pour tout le site — le changement s'applique immédiatement pour tous les visiteurs.
-            </p>
-            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              {Object.entries(THEMES).map(([id, theme]) => (
-                <button
-                  key={id}
-                  onClick={() => onUpdateSiteSettings({ theme: id })}
-                  className="overflow-hidden rounded-xl text-left transition"
-                  style={{ border: `2px solid ${siteSettings.theme === id ? theme.values.brass : colors.line}`, background: theme.values.surface }}
-                >
-                  <div className="flex h-16" style={{ background: theme.values.paper }}>
-                    <div className="flex-1" style={{ background: theme.values.ink }} />
-                    <div className="flex-1" style={{ background: theme.values.brass }} />
-                    <div className="flex-1" style={{ background: theme.values.moss }} />
-                    <div className="flex-1" style={{ background: theme.values.brick }} />
+        <Fragment>
+        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Apparence du site</span>
+            {savingSiteSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+          </div>
+          <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+            Choisis un thème de couleurs pour tout le site — le changement s'applique immédiatement pour tous les visiteurs.
+          </p>
+          <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Object.entries(THEMES).map(([id, theme]) => (
+              <button
+                key={id}
+                onClick={() => onUpdateSiteSettings({ theme: id })}
+                className="overflow-hidden rounded-xl text-left transition"
+                style={{ border: `2px solid ${siteSettings.theme === id ? theme.values.brass : colors.line}`, background: theme.values.surface }}
+              >
+                <div className="flex h-16" style={{ background: theme.values.paper }}>
+                  <div className="flex-1" style={{ background: theme.values.ink }} />
+                  <div className="flex-1" style={{ background: theme.values.brass }} />
+                  <div className="flex-1" style={{ background: theme.values.moss }} />
+                  <div className="flex-1" style={{ background: theme.values.brick }} />
+                </div>
+                <div className="p-3">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: theme.values.ink }}>
+                    {theme.label}
+                    {siteSettings.theme === id && <Check size={14} style={{ color: theme.values.brass }} />}
                   </div>
-                  <div className="p-3">
-                    <div className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: theme.values.ink }}>
-                      {theme.label}
-                      {siteSettings.theme === id && <Check size={14} style={{ color: theme.values.brass }} />}
-                    </div>
-                    <p className="mt-0.5 text-xs" style={{ color: theme.values.inkSoft }}>{theme.description}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="Logiciel de bureau" subtitle={siteSettings.desktopAppEnabled ? "Affiché" : "Masqué"} icon={Monitor}>
-            <DesktopAppSettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
-          </CollapsibleSection>
+                  <p className="mt-0.5 text-xs" style={{ color: theme.values.inkSoft }}>{theme.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
+
+        <div className="mt-4 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Logiciel de bureau</span>
+          </div>
+          <div className="space-y-3 p-4">
+            <p className="text-xs" style={{ color: colors.inkSoft }}>
+              Une fois le fichier d'installation (.exe) uploadé sur Supabase → Storage → bucket "downloads", colle son adresse ici. Le bouton de téléchargement (icône écran, à côté d'Admin) n'apparaît aux utilisateurs que si c'est activé ET qu'une adresse est renseignée.
+            </p>
+            <div>
+              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Adresse du fichier d'installation</label>
+              <input
+                type="url"
+                className="df-input w-full max-w-lg rounded-md px-3 py-2 text-sm"
+                style={{ border: `1px solid ${colors.line}` }}
+                placeholder="https://....supabase.co/storage/v1/object/public/downloads/Chantiflow-Setup.exe"
+                defaultValue={siteSettings.desktopAppUrl}
+                onBlur={(e) => onUpdateSiteSettings({ desktopAppUrl: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onUpdateSiteSettings({ desktopAppEnabled: !siteSettings.desktopAppEnabled })}
+                style={{ color: siteSettings.desktopAppEnabled ? colors.moss : colors.line }}
+              >
+                {siteSettings.desktopAppEnabled ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+              </button>
+              <span className="text-sm font-medium" style={{ color: siteSettings.desktopAppEnabled ? colors.moss : colors.inkSoft }}>
+                {siteSettings.desktopAppEnabled ? "Affiché aux utilisateurs" : "Masqué"}
+              </span>
+            </div>
+          </div>
+        </div>
+        </Fragment>
       )}
 
       {tab === "utilisateurs" && (
@@ -8339,7 +8258,11 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
 
       {tab === "paiement" && (
         <div className="space-y-4">
-          <CollapsibleSection title="Paiement — identifiants PayPal" icon={CreditCard}>
+          <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+              <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Paiement — identifiants PayPal</span>
+              {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+            </div>
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
               Colle ici l'identifiant du plan créé côté PayPal pour chaque forfait — obligatoire pour que le bouton d'abonnement fonctionne. Le prix facturé est celui défini dans PayPal, pas celui de l'onglet "Forfaits & tarifs".
             </p>
@@ -8360,9 +8283,13 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                 </div>
               </div>
             ))}
-          </CollapsibleSection>
+          </div>
 
-          <CollapsibleSection title="Paiement — carte bancaire (Stripe)" icon={CreditCard}>
+          <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
+              <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Paiement — carte bancaire (Stripe)</span>
+              {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+            </div>
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
               Colle ici l'identifiant de prix Stripe ("price_...") créé pour chaque forfait — le bouton "Payer par carte" n'apparaît que si un identifiant est renseigné ET que l'affichage est activé ci-dessous.
             </p>
@@ -8383,7 +8310,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                 </div>
               </div>
             ))}
-          </CollapsibleSection>
+          </div>
         </div>
       )}
 
