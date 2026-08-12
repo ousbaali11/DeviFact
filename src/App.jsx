@@ -103,6 +103,30 @@ const THEMES = {
     description: "Papier ancien et sépia — comme un vieux carnet de chantier.",
     values: { ink: "#3E2F22", inkSoft: "#6E5A44", paper: "#EBE0C8", surface: "#F7F0DC", brass: "#8C6239", brassDark: "#6B4A29", slate: "#6B5D45", moss: "#77794A", brick: "#9E5236", line: "#DCCEA8" },
   },
+  stylos: {
+    label: "Stylos",
+    description: "Des stylos et crayons dessinés en fond, encre bleu nuit.",
+    values: { ink: "#1E2530", inkSoft: "#565F70", paper: "#EEF1F6", surface: "#FFFFFF", brass: "#3B5BA5", brassDark: "#2C4480", slate: "#455A80", moss: "#4C8568", brick: "#B24A3E", line: "#DCE2ED" },
+    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2280%22%20height%3D%2280%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.5%22%20fill%3D%22none%22%20opacity%3D%220.10%22%3E%3Cline%20x1%3D%2210%22%20y1%3D%2270%22%20x2%3D%2230%22%20y2%3D%2210%22/%3E%3Cpolygon%20points%3D%2228%2C16%2032%2C16%2030%2C10%22%20fill%3D%22%23000000%22/%3E%3Cline%20x1%3D%2255%22%20y1%3D%2275%22%20x2%3D%2270%22%20y2%3D%2235%22/%3E%3Cpolygon%20points%3D%2268%2C40%2072%2C40%2070%2C35%22%20fill%3D%22%23000000%22/%3E%3C/g%3E%3C/svg%3E")`,
+  },
+  equerre: {
+    label: "Équerre & règle",
+    description: "Équerre et graduations de règle dessinées — précis et technique.",
+    values: { ink: "#20262B", inkSoft: "#576068", paper: "#EEF0F1", surface: "#FFFFFF", brass: "#4A7A8C", brassDark: "#365D6C", slate: "#3E5C6E", moss: "#5B8A6A", brick: "#B0503F", line: "#DEE3E5" },
+    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2290%22%20height%3D%2290%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.3%22%20fill%3D%22none%22%20opacity%3D%220.09%22%3E%3Cpolygon%20points%3D%2210%2C70%2010%2C20%2060%2C70%22/%3E%3Cline%20x1%3D%2215%22%20y1%3D%2220%22%20x2%3D%2215%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2220%22%20x2%3D%2220%22%20y2%3D%2226%22/%3E%3Cline%20x1%3D%2225%22%20y1%3D%2220%22%20x2%3D%2225%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2210%22%20x2%3D%2270%22%20y2%3D%2280%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2220%22%20x2%3D%2276%22%20y2%3D%2220%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2235%22%20x2%3D%2274%22%20y2%3D%2235%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2250%22%20x2%3D%2276%22%20y2%3D%2250%22/%3E%3Cline%20x1%3D%2270%22%20y1%3D%2265%22%20x2%3D%2274%22%20y2%3D%2265%22/%3E%3C/g%3E%3C/svg%3E")`,
+  },
+  compas: {
+    label: "Compas",
+    description: "Un compas de traçage dessiné en fond — précision d'architecte.",
+    values: { ink: "#242030", inkSoft: "#615C74", paper: "#F0EEF5", surface: "#FFFFFF", brass: "#6B4FA0", brassDark: "#523B7C", slate: "#4F4570", moss: "#5B8A6A", brick: "#B0503F", line: "#E1DEEC" },
+    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2290%22%20height%3D%2290%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.4%22%20fill%3D%22none%22%20opacity%3D%220.10%22%3E%3Ccircle%20cx%3D%2245%22%20cy%3D%2265%22%20r%3D%222%22%20fill%3D%22%23000000%22/%3E%3Cline%20x1%3D%2245%22%20y1%3D%2265%22%20x2%3D%2220%22%20y2%3D%2215%22/%3E%3Cline%20x1%3D%2245%22%20y1%3D%2265%22%20x2%3D%2265%22%20y2%3D%2220%22/%3E%3Ccircle%20cx%3D%2245%22%20cy%3D%2265%22%20r%3D%2222%22%20stroke-dasharray%3D%222%2C3%22/%3E%3C/g%3E%3C/svg%3E")`,
+  },
+  bureau: {
+    label: "Bureau",
+    description: "Petites feuilles de document dessinées en fond — administratif et propre.",
+    values: { ink: "#2C2620", inkSoft: "#665C4E", paper: "#F1ECE2", surface: "#FFFFFF", brass: "#A07840", brassDark: "#7C5C2E", slate: "#5C6B5C", moss: "#6E7F4C", brick: "#A6483B", line: "#E5DDCC" },
+    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2270%22%20height%3D%2270%22%3E%3Cg%20stroke%3D%22%23000000%22%20stroke-width%3D%221.3%22%20fill%3D%22none%22%20opacity%3D%220.09%22%3E%3Cpath%20d%3D%22M15%2C10%20L40%2C10%20L50%2C20%20L50%2C60%20L15%2C60%20Z%22/%3E%3Cpath%20d%3D%22M40%2C10%20L40%2C20%20L50%2C20%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2230%22%20x2%3D%2245%22%20y2%3D%2230%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2238%22%20x2%3D%2245%22%20y2%3D%2238%22/%3E%3Cline%20x1%3D%2220%22%20y1%3D%2246%22%20x2%3D%2238%22%20y2%3D%2246%22/%3E%3C/g%3E%3C/svg%3E")`,
+  },
 };
 
 // Applique les variables CSS du thème actif directement sur la page —
@@ -1628,7 +1652,9 @@ export default function DeviFactApp() {
     // atterrir sur la page Tarifs (pour voir la confirmation), même si
     // une autre page était mémorisée avant de partir payer.
     if (new URLSearchParams(window.location.search).get("paiement")) return "pricing";
-    return sessionStorage.getItem("devifact_lastView") || "dashboard";
+    const restored = localStorage.getItem("devifact_lastView") || "dashboard";
+    console.log("[Position] Vue restaurée au chargement :", restored);
+    return restored;
   });
   const [documents, setDocuments] = useState([]);
   const [clients, setClients] = useState([]);
@@ -1641,7 +1667,7 @@ export default function DeviFactApp() {
   const [savingClients, setSavingClients] = useState(false);
   const [savingPrestations, setSavingPrestations] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
-  const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && sessionStorage.getItem("devifact_lastActiveId")) || null);
+  const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_lastActiveId")) || null);
   // Garde en mémoire l'identifiant de la personne dont les données sont
   // actuellement chargées — permet de savoir, dans le gestionnaire de
   // connexion, si un événement concerne vraiment un changement de
@@ -1964,8 +1990,8 @@ export default function DeviFactApp() {
     // ça, un autre compte se connectant dans le même onglet pourrait
     // se retrouver ramené sur un document qui ne lui appartient pas.
     if (typeof window !== "undefined") {
-      sessionStorage.removeItem("devifact_lastView");
-      sessionStorage.removeItem("devifact_lastActiveId");
+      localStorage.removeItem("devifact_lastView");
+      localStorage.removeItem("devifact_lastActiveId");
     }
   }
 
@@ -2045,12 +2071,17 @@ export default function DeviFactApp() {
             return;
           }
           currentUserIdRef.current = session.user.id;
-          // Vider d'abord toute donnée encore en mémoire (d'un compte
-          // précédent) avant de charger celles de cette connexion —
-          // même précaution que switchOrganization, pour ne jamais
-          // laisser des documents d'un autre compte s'afficher, même
-          // brièvement, pendant le chargement.
-          clearUserData();
+          // "INITIAL_SESSION" = premier chargement d'une session déjà
+          // existante (typiquement : la personne recharge la page).
+          // currentUserIdRef repart forcément à null à chaque
+          // rechargement (simple mémoire, pas persistante) — sans cette
+          // distinction, ce cas serait à tort traité comme une nouvelle
+          // connexion, et clearUserData() effacerait la page où la
+          // personne se trouvait (voir la mémorisation de position plus
+          // bas). On ne vide donc QUE pour un vrai changement de compte.
+          if (_event !== "INITIAL_SESSION") {
+            clearUserData();
+          }
           const profile = await loadProfile(session.user.id, session.user.email);
           setActiveOrganization(profile?.organizationId || null);
           await loadUserData();
@@ -2101,10 +2132,10 @@ export default function DeviFactApp() {
   // en était plutôt que d'être ramenée au tableau de bord.
   useEffect(() => {
     if (typeof window === "undefined" || !account) return;
-    if (view && view !== "dashboard") sessionStorage.setItem("devifact_lastView", view);
-    else sessionStorage.removeItem("devifact_lastView");
-    if (activeId) sessionStorage.setItem("devifact_lastActiveId", activeId);
-    else sessionStorage.removeItem("devifact_lastActiveId");
+    if (view && view !== "dashboard") localStorage.setItem("devifact_lastView", view);
+    else localStorage.removeItem("devifact_lastView");
+    if (activeId) localStorage.setItem("devifact_lastActiveId", activeId);
+    else localStorage.removeItem("devifact_lastActiveId");
   }, [view, activeId, account]);
 
   async function updatePlanPrice(planId, field, value) {
@@ -3905,14 +3936,14 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
       <div className="flex min-w-0 grow items-center gap-6">
-        <div className="flex shrink-0 items-center gap-3">
+        <button onClick={() => setView("dashboard")} className="flex shrink-0 items-center gap-3" title="Retour à l'accueil">
           {siteSettings?.logo ? (
             <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
           ) : (
             <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: colors.brass, color: colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
           )}
           <span className="df-display text-lg font-semibold tracking-wide text-white">{siteSettings?.name || "DeviFact"}</span>
-        </div>
+        </button>
         <div className="hidden min-w-0 grow items-center justify-between gap-3 lg:flex">
           <div className="flex items-center gap-1">
             {mainTabs.map(({ id, label, icon: Icon }) =>
