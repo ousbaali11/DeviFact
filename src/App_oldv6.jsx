@@ -11,7 +11,7 @@ import {
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
-  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor,
+  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
 
@@ -1967,13 +1967,11 @@ export default function DeviFactApp() {
       visibleServices: data.visible_services || null,
       contactEmail: data.contact_email || "contact@chantiflow.fr",
       theme: data.theme || "classique",
-      desktopAppUrl: data.desktop_app_url || "",
-      desktopAppEnabled: data.desktop_app_enabled || false,
     });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrl: "desktop_app_url", desktopAppEnabled: "desktop_app_enabled" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -4093,11 +4091,6 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             </>
           )}
         </div>
-        {siteSettings?.desktopAppEnabled && siteSettings?.desktopAppUrl && (
-          <a href={siteSettings.desktopAppUrl} download className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Télécharger le logiciel de bureau">
-            <Monitor size={15} />
-          </a>
-        )}
         {account?.isAdmin && (
           <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "admin" ? "white" : "rgba(255,255,255,0.65)", background: view === "admin" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Admin">
             <Shield size={15} />
@@ -7976,7 +7969,6 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
       )}
 
       {tab === "apparence" && (
-        <Fragment>
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Apparence du site</span>
@@ -8010,40 +8002,6 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
             ))}
           </div>
         </div>
-
-        <div className="mt-4 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-          <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
-            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Logiciel de bureau</span>
-          </div>
-          <div className="space-y-3 p-4">
-            <p className="text-xs" style={{ color: colors.inkSoft }}>
-              Une fois le fichier d'installation (.exe) uploadé sur Supabase → Storage → bucket "downloads", colle son adresse ici. Le bouton de téléchargement (icône écran, à côté d'Admin) n'apparaît aux utilisateurs que si c'est activé ET qu'une adresse est renseignée.
-            </p>
-            <div>
-              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Adresse du fichier d'installation</label>
-              <input
-                type="url"
-                className="df-input w-full max-w-lg rounded-md px-3 py-2 text-sm"
-                style={{ border: `1px solid ${colors.line}` }}
-                placeholder="https://....supabase.co/storage/v1/object/public/downloads/Chantiflow-Setup.exe"
-                defaultValue={siteSettings.desktopAppUrl}
-                onBlur={(e) => onUpdateSiteSettings({ desktopAppUrl: e.target.value })}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onUpdateSiteSettings({ desktopAppEnabled: !siteSettings.desktopAppEnabled })}
-                style={{ color: siteSettings.desktopAppEnabled ? colors.moss : colors.line }}
-              >
-                {siteSettings.desktopAppEnabled ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
-              </button>
-              <span className="text-sm font-medium" style={{ color: siteSettings.desktopAppEnabled ? colors.moss : colors.inkSoft }}>
-                {siteSettings.desktopAppEnabled ? "Affiché aux utilisateurs" : "Masqué"}
-              </span>
-            </div>
-          </div>
-        </div>
-        </Fragment>
       )}
 
       {tab === "utilisateurs" && (
