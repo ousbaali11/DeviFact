@@ -6831,7 +6831,6 @@ function CountrySelect({ value, onChange, options, placeholder = "— Non préci
 function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
-  const [nameError, setNameError] = useState(false);
 
   const filtered = clients.filter((c) => {
     if (!search.trim()) return true;
@@ -6842,11 +6841,10 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
   function countDocs(clientId) {
     return documents.filter((d) => d.clientId === clientId).length;
   }
-  function startNew() { if (!isLocked) { setEditing(emptyClient()); setNameError(false); } }
-  function startEdit(c) { if (!isLocked) { setEditing({ ...c }); setNameError(false); } }
+  function startNew() { if (!isLocked) setEditing(emptyClient()); }
+  function startEdit(c) { if (!isLocked) setEditing({ ...c }); }
   function save() {
-    if (isLocked) return;
-    if (!editing.name.trim()) { setNameError(true); return; }
+    if (isLocked || !editing.name.trim()) return;
     onSave(editing);
     setEditing(null);
   }
@@ -6879,10 +6877,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
             <button onClick={() => setEditing(null)} style={{ color: colors.inkSoft }}><X size={16} /></button>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <div>
-              <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${nameError ? colors.brick : colors.line}` }} placeholder="Nom / raison sociale" value={editing.name} onChange={(e) => { setEditing({ ...editing, name: e.target.value }); if (nameError) setNameError(false); }} />
-              {nameError && <p className="mt-1 text-xs" style={{ color: colors.brick }}>Le nom est obligatoire.</p>}
-            </div>
+            <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom / raison sociale" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={editing.address} onChange={(e) => setEditing({ ...editing, address: e.target.value })} />
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Téléphone" value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
