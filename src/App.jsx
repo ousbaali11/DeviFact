@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef, useMemo, forwardRef, Fragment } from "react";
-import * as Sentry from "@sentry/react";
+import { useState, useEffect, useRef, useMemo, forwardRef, Fragment, Component } from "react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { db } from "./client.js";
@@ -15,23 +14,6 @@ import {
   Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
-
-// Surveillance des erreurs en production (Sentry) — envoie une alerte
-// automatique dès qu'une vraie erreur survient chez un utilisateur,
-// avec le détail technique, sans attendre qu'on nous le signale.
-// DSN : adresse propre à ce projet, obtenue sur sentry.io — jamais
-// secrète (peut être visible côté navigateur sans risque), mais reste
-// à remplacer par la tienne avant de déployer.
-if (typeof window !== "undefined") {
-  Sentry.init({
-    dsn: "COLLE_TON_DSN_SENTRY_ICI",
-    environment: window.location.hostname === "www.chantiflow.fr" ? "production" : "developpement",
-    // Limite le volume envoyé — 100% des erreurs, mais un échantillon
-    // seulement des sessions de performance (largement suffisant pour
-    // détecter un problème sans consommer tout le quota gratuit).
-    tracesSampleRate: 0.1,
-  });
-}
 
 // Chaque couleur pointe vers une variable CSS (définie par le thème
 // actif, voir THEMES et ThemeStyleInjector) plutôt qu'une valeur figée
@@ -2508,6 +2490,7 @@ function DeviFactAppInner() {
   // révisions Maroc peuvent en avoir plusieurs, une par secteur).
   async function exportBatchExcel(docs) {
     if (!docs.length) return;
+    try {
     const type = docs[0].type;
     if (type === "revision") {
       const { default: ExcelJS } = await import("exceljs");
@@ -2634,6 +2617,10 @@ function DeviFactAppInner() {
       XLSX.utils.book_append_sheet(wb, ws, sheetName);
     });
     XLSX.writeFile(wb, `${docTypeLabel(type)}s-groupes.xlsx`);
+    } catch (err) {
+      console.error("Erreur de génération du fichier Excel groupé", err);
+      alert("Impossible de générer le fichier Excel. Réessaie, et préviens-moi si ça persiste.");
+    }
   }
 
   // PDF groupé : un seul fichier, une page (ou plus) par document —
@@ -3360,29 +3347,50 @@ function DeviFactAppInner() {
   );
 }
 
-// Export par défaut réel — enveloppe l'application dans une protection
-// Sentry : si une erreur imprévue survient malgré tout (un vrai bug
-// qui aurait échappé aux tests), la personne voit un message clair
-// plutôt qu'un écran blanc silencieux, et l'erreur est automatiquement
-// signalée avec son détail technique.
-export default function DeviFactApp() {
-  return (
-    <Sentry.ErrorBoundary
-      fallback={({ resetError }) => (
+// Filet de sécurité maison — si une erreur imprévue survient malgré
+// tout (un vrai bug qui aurait échappé aux tests), la personne voit un
+// message clair plutôt qu'un écran blanc silencieux. Volontairement
+// sans dépendance externe (ex: Sentry) — si un jour tu veux une vraie
+// alerte automatique en cas d'erreur chez un utilisateur, dis-le-moi,
+// ça se rajoute proprement en un morceau séparé plutôt que d'imposer
+// une dépendance non installée.
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error("Erreur inattendue interceptée :", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
         <div className="flex min-h-full w-full flex-col items-center justify-center gap-4 p-8 text-center" style={{ background: "#F5F5F6", color: "#242427" }}>
           <AlertTriangle size={40} style={{ color: "#D64545" }} />
           <div>
             <h2 className="text-lg font-semibold">Une erreur inattendue est survenue</h2>
-            <p className="mt-1 text-sm" style={{ color: "#77777C" }}>L'équipe a été automatiquement prévenue. Essaie de recharger la page.</p>
+            <p className="mt-1 text-sm" style={{ color: "#77777C" }}>Essaie de recharger la page. Si ça persiste, préviens-nous.</p>
           </div>
-          <button onClick={() => { resetError(); window.location.reload(); }} className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ background: "#3B3B3F" }}>
+          <button onClick={() => { this.setState({ hasError: false }); window.location.reload(); }} className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ background: "#3B3B3F" }}>
             Recharger la page
           </button>
         </div>
-      )}
-    >
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Export par défaut réel — enveloppe l'application dans le filet de
+// sécurité ci-dessus.
+export default function DeviFactApp() {
+  return (
+    <ErrorBoundary>
       <DeviFactAppInner />
-    </Sentry.ErrorBoundary>
+    </ErrorBoundary>
   );
 }
 
@@ -4641,23 +4649,28 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   // ce type de document (index de base, formule détaillée, décomptes,
   // total HT/TVA/TTC, cadres de signature).
   async function exportExcelMaroc() {
-    // Chargé seulement ici, au moment de l'export — évite d'alourdir
-    // le chargement initial de l'application pour tout le monde avec
-    // une librairie dont seul le forfait Entreprise au Maroc a besoin.
-    const { default: ExcelJS } = await import("exceljs");
-    const workbook = new ExcelJS.Workbook();
-    sectorLines.forEach((sec) => buildMarocRevisionSheet(workbook, localDoc, sec));
+    try {
+      // Chargé seulement ici, au moment de l'export — évite d'alourdir
+      // le chargement initial de l'application pour tout le monde avec
+      // une librairie dont seul le forfait Entreprise au Maroc a besoin.
+      const { default: ExcelJS } = await import("exceljs");
+      const workbook = new ExcelJS.Workbook();
+      sectorLines.forEach((sec) => buildMarocRevisionSheet(workbook, localDoc, sec));
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${localDoc.docNumber}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${localDoc.docNumber}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Erreur de génération du fichier Excel", err);
+      alert("Impossible de générer le fichier Excel. Réessaie, et préviens-moi si ça persiste.");
+    }
   }
 
   return (
