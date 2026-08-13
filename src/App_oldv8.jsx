@@ -1355,8 +1355,7 @@ function computeTotals(doc) {
 const GlobalStyle = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-    html, body, #root { height: 100%; }
-    .df-root { font-family: 'Inter', sans-serif; background-image: var(--df-bg-pattern, none); min-height: 100%; }
+    .df-root { font-family: 'Inter', sans-serif; background-image: var(--df-bg-pattern, none); }
     button, [role="button"], a, .df-select, select, summary { cursor: pointer; }
     .df-display { font-family: 'Space Grotesk', sans-serif; }
     .df-mono { font-family: 'IBM Plex Mono', monospace; }
@@ -2105,22 +2104,9 @@ export default function DeviFactApp() {
           await loadUserData();
           setAccount(profile);
         } else {
-          // Ne traite "pas de session" comme vraiment définitif que
-          // pour les événements qui le confirment réellement
-          // ("INITIAL_SESSION" = vérification terminée au chargement,
-          // "SIGNED_OUT" = déconnexion explicite). Un événement
-          // intermédiaire avec session vide, avant que la vraie
-          // session enregistrée ait fini d'être relue, ne doit jamais
-          // faire passer par la page d'accueil — même brièvement —
-          // avant de revenir sur le compte connecté juste après.
-          if (_event === "INITIAL_SESSION" || _event === "SIGNED_OUT" || !currentUserIdRef.current) {
-            currentUserIdRef.current = null;
-            clearUserData();
-            setAccount(null);
-          } else {
-            setLoading(false);
-            return;
-          }
+          currentUserIdRef.current = null;
+          clearUserData();
+          setAccount(null);
         }
       } catch (err) {
         // Ne doit jamais laisser l'écran de connexion bloqué indéfiniment,
@@ -4109,7 +4095,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             </>
           )}
         </div>
-        {!window.chantiflowDesktop && siteSettings?.desktopAppEnabled && (siteSettings?.desktopAppUrlWindows || siteSettings?.desktopAppUrlMac) && (
+        {siteSettings?.desktopAppEnabled && (siteSettings?.desktopAppUrlWindows || siteSettings?.desktopAppUrlMac) && (
           <div className="relative">
             <button
               onClick={() => setDesktopMenuOpen((v) => !v)}
