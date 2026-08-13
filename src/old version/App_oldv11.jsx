@@ -156,41 +156,6 @@ function applyTheme(themeId) {
   document.documentElement.style.setProperty("--df-bg-pattern", theme.pattern || "none");
 }
 
-// Ferme un menu déroulant/popover avec la touche Échap — au clavier,
-// jusqu'ici seul un clic en dehors du menu le fermait.
-function useEscapeToClose(isOpen, onClose) {
-  useEffect(() => {
-    if (!isOpen) return;
-    function handleKeyDown(e) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
-}
-
-// Lit un fichier image en le validant d'abord (type réel du fichier,
-// pas juste l'attribut "accept" qui n'est qu'une suggestion visuelle
-// et n'empêche personne de choisir autre chose) et sa taille — sans
-// ça, une photo prise directement au téléphone (souvent 5 à 15 Mo)
-// finissait stockée telle quelle, sans le moindre avertissement.
-function readImageFile(file, maxSizeMB = 3) {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith("image/")) {
-      reject(new Error("Merci de choisir une image (JPG, PNG...)."));
-      return;
-    }
-    if (file.size > maxSizeMB * 1024 * 1024) {
-      reject(new Error(`Cette image est trop volumineuse (max ${maxSizeMB} Mo) — réduis-la avant de l'ajouter.`));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Impossible de lire ce fichier."));
-    reader.readAsDataURL(file);
-  });
-}
-
 const TVA_RATES = [20, 10, 5.5, 2.1, 0];
 const UNITS = ["forfait", "heure", "jour", "m²", "m³", "ml", "pièce", "kg", "lot"];
 const UNIT_OPTIONS = ["", ...UNITS];
@@ -2309,27 +2274,18 @@ function DeviFactAppInner() {
     if (!data || data.length === 0) { console.error("Aucune ligne modifiée (statut de paiement) — probablement bloqué par une règle de sécurité."); alert("Impossible de mettre à jour le statut : la mise à jour a été bloquée."); return; }
     setAccount({ ...account, paymentStatus: nextStatus });
   }
-  const [deletingAccount, setDeletingAccount] = useState(false);
   async function deleteCurrentAccount() {
     if (!account?.organizationId) return;
-    setDeletingAccount(true);
     // Supprime les données applicatives de l'organisation. La suppression
     // du compte d'authentification lui-même se fait depuis le dashboard
     // du fournisseur (Authentication → Users), jamais depuis le navigateur.
-    const results = await Promise.allSettled([
+    await Promise.allSettled([
       window.storage.set("documents", JSON.stringify([]), false),
       window.storage.set("clients", JSON.stringify([]), false),
       window.storage.set("prestations", JSON.stringify([]), false),
       window.storage.set("company-profile", JSON.stringify(emptyCompanyProfile()), false),
       db.from("organizations").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", account.organizationId),
     ]);
-    const failed = results.filter((r) => r.status === "rejected");
-    if (failed.length > 0) {
-      console.error("Échec partiel de la réinitialisation du compte", failed);
-      alert("La réinitialisation n'a pas pu se terminer complètement. Vérifie ce qu'il reste, et réessaie si besoin.");
-      setDeletingAccount(false);
-      return;
-    }
     setDocuments([]); setClients([]); setPrestations([]); setCompanyProfile(emptyCompanyProfile());
     await logout();
   }
@@ -2507,10 +2463,6 @@ function DeviFactAppInner() {
     if (isLocked) return;
     const docs = documents.filter((d) => ids.includes(d.id));
     if (docs.length < 2) return;
-    const distinctClients = [...new Set(docs.map((d) => d.clientId || d.client?.name || ""))];
-    if (distinctClients.length > 1) {
-      if (!window.confirm("Ces documents appartiennent à des clients différents — seules les coordonnées du premier seront gardées sur le document fusionné. Continuer quand même ?")) return;
-    }
     const type = docs[0].type;
     const mergedItems = [];
     docs.forEach((d) => {
@@ -2739,16 +2691,6 @@ function DeviFactAppInner() {
       })
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }, [documents, typeFilter, search]);
-
-  // Affiche un nombre limité de documents à la fois — sans ça, un
-  // compte avec plusieurs centaines de documents accumulés au fil du
-  // temps ralentirait la page (tout serait affiché d'un coup). La
-  // recherche et les filtres continuent de porter sur TOUS les
-  // documents, pas seulement ceux actuellement affichés.
-  const PAGE_SIZE = 40;
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [search, typeFilter]);
-  const visibleFiltered = filtered.slice(0, visibleCount);
 
   const stats = useMemo(() => {
     const enAttente = documents.filter((d) => d.type === "devis" && ["envoyé", "vu"].includes(d.status));
@@ -3193,7 +3135,6 @@ function DeviFactAppInner() {
           onTogglePaypalPayment={togglePaypalPayment}
           onTogglePayment={togglePaymentStatus}
           onDeleteAccount={deleteCurrentAccount}
-          deletingAccount={deletingAccount}
           siteSettings={siteSettings}
           savingSiteSettings={savingSiteSettings}
           onUpdateSiteSettings={updateSiteSettings}
@@ -3349,7 +3290,7 @@ function DeviFactAppInner() {
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
               Sélectionne plusieurs devis (ou plusieurs factures) pour les <strong>fusionner</strong> en un seul document.
             </p>
-            {visibleFiltered.map((d, idx) => {
+            {filtered.map((d, idx) => {
               const isRevision = d.type === "revision";
               const isSituation = d.type === "situation";
               const totalTTC = isRevision ? computeRevision(d).montantRevise
@@ -3361,7 +3302,7 @@ function DeviFactAppInner() {
               const TypeIconComp = docTypeIcon(d.type);
               return (
                 <div key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none", background: selectedIds.includes(d.id) ? "rgba(184,118,62,0.06)" : "transparent" }}>
-                  <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} style={{ accentColor: colors.brass }} aria-label={`Sélectionner ${d.docNumber}`} />
+                  <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} style={{ accentColor: colors.brass }} />
                   <div className="flex items-center gap-2" style={{ color: docTypeColor(d.type) }}>
                     <TypeIconComp size={16} />
                   </div>
@@ -3385,13 +3326,6 @@ function DeviFactAppInner() {
 
               );
             })}
-            {filtered.length > visibleCount && (
-              <div className="flex justify-center border-t px-4 py-3" style={{ borderColor: colors.line }}>
-                <button onClick={() => setVisibleCount((c) => c + PAGE_SIZE)} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.paper, color: colors.slate }}>
-                  Charger {Math.min(PAGE_SIZE, filtered.length - visibleCount)} de plus ({filtered.length - visibleCount} restant{filtered.length - visibleCount > 1 ? "s" : ""})
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -3452,34 +3386,9 @@ class ErrorBoundary extends Component {
 
 // Export par défaut réel — enveloppe l'application dans le filet de
 // sécurité ci-dessus.
-// Bandeau affiché en toutes circonstances (chargement, connexion,
-// tableau de bord...) dès que la connexion internet est perdue —
-// composant volontairement autonome, indépendant de l'écran
-// actuellement affiché, pour ne jamais dépendre de sa logique interne.
-function OfflineBanner() {
-  const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" && !navigator.onLine);
-  useEffect(() => {
-    function handleOnline() { setIsOffline(false); }
-    function handleOffline() { setIsOffline(true); }
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, []);
-  if (!isOffline) return null;
-  return (
-    <div className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-2 py-2 text-center text-sm font-medium text-white" style={{ background: "#A6483B" }}>
-      <AlertTriangle size={14} /> Pas de connexion internet — certaines actions ne fonctionneront pas tant qu'elle n'est pas rétablie.
-    </div>
-  );
-}
-
 export default function DeviFactApp() {
   return (
     <ErrorBoundary>
-      <OfflineBanner />
       <DeviFactAppInner />
     </ErrorBoundary>
   );
@@ -3535,7 +3444,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
             <button onClick={onLogin} className="text-sm font-medium" style={{ color: colors.inkSoft }}>Connexion</button>
             <button onClick={onGetStarted} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Essai gratuit</button>
           </div>
-          <button onClick={() => setMobileMenu((v) => !v)} className="sm:hidden" title="Menu" aria-label="Ouvrir le menu"><Menu size={22} /></button>
+          <button onClick={() => setMobileMenu((v) => !v)} className="sm:hidden"><Menu size={22} /></button>
         </div>
         {mobileMenu && (
           <div className="flex flex-col gap-3 border-t px-6 py-4 sm:hidden" style={{ borderColor: colors.line }}>
@@ -4098,10 +4007,6 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
-  useEscapeToClose(orgMenuOpen, () => setOrgMenuOpen(false));
-  useEscapeToClose(servicesMenuOpen, () => setServicesMenuOpen(false));
-  useEscapeToClose(mobileNavOpen, () => setMobileNavOpen(false));
-  useEscapeToClose(desktopMenuOpen, () => setDesktopMenuOpen(false));
   const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "clients", label: "Clients", icon: Users },
@@ -4527,20 +4432,6 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
 function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onSaveClient, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
-  // Avertit avant de fermer/quitter si une sauvegarde est encore en
-  // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
-  // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
-  // toute dernière modification silencieusement.
-  useEffect(() => {
-    function handleBeforeUnload(e) {
-      if (saveTimer.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
@@ -4916,7 +4807,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                               );
                             })()}
                             {(sec.terms || []).length > 1 && (
-                              <button onClick={() => removeTerm(sec.id, t.id)} title="Supprimer ce terme" style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                              <button onClick={() => removeTerm(sec.id, t.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                             )}
                           </div>
                           {getRevisionIndexOptions(localDoc.country) && !getRevisionIndexOptions(localDoc.country).includes(t.symbole) && (
@@ -4983,7 +4874,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                             return (
                               <div key={d.id || dIdx} className="flex items-center justify-between gap-2 rounded-lg px-3 py-2" style={{ background: "repeating-linear-gradient(45deg, transparent, transparent 6px, " + colors.line + "40 6px, " + colors.line + "40 12px)", border: `1px dashed ${colors.line}` }}>
                                 <span className="text-xs italic" style={{ color: colors.inkSoft }}>— ligne vide (séparateur dans l'Excel) —</span>
-                                <button onClick={() => removeDecompte(sec.id, d.id)} title="Supprimer ce décompte" style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                                <button onClick={() => removeDecompte(sec.id, d.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                               </div>
                             );
                           }
@@ -4994,7 +4885,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                               <div className="mb-2 flex items-center gap-2">
                                 <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder={`ex: DP N°${dIdx + 1} : Travaux exécutés du ... au ...`} value={d.label} onChange={(e) => patchDecompte(sec.id, d.id, { label: e.target.value })} />
                                 {(sec.decomptes || []).length > 1 && (
-                                  <button onClick={() => removeDecompte(sec.id, d.id)} title="Supprimer ce décompte" style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                                  <button onClick={() => removeDecompte(sec.id, d.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                                 )}
                               </div>
                               <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -5020,7 +4911,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                                       <input type="number" className="df-input df-mono w-20 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.jours} onChange={(e) => patchMois(sec.id, d.id, m.id, { jours: e.target.value })} placeholder="jours" />
                                       <span className="grow" />
                                       {(d.mois || []).length > 1 && (
-                                        <button onClick={() => removeMois(sec.id, d.id, m.id)} title="Supprimer ce mois" style={{ color: colors.brick }}><Trash2 size={13} /></button>
+                                        <button onClick={() => removeMois(sec.id, d.id, m.id)} style={{ color: colors.brick }}><Trash2 size={13} /></button>
                                       )}
                                     </div>
                                     <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min((sec.terms || []).length, 4) || 1}, minmax(0,1fr))` }}>
@@ -5191,20 +5082,6 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
 function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onCreateNext, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
-  // Avertit avant de fermer/quitter si une sauvegarde est encore en
-  // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
-  // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
-  // toute dernière modification silencieusement.
-  useEffect(() => {
-    function handleBeforeUnload(e) {
-      if (saveTimer.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
@@ -5366,7 +5243,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                 <div key={l.id} className="rounded-lg p-3" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
                   <div className="mb-2 flex items-center gap-2">
                     <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation du poste" value={l.designation} onChange={(e) => patchLine(l.id, { designation: e.target.value })} />
-                    {localDoc.items.length > 1 && <button onClick={() => removeLine(l.id)} title="Supprimer cette ligne" style={{ color: colors.brick }}><Trash2 size={14} /></button>}
+                    {localDoc.items.length > 1 && <button onClick={() => removeLine(l.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>}
                   </div>
                   <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <div><label className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>Qté</label><input type="number" className="df-input df-mono w-full rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={l.qty} onChange={(e) => patchLine(l.id, { qty: e.target.value })} /></div>
@@ -5536,20 +5413,6 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
 function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
-  // Avertit avant de fermer/quitter si une sauvegarde est encore en
-  // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
-  // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
-  // toute dernière modification silencieusement.
-  useEffect(() => {
-    function handleBeforeUnload(e) {
-      if (saveTimer.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
@@ -5709,7 +5572,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
                   <div key={r.id} className="rounded-lg p-3" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
                     <div className="mb-2 flex items-center gap-2">
                       <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Description de la réserve" value={r.description} onChange={(e) => patchReserve(r.id, { description: e.target.value })} />
-                      <button onClick={() => removeReserve(r.id)} title="Supprimer cette réserve" style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                      <button onClick={() => removeReserve(r.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                       <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Localisation" value={r.localisation} onChange={(e) => patchReserve(r.id, { localisation: e.target.value })} />
@@ -5870,20 +5733,6 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
 function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
-  // Avertit avant de fermer/quitter si une sauvegarde est encore en
-  // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
-  // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
-  // toute dernière modification silencieusement.
-  useEffect(() => {
-    function handleBeforeUnload(e) {
-      if (saveTimer.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
@@ -6016,9 +5865,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Durée</label>
-              <div className="df-mono rounded-md px-3 py-2 text-sm" style={{ background: colors.paper, color: !duree && localDoc.heureArrivee && localDoc.heureDepart ? colors.brick : colors.ink }}>
-                {duree ? `${duree.heures}h${String(duree.minutes).padStart(2, "0")}` : localDoc.heureArrivee && localDoc.heureDepart ? "Départ avant l'arrivée ?" : "—"}
-              </div>
+              <div className="df-mono rounded-md px-3 py-2 text-sm" style={{ background: colors.paper }}>{duree ? `${duree.heures}h${String(duree.minutes).padStart(2, "0")}` : "—"}</div>
             </div>
           </div>
 
@@ -6053,7 +5900,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
                 <div key={m.id} className="flex items-center gap-2">
                   <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation" value={m.designation} onChange={(e) => patchMateriel(m.id, { designation: e.target.value })} />
                   <input type="number" className="df-input df-mono w-20 rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.quantite} onChange={(e) => patchMateriel(m.id, { quantite: e.target.value })} />
-                  <button onClick={() => removeMateriel(m.id)} title="Supprimer ce matériel" style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                  <button onClick={() => removeMateriel(m.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                 </div>
               ))}
             </div>
@@ -6187,20 +6034,6 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
 function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
-  // Avertit avant de fermer/quitter si une sauvegarde est encore en
-  // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
-  // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
-  // toute dernière modification silencieusement.
-  useEffect(() => {
-    function handleBeforeUnload(e) {
-      if (saveTimer.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
@@ -6451,20 +6284,6 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
 function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
-  // Avertit avant de fermer/quitter si une sauvegarde est encore en
-  // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
-  // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
-  // toute dernière modification silencieusement.
-  useEffect(() => {
-    function handleBeforeUnload(e) {
-      if (saveTimer.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
@@ -6749,20 +6568,6 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
 function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
-  // Avertit avant de fermer/quitter si une sauvegarde est encore en
-  // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
-  // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
-  // toute dernière modification silencieusement.
-  useEffect(() => {
-    function handleBeforeUnload(e) {
-      if (saveTimer.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
@@ -6904,15 +6709,12 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
                     <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: t.couleur }} />
                     <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation de la tâche" value={t.designation} onChange={(e) => patchTache(t.id, { designation: e.target.value })} />
                     <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${info.color}18`, color: info.color }}>{info.label}</span>
-                    {(localDoc.taches || []).length > 1 && <button onClick={() => removeTache(t.id)} title="Supprimer cette tâche" style={{ color: colors.brick }}><Trash2 size={14} /></button>}
+                    {(localDoc.taches || []).length > 1 && <button onClick={() => removeTache(t.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>}
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Corps de métier" value={t.corpsMetier} onChange={(e) => patchTache(t.id, { corpsMetier: e.target.value })} />
                     <input type="date" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.dateDebut} onChange={(e) => patchTache(t.id, { dateDebut: e.target.value })} />
-                    <div>
-                      <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${t.dateDebut && t.dateFin && t.dateFin < t.dateDebut ? colors.brick : colors.line}` }} value={t.dateFin} onChange={(e) => patchTache(t.id, { dateFin: e.target.value })} />
-                      {t.dateDebut && t.dateFin && t.dateFin < t.dateDebut && <p className="mt-0.5 text-xs" style={{ color: colors.brick }}>Avant la date de début</p>}
-                    </div>
+                    <input type="date" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.dateFin} onChange={(e) => patchTache(t.id, { dateFin: e.target.value })} />
                     <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}>
                       <input type="checkbox" checked={t.statut === "termine"} onChange={(e) => patchTache(t.id, { statut: e.target.checked ? "termine" : "a_venir" })} /> Terminé
                     </label>
@@ -6977,7 +6779,6 @@ function countryCodeOf(entry) {
 function CountrySelect({ value, onChange, options, placeholder = "— Non précisé —", allowOther = false, showEmpty = true }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  useEscapeToClose(open, () => setOpen(false));
   const list = (options || COUNTRIES).filter((c) => c.toLowerCase().includes(query.toLowerCase()));
   const code = countryCodeOf(value);
   return (
@@ -7112,7 +6913,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
               <div className="w-24 shrink-0 df-mono text-xs" style={{ color: colors.inkSoft }}>{countDocs(c.id)} document(s)</div>
               <div className="flex shrink-0 gap-2">
                 <button onClick={() => startEdit(c)} disabled={isLocked} style={{ color: isLocked ? colors.line : colors.slate, cursor: isLocked ? "not-allowed" : "pointer" }}><Pencil size={15} /></button>
-                <button onClick={() => onDelete(c.id)} disabled={isLocked} title="Supprimer le client" style={{ color: isLocked ? colors.line : colors.brick, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
+                <button onClick={() => onDelete(c.id)} disabled={isLocked} style={{ color: isLocked ? colors.line : colors.brick, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
               </div>
             </div>
           ))}
@@ -7125,7 +6926,6 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
 function PrestationsView({ prestations, saving, onSave, onDelete }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
-  const [designationError, setDesignationError] = useState(false);
 
   const filtered = prestations.filter((p) => {
     if (!search.trim()) return true;
@@ -7133,10 +6933,10 @@ function PrestationsView({ prestations, saving, onSave, onDelete }) {
     return (p.designation || "").toLowerCase().includes(s) || (p.category || "").toLowerCase().includes(s);
   });
 
-  function startNew() { setEditing(emptyPrestation()); setDesignationError(false); }
-  function startEdit(p) { setEditing({ ...p }); setDesignationError(false); }
+  function startNew() { setEditing(emptyPrestation()); }
+  function startEdit(p) { setEditing({ ...p }); }
   function save() {
-    if (!editing.designation.trim()) { setDesignationError(true); return; }
+    if (!editing.designation.trim()) return;
     onSave(editing);
     setEditing(null);
   }
@@ -7198,7 +6998,7 @@ function PrestationsView({ prestations, saving, onSave, onDelete }) {
               <div className="df-mono w-16 shrink-0 text-right text-xs" style={{ color: colors.inkSoft }}>{p.tva}%</div>
               <div className="flex shrink-0 gap-2">
                 <button onClick={() => startEdit(p)} style={{ color: colors.slate }}><Pencil size={15} /></button>
-                <button onClick={() => { if (window.confirm(`Supprimer "${p.designation}" de la bibliothèque ?`)) onDelete(p.id); }} title="Supprimer" style={{ color: colors.brick }}><Trash2 size={15} /></button>
+                <button onClick={() => { if (window.confirm(`Supprimer "${p.designation}" de la bibliothèque ?`)) onDelete(p.id); }} style={{ color: colors.brick }}><Trash2 size={15} /></button>
               </div>
             </div>
           ))}
@@ -7366,27 +7166,13 @@ function ApiView({ account }) {
     }
   }
 
-  const [revokingId, setRevokingId] = useState(null);
-  async function revokeKey(keyId, keyName) {
-    if (!window.confirm(`Révoquer la clé "${keyName}" ? Toute intégration qui l'utilise cessera immédiatement de fonctionner — action irréversible.`)) return;
-    setRevokingId(keyId);
-    try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error: fnError } = await db.functions.invoke("manage-api-key", {
-        body: { action: "revoke", organizationId: account.organizationId, keyId },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
-      if (fnError || data?.error) {
-        alert(`Impossible de révoquer cette clé : ${data?.error || fnError?.message || "erreur inconnue"}`);
-        return;
-      }
-      await loadKeys();
-    } catch (err) {
-      console.error("Erreur de révocation de clé API", err);
-      alert("Impossible de révoquer cette clé. Réessaie, et préviens-nous si ça persiste.");
-    } finally {
-      setRevokingId(null);
-    }
+  async function revokeKey(keyId) {
+    const { data: { session } } = await db.auth.getSession();
+    await db.functions.invoke("manage-api-key", {
+      body: { action: "revoke", organizationId: account.organizationId, keyId },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    });
+    await loadKeys();
   }
 
   function copyKey() {
@@ -7466,9 +7252,7 @@ function ApiView({ account }) {
                 {k.revoked_at ? "Révoquée" : k.last_used_at ? `Utilisée le ${new Date(k.last_used_at).toLocaleDateString("fr-FR")}` : "Jamais utilisée"}
               </div>
               {!k.revoked_at && (
-                <button onClick={() => revokeKey(k.id, k.name)} disabled={revokingId === k.id} className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brick, opacity: revokingId === k.id ? 0.6 : 1 }}>
-                  {revokingId === k.id && <Loader2 size={11} className="animate-spin" />} Révoquer
-                </button>
+                <button onClick={() => revokeKey(k.id)} className="text-xs font-medium" style={{ color: colors.brick }}>Révoquer</button>
               )}
             </div>
           ))}
@@ -7642,7 +7426,6 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
   const [local, setLocal] = useState(profile);
   const [editing, setEditing] = useState(!profile.name);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [nameError, setNameError] = useState(false);
 
   useEffect(() => setLocal(profile), []);
 
@@ -7652,11 +7435,11 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
   function handleLogoUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    readImageFile(file).then((dataUrl) => patch({ logo: dataUrl })).catch((err) => alert(err.message));
-    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = () => patch({ logo: reader.result });
+    reader.readAsDataURL(file);
   }
   function handleSave() {
-    if (!local.name.trim()) { setNameError(true); return; }
     onSave(local);
     setEditing(false);
   }
@@ -7738,8 +7521,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
 
           <div>
             <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>{local.type === "particulier" ? "Nom et prénom" : "Raison sociale"}</label>
-            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${nameError ? colors.brick : colors.line}` }} value={local.name} onChange={(e) => { patch({ name: e.target.value }); if (nameError) setNameError(false); }} />
-            {nameError && <p className="mt-1 text-xs" style={{ color: colors.brick }}>{local.type === "particulier" ? "Le nom est obligatoire." : "La raison sociale est obligatoire."}</p>}
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.name} onChange={(e) => patch({ name: e.target.value })} />
           </div>
           {local.type !== "particulier" && (
             <div>
@@ -7896,7 +7678,6 @@ function PayPalButton({ planId, organizationId, onApproved }) {
 function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNotice, documentCount, siteSettings }) {
   const [billing, setBilling] = useState(account?.billing || "mensuel");
   const [approvedMsg, setApprovedMsg] = useState(false);
-  const [activatingPlanId, setActivatingPlanId] = useState(null);
   const [stripeReturnMsg, setStripeReturnMsg] = useState(null); // "succes" | "annule" | null
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -7985,14 +7766,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
               ) : plan.id === "entreprise" ? (
                 <a href={`mailto:${siteSettings?.contactEmail || "contact@chantiflow.fr"}?subject=Forfait%20Entreprise`} className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Nous contacter</a>
               ) : price === 0 ? (
-                <button
-                  onClick={async () => { setActivatingPlanId(plan.id); await onChooseZeroPrice(plan.id, billing); setActivatingPlanId(null); }}
-                  disabled={activatingPlanId === plan.id}
-                  className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium"
-                  style={{ background: colors.ink, color: "white", opacity: activatingPlanId === plan.id ? 0.7 : 1 }}
-                >
-                  {activatingPlanId === plan.id ? <Loader2 size={14} className="animate-spin" /> : null} {activatingPlanId === plan.id ? "Activation…" : "Activer (0€)"}
-                </button>
+                <button onClick={() => onChooseZeroPrice(plan.id, billing)} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Activer (0€)</button>
               ) : showCard || showPaypal ? (
                 <div className="flex flex-col gap-2">
                   {showCard && <StripeCheckoutButton planId={plan.id} billingCycle={billing} organizationId={account?.organizationId} />}
@@ -8155,8 +7929,9 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   function handleLogoUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    readImageFile(file).then((dataUrl) => patch({ logo: dataUrl })).catch((err) => alert(err.message));
-    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = () => patch({ logo: reader.result });
+    reader.readAsDataURL(file);
   }
   function handleSave() {
     onSave(local);
@@ -8329,7 +8104,7 @@ function DesktopAppSettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState("apercu");
   const totalTTC = documents.reduce((s, d) => s + (
@@ -8707,9 +8482,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
           ) : (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium" style={{ color: colors.brick }}>Confirmer la réinitialisation définitive ?</span>
-            <button onClick={onDeleteAccount} disabled={deletingAccount} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick, opacity: deletingAccount ? 0.7 : 1 }}>
-              {deletingAccount && <Loader2 size={12} className="animate-spin" />} Oui, réinitialiser
-            </button>
+            <button onClick={onDeleteAccount} className="rounded-lg px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Oui, réinitialiser</button>
             <button onClick={() => setConfirmDelete(false)} className="rounded-lg px-3 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Annuler</button>
           </div>
         )}
@@ -8869,20 +8642,6 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const saveTimer = useRef(null);
-  // Avertit avant de fermer/quitter si une sauvegarde est encore en
-  // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
-  // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
-  // toute dernière modification silencieusement.
-  useEffect(() => {
-    function handleBeforeUnload(e) {
-      if (saveTimer.current) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
 
   const matchingClients = clientQuery.trim()
     ? clients.filter((c) => (c.name || "").toLowerCase().includes(clientQuery.toLowerCase())).slice(0, 5)
@@ -8932,7 +8691,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     setClientPickerOpen(false);
   }
   function saveCurrentClient() {
-    if (!localDoc.client.name.trim()) { alert("Renseigne d'abord le nom du client avant de l'enregistrer."); return; }
+    if (!localDoc.client.name.trim()) return;
     const id = localDoc.clientId || nextId("cli");
     onSaveClient({ id, ...localDoc.client });
     if (!localDoc.clientId) patch({ clientId: id });
@@ -9009,7 +8768,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     setLibraryQuery("");
   }
   function saveLineAsPrestation(it) {
-    if (!it.designation.trim()) { alert("Renseigne d'abord une désignation pour cette ligne avant de l'enregistrer."); return; }
+    if (!it.designation.trim()) return;
     onSavePrestation({ id: nextId("pr"), designation: it.designation, category: "", unit: it.unit, unitPrice: it.unitPrice, tva: it.tva });
   }
   async function generateFromAI() {
@@ -9099,8 +8858,9 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
   function handleImageUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    readImageFile(file).then((dataUrl) => patchDeep("signature", { image: dataUrl })).catch((err) => alert(err.message));
-    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = () => patchDeep("signature", { image: reader.result });
+    reader.readAsDataURL(file);
   }
 
   const printRef = useRef(null);
@@ -9677,13 +9437,13 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 <div className="no-print flex shrink-0 gap-1 pt-2">
                   <button onClick={() => moveItem(it.id, -1)} style={{ color: colors.inkSoft }}><ChevronUp size={15} /></button>
                   <button onClick={() => moveItem(it.id, 1)} style={{ color: colors.inkSoft }}><ChevronDown size={15} /></button>
-                  <button onClick={() => removeItem(it.id)} title="Supprimer cette ligne" style={{ color: colors.brick }}><Trash2 size={15} /></button>
+                  <button onClick={() => removeItem(it.id)} style={{ color: colors.brick }}><Trash2 size={15} /></button>
                 </div>
               </div>
             ) : (
               <div key={it.id} className="rounded-lg p-2" style={{ background: selectedLineIds.includes(it.id) ? "rgba(166,72,59,0.08)" : idx % 2 ? "transparent" : "rgba(62,92,110,0.04)" }}>
                 <div className="flex flex-wrap items-start gap-2">
-                  <input type="checkbox" className="no-print mt-2" checked={selectedLineIds.includes(it.id)} onChange={() => toggleLineSelect(it.id)} style={{ accentColor: colors.brick }} aria-label="Sélectionner cette ligne" />
+                  <input type="checkbox" className="no-print mt-2" checked={selectedLineIds.includes(it.id)} onChange={() => toggleLineSelect(it.id)} style={{ accentColor: colors.brick }} />
                   <div className="grow basis-56">
                     <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Désignation" value={it.designation} onChange={(e) => updateItem(it.id, { designation: e.target.value })} />
                     <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -9760,7 +9520,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                     <button onClick={() => saveLineAsPrestation(it)} title="Enregistrer comme prestation" style={{ color: colors.brassDark }}><BookmarkPlus size={14} /></button>
                     <button onClick={() => moveItem(it.id, -1)} style={{ color: colors.inkSoft }}><ChevronUp size={14} /></button>
                     <button onClick={() => moveItem(it.id, 1)} style={{ color: colors.inkSoft }}><ChevronDown size={14} /></button>
-                    <button onClick={() => removeItem(it.id)} title="Supprimer cette ligne" style={{ color: colors.brick }}><Trash2 size={14} /></button>
+                    <button onClick={() => removeItem(it.id)} style={{ color: colors.brick }}><Trash2 size={14} /></button>
                   </div>
                 </div>
 
@@ -9795,7 +9555,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                         <input type="number" className="df-input df-mono w-20 rounded-md px-1 py-1 text-right text-xs" style={inputStyle} placeholder="Prix" value={d.price} onChange={(e) => updateDetail(it.id, d.id, { price: e.target.value })} />
                         <button onClick={() => outdentDetail(it.id, d.id)} disabled={d.level <= 1} title="Désindenter (Maj+Tab)" className="no-print shrink-0" style={{ color: d.level <= 1 ? colors.line : colors.inkSoft }}><IndentDecrease size={13} /></button>
                         <button onClick={() => indentDetail(it.id, d.id)} disabled={dIdx === 0} title="Indenter (Tab) — devient une sous-description" className="no-print shrink-0" style={{ color: dIdx === 0 ? colors.line : colors.inkSoft }}><IndentIncrease size={13} /></button>
-                        <button onClick={() => removeDetail(it.id, d.id)} className="no-print shrink-0" style={{ color: colors.brick }} title="Retirer cette ligne" aria-label="Retirer cette ligne"><X size={12} /></button>
+                        <button onClick={() => removeDetail(it.id, d.id)} className="no-print shrink-0" style={{ color: colors.brick }}><X size={12} /></button>
                       </div>
                     ))}
                     <button onClick={() => addDetail(it.id, 1)} className="no-print flex items-center gap-1 text-xs" style={{ color: colors.slate }}>
