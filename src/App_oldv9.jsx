@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo, forwardRef, Fragment } from "react";
-import * as Sentry from "@sentry/react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { db } from "./client.js";
@@ -15,23 +14,6 @@ import {
   Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
-
-// Surveillance des erreurs en production (Sentry) — envoie une alerte
-// automatique dès qu'une vraie erreur survient chez un utilisateur,
-// avec le détail technique, sans attendre qu'on nous le signale.
-// DSN : adresse propre à ce projet, obtenue sur sentry.io — jamais
-// secrète (peut être visible côté navigateur sans risque), mais reste
-// à remplacer par la tienne avant de déployer.
-if (typeof window !== "undefined") {
-  Sentry.init({
-    dsn: "COLLE_TON_DSN_SENTRY_ICI",
-    environment: window.location.hostname === "www.chantiflow.fr" ? "production" : "developpement",
-    // Limite le volume envoyé — 100% des erreurs, mais un échantillon
-    // seulement des sessions de performance (largement suffisant pour
-    // détecter un problème sans consommer tout le quota gratuit).
-    tracesSampleRate: 0.1,
-  });
-}
 
 // Chaque couleur pointe vers une variable CSS (définie par le thème
 // actif, voir THEMES et ThemeStyleInjector) plutôt qu'une valeur figée
@@ -1409,7 +1391,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   const mono = { fontFamily: "'IBM Plex Mono', monospace" };
   const isFreeWatermark = watermarkEnabled; // contrôlé par l'Admin, forfait par forfait
   const hidePrices = doc.type === "livraison" && !doc.showPrices;
-  const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10.5pt", lineHeight: 1.4,
@@ -1669,14 +1651,14 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   );
 });
 
-function DeviFactAppInner() {
+export default function DeviFactApp() {
   // Repère de diagnostic temporaire : affiche dans la console (F12)
   // l'heure exacte à laquelle l'application démarre. Si cette ligne
   // réapparaît avec une NOUVELLE heure après être revenu sur l'onglet,
   // ça prouve qu'un vrai rechargement de page a eu lieu. Si elle ne
   // réapparaît pas, la page n'a pas rechargé — la cause est ailleurs.
   useEffect(() => {
-    console.log(`%c🔵 Chantiflow démarré à ${new Date().toLocaleTimeString("fr-FR")}`, "background:#1B2A33;color:white;padding:4px 8px;border-radius:4px;font-weight:bold;");
+    console.log(`%c🔵 DeviFact démarré à ${new Date().toLocaleTimeString("fr-FR")}`, "background:#1B2A33;color:white;padding:4px 8px;border-radius:4px;font-weight:bold;");
   }, []);
 
   const [view, setView] = useState(() => {
@@ -1717,7 +1699,7 @@ function DeviFactAppInner() {
   const [splitNotice, setSplitNotice] = useState(null);
   const [savingPlanSettings, setSavingPlanSettings] = useState(false);
   const [preAuthView, setPreAuthView] = useState("landing"); // landing | auth
-  const [siteSettings, setSiteSettings] = useState({ name: "Chantiflow", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" });
+  const [siteSettings, setSiteSettings] = useState({ name: "DeviFact", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" });
   const [savingSiteSettings, setSavingSiteSettings] = useState(false);
   const [authMode, setAuthMode] = useState("signup");
   // Le titre affiché dans l'onglet du navigateur vient du fichier
@@ -1979,7 +1961,7 @@ function DeviFactAppInner() {
       return;
     }
     setSiteSettings({
-      name: data.name || "Chantiflow", logo: data.logo_url || null, logoWidth: data.logo_width || 36, logoHeight: data.logo_height || 36,
+      name: data.name || "DeviFact", logo: data.logo_url || null, logoWidth: data.logo_width || 36, logoHeight: data.logo_height || 36,
       pdfBackground: data.pdf_background || "#FBF7EF",
       pdfHeaderColor: data.pdf_header_color || "#1B2A33",
       pdfBlockColor: data.pdf_block_color || "#F1F0EA",
@@ -2350,8 +2332,6 @@ function DeviFactAppInner() {
   }
   function deleteClient(id) {
     if (isLocked) return;
-    const client = clients.find((c) => c.id === id);
-    if (!window.confirm(`Supprimer définitivement le client "${client?.name || ""}" ? Cette action est irréversible.`)) return;
     persistClients(clients.filter((c) => c.id !== id));
   }
   async function persistPrestations(next) {
@@ -2443,8 +2423,6 @@ function DeviFactAppInner() {
   }
   function deleteDoc(id) {
     if (isLocked) return;
-    const doc = documents.find((d) => d.id === id);
-    if (!window.confirm(`Supprimer définitivement "${doc?.docNumber || "ce document"}" ? Cette action est irréversible.`)) return;
     persist(documents.filter((d) => d.id !== id));
     if (activeId === id) backToDashboard();
   }
@@ -3360,32 +3338,6 @@ function DeviFactAppInner() {
   );
 }
 
-// Export par défaut réel — enveloppe l'application dans une protection
-// Sentry : si une erreur imprévue survient malgré tout (un vrai bug
-// qui aurait échappé aux tests), la personne voit un message clair
-// plutôt qu'un écran blanc silencieux, et l'erreur est automatiquement
-// signalée avec son détail technique.
-export default function DeviFactApp() {
-  return (
-    <Sentry.ErrorBoundary
-      fallback={({ resetError }) => (
-        <div className="flex min-h-full w-full flex-col items-center justify-center gap-4 p-8 text-center" style={{ background: "#F5F5F6", color: "#242427" }}>
-          <AlertTriangle size={40} style={{ color: "#D64545" }} />
-          <div>
-            <h2 className="text-lg font-semibold">Une erreur inattendue est survenue</h2>
-            <p className="mt-1 text-sm" style={{ color: "#77777C" }}>L'équipe a été automatiquement prévenue. Essaie de recharger la page.</p>
-          </div>
-          <button onClick={() => { resetError(); window.location.reload(); }} className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ background: "#3B3B3F" }}>
-            Recharger la page
-          </button>
-        </div>
-      )}
-    >
-      <DeviFactAppInner />
-    </Sentry.ErrorBoundary>
-  );
-}
-
 function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
   const [openFaq, setOpenFaq] = useState(null);
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -3597,7 +3549,7 @@ function ResetPasswordScreen({ siteSettings, onDone }) {
           ) : (
             <div className="flex h-10 w-10 items-center justify-center rounded-lg df-mono text-base font-semibold" style={{ background: colors.brass, color: colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
           )}
-          <span className="df-display text-xl font-semibold tracking-wide">{siteSettings?.name || "Chantiflow"}</span>
+          <span className="df-display text-xl font-semibold tracking-wide">{siteSettings?.name || "DeviFact"}</span>
         </div>
         <div className="rounded-2xl p-6" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <h1 className="df-display mb-1 text-lg font-semibold">Nouveau mot de passe</h1>
@@ -3883,7 +3835,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
           ) : (
             <div className="flex h-10 w-10 items-center justify-center rounded-lg df-mono text-base font-semibold" style={{ background: colors.brass, color: colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
           )}
-          <span className="df-display text-xl font-semibold tracking-wide">{siteSettings?.name || "Chantiflow"}</span>
+          <span className="df-display text-xl font-semibold tracking-wide">{siteSettings?.name || "DeviFact"}</span>
         </div>
 
         <div className="rounded-2xl p-6" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
@@ -4022,7 +3974,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           ) : (
             <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: colors.brass, color: colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
           )}
-          <span className="df-display text-lg font-semibold tracking-wide text-white">{siteSettings?.name || "Chantiflow"}</span>
+          <span className="df-display text-lg font-semibold tracking-wide text-white">{siteSettings?.name || "DeviFact"}</span>
         </button>
         <div className="hidden min-w-0 grow items-center justify-between gap-3 lg:flex">
           <div className="flex items-center gap-1">
@@ -4242,7 +4194,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const cellStyle = { border: "1px solid #B7B7B7", padding: "3px 5px", verticalAlign: "middle", whiteSpace: "nowrap" };
-  const watermarkText = upx(siteSettings?.name || "Chantiflow");
+  const watermarkText = upx(siteSettings?.name || "DeviFact");
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "7.5pt", lineHeight: 1.3,
@@ -4986,7 +4938,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const mono = { fontFamily: "'IBM Plex Mono', monospace" };
-  const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.4,
@@ -5302,7 +5254,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const garanties = computePvGaranties(doc);
   const typeInfo = PV_TYPES[doc.typeReception] || PV_TYPES.sans_reserves;
-  const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.4,
@@ -5617,7 +5569,7 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const duree = computeInterventionDuree(doc);
   const statut = STATUTS_RESOLUTION[doc.statutResolution] || STATUTS_RESOLUTION.resolu;
-  const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.4,
@@ -5936,7 +5888,7 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
   const mono = { fontFamily: "'IBM Plex Mono', monospace" };
   const montantTVA = (Number(doc.montantTotalHT) || 0) * (Number(doc.tva) || 0) / 100;
   const montantTTC = (Number(doc.montantTotalHT) || 0) + montantTVA;
-  const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.45,
@@ -6210,7 +6162,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const mono = { fontFamily: "'IBM Plex Mono', monospace" };
   const dateLimite = computeRelanceDateLimite(doc);
-  const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10pt", lineHeight: 1.5,
@@ -6481,7 +6433,7 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const range = computePlanningRange(doc);
   const monthMarkers = computeMonthMarkers(range);
-  const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
+  const watermarkText = (siteSettings?.name || "DeviFact").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "9.5pt", lineHeight: 1.4,
@@ -6980,7 +6932,7 @@ function PrestationsView({ prestations, saving, onSave, onDelete }) {
               <div className="df-mono w-16 shrink-0 text-right text-xs" style={{ color: colors.inkSoft }}>{p.tva}%</div>
               <div className="flex shrink-0 gap-2">
                 <button onClick={() => startEdit(p)} style={{ color: colors.slate }}><Pencil size={15} /></button>
-                <button onClick={() => { if (window.confirm(`Supprimer "${p.designation}" de la bibliothèque ?`)) onDelete(p.id); }} style={{ color: colors.brick }}><Trash2 size={15} /></button>
+                <button onClick={() => onDelete(p.id)} style={{ color: colors.brick }}><Trash2 size={15} /></button>
               </div>
             </div>
           ))}
@@ -7394,7 +7346,7 @@ function TeamView({ account }) {
                 <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${ROLE_COLORS[m.role]}18`, color: ROLE_COLORS[m.role] }}>{ROLE_LABELS[m.role]}</span>
               )}
               {isOwner && m.user_id !== account?.id && (
-                <button onClick={() => { if (window.confirm(`Retirer "${m.profiles?.email || "ce membre"}" de l'équipe ?`)) removeMember(m.id); }} title="Retirer de l'équipe" style={{ color: colors.brick }}><Trash2 size={15} /></button>
+                <button onClick={() => removeMember(m.id)} title="Retirer de l'équipe" style={{ color: colors.brick }}><Trash2 size={15} /></button>
               )}
             </div>
           ))}
