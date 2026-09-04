@@ -7940,6 +7940,17 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
   const [approvedMsg, setApprovedMsg] = useState(false);
   const [activatingPlanId, setActivatingPlanId] = useState(null);
   const [stripeReturnMsg, setStripeReturnMsg] = useState(null); // "succes" | "annule" | null
+  // Garde une trace des rafraîchissements différés (après paiement) pour
+  // pouvoir les annuler si la personne quitte cette page avant qu'ils
+  // ne se déclenchent — évite un appel réseau inutile une fois parti.
+  const refreshTimers = useRef([]);
+  function scheduleRefresh(delays) {
+    if (!onRefreshAccount) return;
+    delays.forEach((delay) => refreshTimers.current.push(setTimeout(onRefreshAccount, delay)));
+  }
+  useEffect(() => {
+    return () => refreshTimers.current.forEach(clearTimeout);
+  }, []);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const paiement = params.get("paiement");
@@ -7949,12 +7960,12 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
       const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : "");
       window.history.replaceState({}, "", newUrl);
     }
-    if (paiement === "succes" && onRefreshAccount) {
+    if (paiement === "succes") {
       // Le webhook Stripe peut mettre quelques secondes à confirmer le
       // paiement côté serveur — plusieurs tentatives espacées plutôt
       // qu'une seule, pour que "Forfait actuel" apparaisse tout seul
       // dès que possible, sans jamais avoir à recharger la page.
-      [2000, 5000, 9000].forEach((delay) => setTimeout(onRefreshAccount, delay));
+      scheduleRefresh([2000, 5000, 9000]);
     }
   }, []);
   const visiblePlans = plans.filter((p) => !p.hidden);
@@ -8066,7 +8077,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
               ) : showCard || showPaypal ? (
                 <div className="flex flex-col gap-2">
                   {showCard && <StripeCheckoutButton planId={plan.id} billingCycle={billing} organizationId={account?.organizationId} />}
-                  {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => { setApprovedMsg(true); [3000, 8000, 15000, 30000, 60000].forEach((delay) => setTimeout(onRefreshAccount, delay)); }} />}
+                  {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => { setApprovedMsg(true); scheduleRefresh([3000, 8000, 15000, 30000, 60000]); }} />}
                 </div>
               ) : (
                 <p className="rounded-lg py-2 text-center text-xs" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible</p>
