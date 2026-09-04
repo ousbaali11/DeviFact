@@ -1759,7 +1759,7 @@ function DeviFactAppInner() {
 
     let { data: memberships } = await db
       .from("organization_members")
-      .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status, activated_via_free_button )")
+      .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status, activated_via_free_button, expires_at, subscription_cancelled, stripe_subscription_id, paypal_subscription_id )")
       .eq("user_id", userId)
       .eq("status", "active")
       .order("created_at", { ascending: true });
@@ -1784,7 +1784,7 @@ function DeviFactAppInner() {
       } else {
         const { data: retried } = await db
           .from("organization_members")
-          .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status, activated_via_free_button )")
+          .select("role, organization_id, organizations ( id, name, plan, billing_cycle, payment_status, activated_via_free_button, expires_at, subscription_cancelled, stripe_subscription_id, paypal_subscription_id )")
           .eq("user_id", userId)
           .eq("status", "active")
           .order("created_at", { ascending: true });
@@ -1838,6 +1838,9 @@ function DeviFactAppInner() {
       billing: org?.billing_cycle || "mensuel",
       paymentStatus: org?.payment_status || "gratuit",
       needsRegularization,
+      subscriptionCancelled: org?.subscription_cancelled || false,
+      expiresAt: org?.expires_at || null,
+      hasStripeOrPaypal: !!(org?.stripe_subscription_id || org?.paypal_subscription_id),
     };
   }
   async function loadPlans() {
@@ -2270,6 +2273,42 @@ function DeviFactAppInner() {
   // Sûr : le prix vient de la table "plans" en base, que seul un admin
   // peut modifier (RLS) — un utilisateur ne peut pas déclencher ceci en
   // falsifiant un prix depuis son navigateur.
+  const [cancellingSubscription, setCancellingSubscription] = useState(false);
+  // Recharge le compte depuis la base — utile juste après un retour de
+  // paiement (Stripe/PayPal), pour que "Forfait actuel" apparaisse
+  // automatiquement dès que le paiement est confirmé côté serveur,
+  // sans que la personne ait à recharger la page elle-même.
+  async function refreshAccount() {
+    if (!account?.id) return;
+    const profile = await loadProfile(account.id, account.email, account.organizationId);
+    setAccount(profile);
+  }
+
+  async function cancelSubscription() {
+    if (!account?.organizationId) return;
+    if (!window.confirm("Résilier ton abonnement ? Tu gardes l'accès jusqu'à la fin de la période déjà payée, puis ton compte repassera automatiquement en gratuit.")) return;
+    setCancellingSubscription(true);
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const { data, error: fnError } = await db.functions.invoke("cancel-subscription", {
+        body: { organizationId: account.organizationId },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      if (fnError || data?.error) {
+        alert(`Impossible de résilier : ${data?.error || fnError?.message || "erreur inconnue"}`);
+        return;
+      }
+      alert(`Résiliation confirmée. Ton accès reste actif jusqu'au ${fr(data.expiresAt)}.`);
+      const profile = await loadProfile(account.id, account.email, account.organizationId);
+      setAccount(profile);
+    } catch (err) {
+      console.error("Erreur de résiliation d'abonnement", err);
+      alert("Impossible de résilier pour l'instant. Réessaie, et préviens-nous si ça persiste.");
+    } finally {
+      setCancellingSubscription(false);
+    }
+  }
+
   async function chooseZeroPricePlan(planId, billingCycle) {
     console.log("[Activer 0€] Démarrage — planId:", planId, "billingCycle:", billingCycle, "organizationId:", account?.organizationId);
     if (!account?.organizationId) {
@@ -3163,6 +3202,9 @@ function DeviFactAppInner() {
           plans={plans}
           onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); setView("dashboard"); }}
           onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) { setLimitNotice(false); setView("dashboard"); } }}
+          onCancelSubscription={cancelSubscription}
+          onRefreshAccount={refreshAccount}
+          cancellingSubscription={cancellingSubscription}
           limitNotice={limitNotice}
           documentCount={documents.length}
           siteSettings={siteSettings}
@@ -3816,7 +3858,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
       const { data: exists, error: checkError } = await db.rpc("email_has_account", { check_email: cleanEmail });
       if (checkError) {
         console.error("Erreur de vérification de l'email", checkError);
-        setError((err && typeof err === "object" && err.message) ? err.message : "Une erreur est survenue. Réessaie.");
+        setError(checkError.message || "Une erreur est survenue. Réessaie.");
         setBusy(false);
         return;
       }
@@ -7893,7 +7935,7 @@ function PayPalButton({ planId, organizationId, onApproved }) {
   );
 }
 
-function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNotice, documentCount, siteSettings }) {
+function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancelSubscription, cancellingSubscription, onRefreshAccount, limitNotice, documentCount, siteSettings }) {
   const [billing, setBilling] = useState(account?.billing || "mensuel");
   const [approvedMsg, setApprovedMsg] = useState(false);
   const [activatingPlanId, setActivatingPlanId] = useState(null);
@@ -7906,6 +7948,13 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
       params.delete("paiement");
       const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : "");
       window.history.replaceState({}, "", newUrl);
+    }
+    if (paiement === "succes" && onRefreshAccount) {
+      // Le webhook Stripe peut mettre quelques secondes à confirmer le
+      // paiement côté serveur — plusieurs tentatives espacées plutôt
+      // qu'une seule, pour que "Forfait actuel" apparaisse tout seul
+      // dès que possible, sans jamais avoir à recharger la page.
+      [2000, 5000, 9000].forEach((delay) => setTimeout(onRefreshAccount, delay));
     }
   }, []);
   const visiblePlans = plans.filter((p) => !p.hidden);
@@ -7920,6 +7969,27 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
       {limitNotice && (
         <div className="mx-auto mb-6 max-w-lg rounded-xl p-3 text-center text-sm" style={{ background: `${colors.brick}15`, color: colors.brick, border: `1px solid ${colors.brick}40` }}>
           Le forfait Gratuit est limité à {plans.find((p) => p.id === "gratuit")?.limit ?? 3} devis/factures ({documentCount} déjà créés). Passe à un forfait payant pour continuer.
+        </div>
+      )}
+      {account?.plan !== "gratuit" && account?.paymentStatus === "payé" && account?.hasStripeOrPaypal && (
+        <div className="mx-auto mb-6 max-w-lg rounded-xl p-4 text-center text-sm" style={{ background: account.subscriptionCancelled ? `${colors.brick}10` : colors.surface, border: `1px solid ${account.subscriptionCancelled ? colors.brick + "40" : colors.line}` }}>
+          {account.subscriptionCancelled ? (
+            <>
+              <p style={{ color: colors.brick }}>Abonnement résilié — ton accès reste actif jusqu'au <strong>{account.expiresAt ? fr(account.expiresAt) : "—"}</strong>, puis ton compte repassera automatiquement en gratuit.</p>
+            </>
+          ) : (
+            <>
+              <p style={{ color: colors.inkSoft }}>Abonnement actif{account.expiresAt ? ` — prochain renouvellement le ${fr(account.expiresAt)}` : ""}.</p>
+              <button
+                onClick={onCancelSubscription}
+                disabled={cancellingSubscription}
+                className="mt-2 text-xs font-medium underline"
+                style={{ color: colors.brick, opacity: cancellingSubscription ? 0.6 : 1 }}
+              >
+                {cancellingSubscription ? "Résiliation en cours…" : "Résilier mon abonnement"}
+              </button>
+            </>
+          )}
         </div>
       )}
       {stripeReturnMsg === "succes" && (
@@ -7996,7 +8066,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, limitNot
               ) : showCard || showPaypal ? (
                 <div className="flex flex-col gap-2">
                   {showCard && <StripeCheckoutButton planId={plan.id} billingCycle={billing} organizationId={account?.organizationId} />}
-                  {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => setApprovedMsg(true)} />}
+                  {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => { setApprovedMsg(true); [3000, 8000, 15000, 30000, 60000].forEach((delay) => setTimeout(onRefreshAccount, delay)); }} />}
                 </div>
               ) : (
                 <p className="rounded-lg py-2 text-center text-xs" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible</p>
