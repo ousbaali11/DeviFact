@@ -87,11 +87,20 @@ serve(async (req) => {
 
     const billingCycle = plan.paypal_plan_id_annual === paypalPlanId ? "annuel" : "mensuel";
 
+    // Renseigné dès maintenant (pas seulement aux renouvellements) —
+    // ne jamais laisser expires_at vide, sinon la résiliation n'aurait
+    // aucune date à laquelle finalement couper l'accès.
+    const initialExpiry = new Date();
+    if (billingCycle === "annuel") initialExpiry.setFullYear(initialExpiry.getFullYear() + 1);
+    else initialExpiry.setMonth(initialExpiry.getMonth() + 1);
+
     await dbAdmin.from("organizations").update({
       plan: plan.id,
       billing_cycle: billingCycle,
       payment_status: "payé",
       paypal_subscription_id: resource.id,
+      expires_at: initialExpiry.toISOString(),
+      subscription_cancelled: false,
       // Vrai paiement confirmé par PayPal : retire le marqueur
       // "activation gratuite", même si ce compte avait auparavant
       // utilisé le bouton "Activer (0€)" — il ne doit plus jamais être
@@ -102,10 +111,38 @@ serve(async (req) => {
   }
 
   if (eventType === "BILLING.SUBSCRIPTION.CANCELLED" || eventType === "BILLING.SUBSCRIPTION.SUSPENDED") {
-    const { error } = await dbAdmin.from("organizations")
-      .update({ plan: "gratuit", payment_status: "impayé" })
-      .eq("paypal_subscription_id", resource.id);
+    // Important : PayPal coupe l'abonnement immédiatement de son
+    // côté, mais la personne a déjà payé jusqu'à sa date
+    // d'échéance — on ne la fait donc PAS repasser en gratuit tout
+    // de suite. On la marque juste "résiliée", et c'est la tâche
+    // quotidienne (downgrade_expired_cancelled_subscriptions) qui
+    // finira le travail une fois expires_at vraiment dépassée. Si
+    // expires_at n'a jamais été renseignée (ne devrait pas arriver en
+    // fonctionnement normal), on coupe quand même immédiatement plutôt
+    // que de laisser un accès gratuit illimité par erreur.
+    const { data: org } = await dbAdmin.from("organizations").select("expires_at").eq("paypal_subscription_id", resource.id).maybeSingle();
+    const patch = org?.expires_at
+      ? { subscription_cancelled: true }
+      : { plan: "gratuit", payment_status: "gratuit", subscription_cancelled: false };
+    const { error } = await dbAdmin.from("organizations").update(patch).eq("paypal_subscription_id", resource.id);
     if (error) console.error("Erreur lors de la désactivation de l'abonnement", error);
+  }
+
+  if (eventType === "PAYMENT.SALE.COMPLETED") {
+    // Paiement de renouvellement réussi (mois ou année suivante) —
+    // repousse la date d'expiration en conséquence, pour que l'accès
+    // continue normalement.
+    const subscriptionId = resource.billing_agreement_id;
+    if (subscriptionId) {
+      const { data: plan } = await dbAdmin.from("organizations").select("billing_cycle").eq("paypal_subscription_id", subscriptionId).maybeSingle();
+      if (plan) {
+        const next = new Date();
+        if (plan.billing_cycle === "annuel") next.setFullYear(next.getFullYear() + 1);
+        else next.setMonth(next.getMonth() + 1);
+        const { error } = await dbAdmin.from("organizations").update({ expires_at: next.toISOString() }).eq("paypal_subscription_id", subscriptionId);
+        if (error) console.error("Erreur de mise à jour de la date d'expiration PayPal", error);
+      }
+    }
   }
 
   if (eventType === "PAYMENT.SALE.DENIED" || eventType === "BILLING.SUBSCRIPTION.PAYMENT.FAILED") {

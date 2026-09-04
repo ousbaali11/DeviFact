@@ -42,6 +42,14 @@ serve(async (req) => {
       const planId = session.metadata?.plan_id;
       const billingCycle = session.metadata?.billing_cycle;
       if (organizationId && planId) {
+        // Récupère la vraie date de fin de période payée directement
+        // depuis Stripe plutôt que de la calculer nous-mêmes — Stripe
+        // est la seule source fiable (essais gratuits, prorata...).
+        let expiresAt = null;
+        if (session.subscription) {
+          const sub = await stripe.subscriptions.retrieve(session.subscription as string);
+          expiresAt = new Date(sub.current_period_end * 1000).toISOString();
+        }
         const { error } = await dbAdmin.from("organizations").update({
           plan: planId,
           billing_cycle: billingCycle || "mensuel",
@@ -49,6 +57,8 @@ serve(async (req) => {
           activated_via_free_button: false,
           stripe_subscription_id: session.subscription || null,
           stripe_customer_id: session.customer || null,
+          expires_at: expiresAt,
+          subscription_cancelled: false,
         }).eq("id", organizationId);
         if (error) console.error("Erreur d'activation du forfait après paiement Stripe :", error);
       } else {
@@ -56,10 +66,22 @@ serve(async (req) => {
       }
     }
 
+    // Renouvellement automatique (paiement mensuel/annuel suivant) —
+    // repousse expires_at à la nouvelle date, pour que l'accès
+    // continue normalement.
+    if (event.type === "customer.subscription.updated") {
+      const subscription = event.data.object as Stripe.Subscription;
+      const { error } = await dbAdmin.from("organizations").update({
+        expires_at: new Date(subscription.current_period_end * 1000).toISOString(),
+        subscription_cancelled: subscription.cancel_at_period_end === true,
+      }).eq("stripe_subscription_id", subscription.id);
+      if (error) console.error("Erreur de mise à jour de la date d'expiration Stripe :", error);
+    }
+
     if (event.type === "customer.subscription.deleted") {
       const subscription = event.data.object as Stripe.Subscription;
       const { error } = await dbAdmin.from("organizations").update({
-        plan: "gratuit", payment_status: "gratuit",
+        plan: "gratuit", payment_status: "gratuit", subscription_cancelled: false,
       }).eq("stripe_subscription_id", subscription.id);
       if (error) console.error("Erreur de désactivation après annulation Stripe :", error);
     }
