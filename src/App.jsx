@@ -3200,8 +3200,8 @@ function DeviFactAppInner() {
         <PricingView
           account={account}
           plans={plans}
-          onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); setView("dashboard"); }}
-          onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) { setLimitNotice(false); setView("dashboard"); } }}
+          onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); }}
+          onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) setLimitNotice(false); }}
           onCancelSubscription={cancelSubscription}
           onRefreshAccount={refreshAccount}
           cancellingSubscription={cancellingSubscription}
