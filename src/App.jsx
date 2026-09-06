@@ -11,7 +11,7 @@ import {
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
-  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor,
+  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Instagram,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
 
@@ -2009,11 +2009,12 @@ function DeviFactAppInner() {
       desktopAppUrlWindows: data.desktop_app_url_windows || "",
       desktopAppUrlMac: data.desktop_app_url_mac || "",
       desktopAppEnabled: data.desktop_app_enabled || false,
+      contactInstagramUrl: data.contact_instagram_url || "",
     });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -2882,6 +2883,9 @@ function DeviFactAppInner() {
   }
 
   if (!account || !account.loggedIn) {
+    if (preAuthView === "contact") {
+      return <ContactView siteSettings={siteSettings} onBack={() => setPreAuthView("landing")} />;
+    }
     if (preAuthView === "landing") {
       return (
         <LandingPage
@@ -2889,6 +2893,7 @@ function DeviFactAppInner() {
           siteSettings={siteSettings}
           onGetStarted={() => { setAuthMode("signup"); setPreAuthView("auth"); }}
           onLogin={() => { setAuthMode("login"); setPreAuthView("auth"); }}
+          onContact={() => setPreAuthView("contact")}
         />
       );
     }
@@ -2898,16 +2903,23 @@ function DeviFactAppInner() {
   // Le prix de son forfait est passé de 0€ à un prix réel depuis son
   // activation gratuite — bloque l'accès jusqu'à ce qu'elle régularise
   // (choix mensuel/annuel, paiement réel). Ne s'applique jamais à un
-  // vrai paiement déjà effectué (Stripe/PayPal), ni à l'admin lui-même.
-  if (account.needsRegularization && !account.isAdmin) {
+  // vrai paiement déjà effectué (Stripe/PayPal), ni à l'admin lui-même,
+  // ni à la page Contact — qui doit toujours rester joignable, y
+  // compris pour quelqu'un de bloqué qui a besoin d'aide pour régler
+  // justement ce blocage.
+  if (account.needsRegularization && !account.isAdmin && view !== "contact") {
     return (
       <RegularizationScreen
         account={account}
         plans={plans}
         siteSettings={siteSettings}
         onLogout={logout}
+        onContact={() => setView("contact")}
       />
     );
+  }
+  if (view === "contact") {
+    return <ContactView siteSettings={siteSettings} onBack={() => setView("dashboard")} />;
   }
 
   const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
@@ -3203,6 +3215,7 @@ function DeviFactAppInner() {
           onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); }}
           onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) setLimitNotice(false); }}
           onCancelSubscription={cancelSubscription}
+          onContact={() => setView("contact")}
           onRefreshAccount={refreshAccount}
           cancellingSubscription={cancellingSubscription}
           limitNotice={limitNotice}
@@ -3527,7 +3540,128 @@ export default function DeviFactApp() {
   );
 }
 
-function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
+// Page "Nous contacter" — volontairement un composant à part, simple
+// et autonome, pour qu'il reste accessible aussi bien depuis la page
+// d'accueil (sans compte) que depuis l'intérieur de l'app (connecté)
+// — et surtout, JAMAIS bloqué par une histoire d'abonnement expiré :
+// quelqu'un qui n'a plus accès doit toujours pouvoir nous contacter
+// pour savoir comment réactiver son compte.
+function ContactView({ siteSettings, onBack }) {
+  const emptyForm = { nom: "", prenom: "", telephone: "", email: "", objet: "", message: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  function patch(p) {
+    setForm((f) => ({ ...f, ...p }));
+    if (error) setError("");
+  }
+
+  async function handleSubmit() {
+    if (!form.nom.trim() || !form.prenom.trim() || !form.email.trim() || !form.objet.trim() || !form.message.trim()) {
+      setError("Merci de remplir tous les champs obligatoires (téléphone excepté).");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      setError("Cette adresse email ne semble pas valide.");
+      return;
+    }
+    setSending(true);
+    setError("");
+    try {
+      const { data, error: fnError } = await db.functions.invoke("send-contact-message", { body: form });
+      if (fnError || data?.error) {
+        setError(data?.error || fnError?.message || "Une erreur est survenue. Réessaie dans un instant.");
+        return;
+      }
+      setSent(true);
+      setForm(emptyForm);
+    } catch (err) {
+      console.error("Erreur d'envoi du formulaire de contact", err);
+      setError("Impossible d'envoyer le message pour l'instant. Réessaie, ou écris-nous directement par email.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="mx-auto max-w-xl px-4 py-10 sm:py-16">
+        {onBack && (
+          <button onClick={onBack} className="mb-6 flex items-center gap-1 text-sm" style={{ color: colors.inkSoft }}>
+            <ArrowLeft size={15} /> Retour
+          </button>
+        )}
+        <h1 className="df-display mb-2 text-3xl font-semibold">Nous contacter</h1>
+        <p className="mb-6 text-sm" style={{ color: colors.inkSoft }}>
+          Une question, besoin d'aide pour ton abonnement, ou tu ne peux pas payer par carte ou PayPal depuis ton pays ? Écris-nous, on te répond directement.
+        </p>
+
+        <div className="mb-8 flex gap-3">
+          {siteSettings?.contactInstagramUrl && (
+            <a href={siteSettings.contactInstagramUrl} target="_blank" rel="noopener noreferrer" className="flex h-12 w-12 items-center justify-center rounded-full" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.ink }} title="Instagram">
+              <Instagram size={22} />
+            </a>
+          )}
+          <a href={`mailto:${siteSettings?.contactEmail || "contact@chantiflow.fr"}`} className="flex h-12 w-12 items-center justify-center rounded-full" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.ink }} title="Email">
+            <Mail size={22} />
+          </a>
+        </div>
+
+        {sent ? (
+          <div className="rounded-2xl p-6 text-center" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <Check size={32} style={{ color: colors.moss, margin: "0 auto 12px" }} />
+            <p className="font-medium">Message envoyé — merci !</p>
+            <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>On te répond dès que possible, généralement sous 24 à 48h.</p>
+            <button onClick={() => setSent(false)} className="mt-4 text-sm underline" style={{ color: colors.slate }}>Envoyer un autre message</button>
+          </div>
+        ) : (
+          <div className="space-y-3 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Prénom *</label>
+                <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={form.prenom} onChange={(e) => patch({ prenom: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Nom *</label>
+                <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={form.nom} onChange={(e) => patch({ nom: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Email *</label>
+                <input type="email" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={form.email} onChange={(e) => patch({ email: e.target.value })} placeholder="toi@exemple.fr" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Téléphone (avec indicatif)</label>
+                <input type="tel" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={form.telephone} onChange={(e) => patch({ telephone: e.target.value })} placeholder="+33 6 12 34 56 78" />
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Objet *</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={form.objet} onChange={(e) => patch({ objet: e.target.value })} placeholder="Ex : Question sur l'abonnement" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Message *</label>
+              <textarea rows={5} className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={form.message} onChange={(e) => patch({ message: e.target.value })} />
+            </div>
+            {error && <p className="text-sm" style={{ color: colors.brick }}>{error}</p>}
+            <button
+              onClick={handleSubmit}
+              disabled={sending}
+              className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium"
+              style={{ background: colors.brass, color: colors.ink, opacity: sending ? 0.7 : 1 }}
+            >
+              {sending ? <Loader2 size={15} className="animate-spin" /> : null} {sending ? "Envoi…" : "Envoyer le message"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LandingPage({ plans, siteSettings, onGetStarted, onLogin, onContact }) {
   const [openFaq, setOpenFaq] = useState(null);
   const [mobileMenu, setMobileMenu] = useState(false);
   const visiblePlans = plans.filter((p) => !p.hidden);
@@ -3701,7 +3835,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin }) {
       </section>
 
       <footer className="border-t px-6 py-8 text-center text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-        © 2026 {siteSettings.name} — <a href={`mailto:${siteSettings.contactEmail || "contact@chantiflow.fr"}`}>{siteSettings.contactEmail || "contact@chantiflow.fr"}</a>
+        © 2026 {siteSettings.name} — <button onClick={onContact} className="underline" style={{ color: colors.inkSoft }}>Nous contacter</button>
       </footer>
     </div>
   );
@@ -3785,7 +3919,7 @@ function ResetPasswordScreen({ siteSettings, onDone }) {
 // — la personne doit régulariser (choisir mensuel/annuel, payer
 // réellement) pour continuer. Ne s'affiche jamais pour un vrai
 // paiement déjà effectué.
-function RegularizationScreen({ account, plans, siteSettings, onLogout }) {
+function RegularizationScreen({ account, plans, siteSettings, onLogout, onContact }) {
   const [billing, setBilling] = useState(account.billing || "mensuel");
   const plan = plans.find((p) => p.id === account.plan);
   const price = billing === "annuel" ? plan?.annual : plan?.monthly;
@@ -3822,10 +3956,11 @@ function RegularizationScreen({ account, plans, siteSettings, onLogout }) {
             {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account.organizationId} onApproved={() => window.location.reload()} />}
           </div>
         ) : (
-          <p className="rounded-lg py-2 text-center text-xs" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible — contacte-nous en attendant.</p>
+          <button onClick={onContact} className="w-full rounded-lg py-2 text-center text-xs underline" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible — contacte-nous en attendant</button>
         )}
 
-        <button onClick={onLogout} className="mt-4 w-full text-center text-xs underline" style={{ color: colors.inkSoft }}>Se déconnecter</button>
+        <button onClick={onContact} className="mt-4 w-full text-center text-xs underline" style={{ color: colors.slate }}>Nous contacter</button>
+        <button onClick={onLogout} className="mt-2 w-full text-center text-xs underline" style={{ color: colors.inkSoft }}>Se déconnecter</button>
       </div>
     </div>
   );
@@ -4331,6 +4466,9 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             )}
           </div>
         )}
+        <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "contact" ? "white" : "rgba(255,255,255,0.65)", background: view === "contact" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Nous contacter">
+          <Mail size={15} />
+        </button>
         {account?.isAdmin && (
           <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "admin" ? "white" : "rgba(255,255,255,0.65)", background: view === "admin" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Admin">
             <Shield size={15} />
@@ -7935,7 +8073,7 @@ function PayPalButton({ planId, organizationId, onApproved }) {
   );
 }
 
-function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancelSubscription, cancellingSubscription, onRefreshAccount, limitNotice, documentCount, siteSettings }) {
+function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancelSubscription, cancellingSubscription, onRefreshAccount, onContact, limitNotice, documentCount, siteSettings }) {
   const [billing, setBilling] = useState(account?.billing || "mensuel");
   const [approvedMsg, setApprovedMsg] = useState(false);
   const [activatingPlanId, setActivatingPlanId] = useState(null);
@@ -8078,9 +8216,13 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
                 <div className="flex flex-col gap-2">
                   {showCard && <StripeCheckoutButton planId={plan.id} billingCycle={billing} organizationId={account?.organizationId} />}
                   {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => { setApprovedMsg(true); scheduleRefresh([3000, 8000, 15000, 30000, 60000]); }} />}
+                  <p className="text-center text-xs" style={{ color: colors.inkSoft }}>
+                    Carte bancaire ou PayPal indisponible dans ton pays ?{" "}
+                    <button onClick={onContact} className="underline" style={{ color: colors.slate }}>Contacte-nous</button>, on trouvera une solution.
+                  </p>
                 </div>
               ) : (
-                <p className="rounded-lg py-2 text-center text-xs" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible</p>
+                <button onClick={onContact} className="w-full rounded-lg py-2 text-center text-xs underline" style={{ background: colors.paper, color: colors.inkSoft }}>Paiement bientôt disponible — contacte-nous en attendant</button>
               )}
               </div>
             </div>
@@ -8260,7 +8402,12 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
         <div>
           <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Email de contact</label>
           <input type="email" className="df-input w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="contact@tondomaine.fr" value={local.contactEmail || ""} onChange={(e) => patch({ contactEmail: e.target.value })} />
-          <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Utilisé pour le bouton "Nous contacter" du forfait Entreprise et le pied de page du site.</p>
+          <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Utilisé pour le bouton "Nous contacter" du forfait Entreprise, le pied de page, et la page "Nous contacter" (adresse d'envoi du formulaire).</p>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Lien Instagram</label>
+          <input type="url" className="df-input w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="https://instagram.com/tonsite" value={local.contactInstagramUrl || ""} onChange={(e) => patch({ contactInstagramUrl: e.target.value })} />
+          <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Affiché sous forme d'icône sur la page "Nous contacter". Laisse vide pour ne pas l'afficher.</p>
         </div>
         <div>
           <label className="mb-2 block text-xs font-medium" style={{ color: colors.inkSoft }}>Logo du site</label>
