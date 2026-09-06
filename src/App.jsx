@@ -172,6 +172,26 @@ function InstagramIcon({ size = 20 }) {
   );
 }
 
+// Bouton "Enregistrer" en bas de chaque éditeur — marque le document
+// comme "Terminé" une fois cliqué. Reste discret et informatif une
+// fois déjà cliqué, plutôt que de disparaître (pour qu'on sache
+// toujours où on en est en revenant sur ce document plus tard).
+function FinalizeButton({ doc, onFinalize }) {
+  const isDone = doc?.workStage === "termine";
+  return (
+    <div className="no-print flex items-center justify-end gap-2 border-t px-6 py-4" style={{ borderColor: colors.line }}>
+      {isDone && <span className="text-xs" style={{ color: colors.inkSoft }}>Marqué comme terminé — modifie-le et enregistre à nouveau si besoin.</span>}
+      <button
+        onClick={onFinalize}
+        className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium"
+        style={{ background: isDone ? colors.moss : colors.brass, color: isDone ? "white" : colors.ink }}
+      >
+        {isDone ? <Check size={16} /> : null} {isDone ? "Terminé" : "Enregistrer"}
+      </button>
+    </div>
+  );
+}
+
 function useEscapeToClose(isOpen, onClose) {
   useEffect(() => {
     if (!isOpen) return;
@@ -1319,6 +1339,37 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
   fillCell(srv, COL.label, { bold: true, align: "center" });
 }
 
+// Détecte si un document ne contient encore aucune vraie saisie de la
+// personne — sert à ne jamais enregistrer un service ouvert "pour
+// voir" et refermé aussitôt sans rien avoir écrit dedans.
+function isDocumentEmpty(doc) {
+  if (!doc) return true;
+  if ((doc.client?.name || "").trim()) return false;
+  if (Array.isArray(doc.items) && doc.items.some((it) => (it.designation || "").trim())) return false;
+
+  // Champs propres à certains types, en plus de client/items déjà
+  // vérifiés ci-dessus pour tous les types.
+  const specificFields = {
+    situation: ["objet", "marcheNumero"],
+    pv_reception: ["objet", "marcheNumero"],
+    rapport: ["motifAppel", "diagnostic", "travauxRealises", "adresseIntervention", "technicien"],
+    contrat: ["objetTravaux", "montantTotalHT"],
+    relance: ["factureRef", "montantDu"],
+    planning: ["objet", "marcheNumero"],
+  };
+  if ((specificFields[doc.type] || []).some((f) => String(doc[f] || "").trim())) return false;
+
+  if (doc.type === "planning" && Array.isArray(doc.taches) && doc.taches.some((t) => (t.designation || "").trim())) return false;
+  if (doc.type === "pv_reception" && Array.isArray(doc.reserves) && doc.reserves.length > 0) return false;
+
+  // Les notes par défaut ("Merci de votre confiance." ou vide) ne
+  // comptent pas comme un vrai contenu — seulement si modifiées.
+  const defaultNotes = ["", "merci de votre confiance."];
+  if (!defaultNotes.includes((doc.notes || "").trim().toLowerCase())) return false;
+
+  return true;
+}
+
 function newDocument(type, documents) {
   const base = {
     id: nextId("doc"),
@@ -1732,6 +1783,13 @@ function DeviFactAppInner() {
   const [savingPrestations, setSavingPrestations] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
   const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_lastActiveId")) || null);
+  // Document tout juste ouvert ("Nouveau devis" etc.) mais jamais
+  // encore réellement enregistré — reste ici, en mémoire seulement,
+  // tant qu'il est vide. Dès qu'il contient un vrai contenu, il
+  // rejoint la vraie liste "documents" (voir updateDoc) et devient un
+  // brouillon normal. S'il reste vide et que la personne s'en va,
+  // il disparaît simplement, sans avoir jamais été enregistré nulle part.
+  const [pendingDoc, setPendingDoc] = useState(null);
   // Garde en mémoire l'identifiant de la personne dont les données sont
   // actuellement chargées — permet de savoir, dans le gestionnaire de
   // connexion, si un événement concerne vraiment un changement de
@@ -1739,6 +1797,7 @@ function DeviFactAppInner() {
   const currentUserIdRef = useRef(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("tous");
+  const [stageFilter, setStageFilter] = useState("tous"); // tous | brouillon | termine
   const [revisionCountry, setRevisionCountry] = useState("🇫🇷 FR");
   const [limitNotice, setLimitNotice] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -2479,7 +2538,13 @@ function DeviFactAppInner() {
     }
     const doc = type === "situation" ? newSituationDocument(documents) : type === "pv_reception" ? newPvReceptionDocument(documents) : type === "rapport" ? newRapportInterventionDocument(documents) : type === "contrat" ? newContratChantierDocument(documents) : type === "relance" ? newRelanceFormelleDocument(documents) : type === "planning" ? newPlanningChantierDocument(documents) : newDocument(type, documents);
     if (companyProfile.name) doc.company = { ...companyProfile };
-    persist([doc, ...documents]);
+    doc.workStage = "brouillon";
+    // N'enregistre PAS encore ce document — reste seulement en mémoire
+    // (pendingDoc) tant qu'il est vide. Il ne rejoint la vraie liste
+    // (et n'est réellement écrit en base) que dès sa première vraie
+    // saisie, voir updateDoc — sans ça, ouvrir "Nouveau devis" par
+    // erreur ou juste pour voir créait un brouillon vide inutile.
+    setPendingDoc(doc);
     setActiveId(doc.id);
     setView(type === "situation" ? "situation-editor" : type === "pv_reception" ? "pv-editor" : type === "rapport" ? "rapport-editor" : type === "contrat" ? "contrat-editor" : type === "relance" ? "relance-editor" : type === "planning" ? "planning-editor" : "editor");
   }
@@ -2514,12 +2579,47 @@ function DeviFactAppInner() {
     setView(target?.type === "revision" ? "revision-editor" : target?.type === "situation" ? "situation-editor" : target?.type === "pv_reception" ? "pv-editor" : target?.type === "rapport" ? "rapport-editor" : target?.type === "contrat" ? "contrat-editor" : target?.type === "relance" ? "relance-editor" : target?.type === "planning" ? "planning-editor" : "editor");
   }
   function backToDashboard() {
+    // Abandonne proprement le document "en attente" s'il n'a jamais
+    // reçu de vrai contenu — il disparaît simplement, jamais enregistré.
+    if (pendingDoc && pendingDoc.id === activeId) setPendingDoc(null);
     setView("dashboard");
     setActiveId(null);
   }
   function updateDoc(id, patch) {
     if (isLocked) return;
-    persist(documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
+    // Cas normal : le document existe déjà réellement (a déjà eu du
+    // contenu à un moment donné) — mise à jour habituelle.
+    if (documents.some((d) => d.id === id)) {
+      persist(documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
+      return;
+    }
+    // Sinon, c'est le document "en attente" (voir openNew) — tant
+    // qu'il reste vide, on ne fait que mettre à jour la mémoire, sans
+    // rien enregistrer. Dès qu'il contient un vrai contenu, c'est ICI
+    // qu'il rejoint pour de vrai la liste des documents, et devient un
+    // brouillon normal, comme les autres.
+    if (pendingDoc?.id === id) {
+      const merged = { ...pendingDoc, ...patch, updatedAt: Date.now() };
+      if (isDocumentEmpty(merged)) {
+        setPendingDoc(merged);
+      } else {
+        setPendingDoc(null);
+        persist([merged, ...documents]);
+      }
+    }
+  }
+  // Marque un document comme "Terminé" (voir bouton "Enregistrer" dans
+  // chaque éditeur) — impossible de "terminer" un document qui n'a
+  // encore aucun vrai contenu, même principe que pour ne jamais
+  // enregistrer un service resté vide.
+  function finalizeDoc(id) {
+    if (isLocked) return;
+    const doc = documents.find((d) => d.id === id) || (pendingDoc?.id === id ? pendingDoc : null);
+    if (!doc || isDocumentEmpty(doc)) {
+      alert("Il n'y a encore rien à enregistrer — remplis au moins un champ avant.");
+      return;
+    }
+    updateDoc(id, { workStage: "termine" });
   }
   function deleteDoc(id) {
     if (isLocked) return;
@@ -2786,13 +2886,14 @@ function DeviFactAppInner() {
   const filtered = useMemo(() => {
     return documents
       .filter((d) => typeFilter === "tous" || d.type === typeFilter)
+      .filter((d) => stageFilter === "tous" || (stageFilter === "termine" ? d.workStage === "termine" : d.workStage !== "termine"))
       .filter((d) => {
         if (!search.trim()) return true;
         const s = search.toLowerCase();
         return d.docNumber.toLowerCase().includes(s) || (d.client.name || "").toLowerCase().includes(s);
       })
       .sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [documents, typeFilter, search]);
+  }, [documents, typeFilter, stageFilter, search]);
 
   // Affiche un nombre limité de documents à la fois — sans ça, un
   // compte avec plusieurs centaines de documents accumulés au fil du
@@ -2801,7 +2902,7 @@ function DeviFactAppInner() {
   // documents, pas seulement ceux actuellement affichés.
   const PAGE_SIZE = 40;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [search, typeFilter]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [search, typeFilter, stageFilter]);
   const visibleFiltered = filtered.slice(0, visibleCount);
 
   const stats = useMemo(() => {
@@ -2881,7 +2982,14 @@ function DeviFactAppInner() {
     XLSX.writeFile(wb, `export-comptable-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
-  const activeDoc = documents.find((d) => d.id === activeId);
+  const activeDoc = documents.find((d) => d.id === activeId) || (pendingDoc?.id === activeId ? pendingDoc : undefined);
+  // Filet de sécurité valable pour TOUTE façon de quitter un document
+  // en attente encore vide (pas seulement "Retour au tableau de
+  // bord") — dès que ce n'est plus le document actuellement affiché,
+  // il est abandonné, jamais enregistré.
+  useEffect(() => {
+    if (pendingDoc && pendingDoc.id !== activeId) setPendingDoc(null);
+  }, [activeId, pendingDoc]);
 
   if (loading) {
     return (
@@ -2954,6 +3062,7 @@ function DeviFactAppInner() {
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onConvert={() => convertToInvoice(activeDoc.id)}
         onSaveClient={upsertClient}
@@ -2979,6 +3088,7 @@ function DeviFactAppInner() {
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onSaveClient={upsertClient}
         onGoToPricing={() => setView("pricing")}
@@ -2998,6 +3108,7 @@ function DeviFactAppInner() {
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onCreateNext={createNextSituationDoc}
         onGoToPricing={() => setView("pricing")}
@@ -3016,6 +3127,7 @@ function DeviFactAppInner() {
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onGoToPricing={() => setView("pricing")}
       />
@@ -3033,6 +3145,7 @@ function DeviFactAppInner() {
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onGoToPricing={() => setView("pricing")}
       />
@@ -3050,6 +3163,7 @@ function DeviFactAppInner() {
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onGoToPricing={() => setView("pricing")}
       />
@@ -3067,6 +3181,7 @@ function DeviFactAppInner() {
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onGoToPricing={() => setView("pricing")}
       />
@@ -3084,6 +3199,7 @@ function DeviFactAppInner() {
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onGoToPricing={() => setView("pricing")}
       />
@@ -3351,6 +3467,13 @@ function DeviFactAppInner() {
               </button>
             ))}
           </div>
+          <div className="flex gap-1 rounded-lg p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            {[["tous", "Tous"], ["brouillon", "Brouillons"], ["termine", "Terminés"]].map(([id, label]) => (
+              <button key={id} onClick={() => setStageFilter(id)} className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: stageFilter === id ? colors.ink : "transparent", color: stageFilter === id ? "white" : colors.inkSoft }}>
+                {label}
+              </button>
+            ))}
+          </div>
           {documents.length > 0 && (
             <button onClick={exportAccountingCSV} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.moss }} title="Liste de tous les documents avec montants HT/TVA/TTC, à donner à un comptable">
               <FileSpreadsheet size={15} /> Export comptable
@@ -3438,6 +3561,9 @@ function DeviFactAppInner() {
                   <div className="min-w-0 grow basis-40 truncate text-sm">{d.client.name || <span style={{ color: colors.inkSoft }}>Client non renseigné</span>}</div>
                   <div className="df-mono w-28 shrink-0 text-right text-sm font-medium">{formatMoney(totalTTC, d.currency)}</div>
                   <div className="w-24 shrink-0 text-right text-xs" style={{ color: colors.inkSoft }}>{fr(d.updatedAt)}</div>
+                  <span className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: d.workStage === "termine" ? `${colors.moss}18` : `${colors.inkSoft}18`, color: d.workStage === "termine" ? colors.moss : colors.inkSoft }}>
+                    {d.workStage === "termine" ? <Check size={11} /> : null} {d.workStage === "termine" ? "Terminé" : "Brouillon"}
+                  </span>
                   <select
                     value={d.status}
                     onChange={(e) => updateDoc(d.id, { status: e.target.value })}
@@ -4720,7 +4846,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
   );
 });
 
-function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onSaveClient, onGoToPricing }) {
+function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onSaveClient, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
@@ -5292,6 +5418,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         </div>
       </div>
 
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
       <PrintRevision ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -5384,7 +5511,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   );
 });
 
-function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onCreateNext, onGoToPricing }) {
+function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
@@ -5616,6 +5743,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
         </div>
       </div>
 
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
       <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -5729,7 +5857,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
   );
 });
 
-function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
@@ -5948,6 +6076,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
         </div>
       </div>
 
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
       <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -6063,7 +6192,7 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
   );
 });
 
-function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
@@ -6285,6 +6414,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
         </div>
       </div>
 
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
       <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -6380,7 +6510,7 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
   );
 });
 
-function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
@@ -6574,6 +6704,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
       <PrintContrat ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -6644,7 +6775,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
   );
 });
 
-function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
@@ -6836,6 +6967,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
       <PrintRelance ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -6942,7 +7074,7 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
   );
 });
 
-function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onGoToPricing }) {
+function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
@@ -7154,6 +7286,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
         </div>
       </div>
 
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
       <PrintPlanning ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -9097,7 +9230,7 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, isLocked, isViewer, onChange, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
+function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
@@ -10158,6 +10291,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
           </div>
         </div>
       </div>
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
       <PrintDocument ref={printRef} doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
