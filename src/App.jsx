@@ -3720,6 +3720,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin, onContact }) 
             <a href="#fonctionnalites">Fonctionnalités</a>
             <a href="#tarifs">Tarifs</a>
             <a href="#faq">FAQ</a>
+            <button onClick={onContact}>Contacter</button>
           </nav>
           <div className="hidden items-center gap-3 sm:flex">
             <button onClick={onLogin} className="text-sm font-medium" style={{ color: colors.inkSoft }}>Connexion</button>
@@ -3731,6 +3732,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin, onContact }) 
           <div className="flex flex-col gap-3 border-t px-6 py-4 sm:hidden" style={{ borderColor: colors.line }}>
             <a href="#fonctionnalites" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Fonctionnalités</a>
             <a href="#tarifs" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Tarifs</a>
+            <button onClick={onContact} className="text-left text-sm font-medium">Contacter</button>
             <button onClick={onLogin} className="text-left text-sm font-medium">Connexion</button>
             <button onClick={onGetStarted} className="rounded-lg px-4 py-2 text-center text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Essai gratuit</button>
           </div>
