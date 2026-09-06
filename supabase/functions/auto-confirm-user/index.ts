@@ -34,6 +34,25 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "userId requis" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Sécurité : n'autorise cette action que pour un compte créé très
+    // récemment (quelques minutes) — jamais pour cibler un compte
+    // existant au hasard. Pas de vérification par session ici
+    // volontairement : au moment précis de l'appel, juste après
+    // l'inscription, la session peut ne pas encore être pleinement
+    // établie (c'est justement pour contourner ce genre de souci de
+    // timing que cette fonction existe) — une fenêtre de temps courte
+    // est une protection fiable qui ne dépend de rien d'autre.
+    const { data: targetUser, error: getUserError } = await dbAdmin.auth.admin.getUserById(userId);
+    if (getUserError || !targetUser?.user) {
+      return new Response(JSON.stringify({ error: "Compte introuvable." }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const createdAt = new Date(targetUser.user.created_at).getTime();
+    const ageMinutes = (Date.now() - createdAt) / 60000;
+    if (ageMinutes > 10) {
+      console.error(`Tentative de confirmation forcée sur un compte trop ancien (${ageMinutes.toFixed(1)} min) : ${userId}`);
+      return new Response(JSON.stringify({ error: "Cette action n'est disponible que juste après l'inscription." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const { error } = await dbAdmin.auth.admin.updateUserById(userId, { email_confirm: true });
     if (error) {
       console.error("Erreur de confirmation forcée :", error);

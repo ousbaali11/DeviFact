@@ -32,7 +32,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "userId ou email requis" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    let query = dbAdmin.from("profiles").select("id, email, confirmation_token, confirmed_at");
+    let query = dbAdmin.from("profiles").select("id, email, confirmation_token, confirmed_at, created_at, last_confirmation_sent_at");
     query = userId ? query.eq("id", userId) : query.eq("email", email);
     const { data: profile, error: profileError } = await query.maybeSingle();
 
@@ -41,6 +41,40 @@ serve(async (req) => {
     }
     if (profile.confirmed_at) {
       return new Response(JSON.stringify({ error: "Ce compte est déjà confirmé" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Sécurité : sans ça, n'importe qui pourrait harceler une adresse
+    // email avec des envois répétés, ou épuiser le quota d'envoi.
+    // Deux cas légitimes seulement : un Admin qui relance quelqu'un
+    // (bouton "Relancer"), ou l'inscription toute fraîche de ce compte
+    // précis (quelques minutes) — jamais un appel ciblant un compte
+    // existant au hasard, sans lien avec l'appelant.
+    const authHeader = req.headers.get("Authorization") || "";
+    const authClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: { user: caller } } = await authClient.auth.getUser();
+    let isAllowed = false;
+    if (caller) {
+      const { data: callerProfile } = await dbAdmin.from("profiles").select("is_admin").eq("id", caller.id).maybeSingle();
+      isAllowed = !!callerProfile?.is_admin;
+    }
+    if (!isAllowed) {
+      const ageMinutes = (Date.now() - new Date(profile.created_at).getTime()) / 60000;
+      isAllowed = ageMinutes <= 10;
+    }
+    if (!isAllowed) {
+      return new Response(JSON.stringify({ error: "Non autorisé." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    // Limite de fréquence — même pour un cas légitime, jamais plus
+    // d'un envoi toutes les 60 secondes pour le même compte.
+    if (profile.last_confirmation_sent_at) {
+      const secondsSinceLast = (Date.now() - new Date(profile.last_confirmation_sent_at).getTime()) / 1000;
+      if (secondsSinceLast < 60) {
+        return new Response(JSON.stringify({ error: "Un email a déjà été envoyé il y a moins d'une minute — patiente un peu avant de réessayer." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     // Génère un nouveau token à chaque envoi — invalide l'ancien lien

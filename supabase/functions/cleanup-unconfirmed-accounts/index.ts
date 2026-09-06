@@ -20,6 +20,17 @@ const corsHeaders = {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
+  // Sécurité : cette fonction ne doit être déclenchée que par la
+  // tâche automatique quotidienne, jamais par un appel public direct
+  // depuis internet — même si l'impact réel serait limité (elle ne
+  // supprime que des comptes déjà censés l'être), un appel répété
+  // sans raison reste inutile à autoriser.
+  const providedSecret = req.headers.get("x-cron-secret") || "";
+  const expectedSecret = Deno.env.get("CRON_SECRET") || "";
+  if (!expectedSecret || providedSecret !== expectedSecret) {
+    return new Response(JSON.stringify({ error: "Non autorisé" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
   try {
     const eightWeeksAgo = new Date(Date.now() - 8 * 7 * 24 * 60 * 60 * 1000).toISOString();
 
