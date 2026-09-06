@@ -2083,11 +2083,12 @@ function DeviFactAppInner() {
       desktopAppUrlMac: data.desktop_app_url_mac || "",
       desktopAppEnabled: data.desktop_app_enabled || false,
       contactInstagramUrl: data.contact_instagram_url || "",
+      landingPageVersion: data.landing_page_version || "classique",
     });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", landingPageVersion: "landing_page_version" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -3009,8 +3010,9 @@ function DeviFactAppInner() {
       return <ContactView siteSettings={siteSettings} onBack={() => setPreAuthView("landing")} />;
     }
     if (preAuthView === "landing") {
+      const LandingComponent = siteSettings?.landingPageVersion === "avancee" ? LandingPageAvancee : LandingPage;
       return (
-        <LandingPage
+        <LandingComponent
           plans={plans}
           siteSettings={siteSettings}
           onGetStarted={() => { setAuthMode("signup"); setPreAuthView("auth"); }}
@@ -3797,6 +3799,144 @@ function ContactView({ siteSettings, onBack }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Nouvelle version, plus avancée, de la page d'accueil — activable
+// depuis Admin → Apparence du site, sans jamais toucher à l'ancienne
+// (gardée intacte juste après, voir LandingPage) ni à aucune logique
+// des services du site : uniquement de la présentation (HTML/CSS).
+function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onContact }) {
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const visiblePlans = plans.filter((p) => !p.hidden);
+  return (
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.surface, color: colors.ink }}>
+      <GlobalStyle />
+
+      {/* Barre de navigation */}
+      <nav className="flex items-center justify-between border-b px-6 py-4 sm:px-10 lg:px-16" style={{ borderColor: colors.line }}>
+        <div className="flex items-center gap-2.5">
+          {siteSettings?.logo ? (
+            <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth || 34, height: siteSettings.logoHeight || 34, objectFit: "contain" }} />
+          ) : (
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-display text-sm font-bold" style={{ background: colors.ink, color: colors.brass }}>{initials(siteSettings?.name) || "C"}</div>
+          )}
+          <span className="df-display text-lg font-bold">{siteSettings?.name || "Chantiflow"}</span>
+        </div>
+        <div className="hidden items-center gap-8 text-sm font-medium lg:flex" style={{ color: colors.inkSoft }}>
+          <a href="#fonctionnalites">Fonctionnalités</a>
+          <a href="#tarifs">Tarifs</a>
+          <a href="#faq">FAQ</a>
+          <button onClick={onContact}>Contacter</button>
+        </div>
+        <div className="hidden items-center gap-3 lg:flex">
+          <button onClick={onLogin} className="text-sm font-semibold">Connexion</button>
+          <button onClick={onGetStarted} className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white" style={{ background: colors.ink }}>Essai gratuit</button>
+        </div>
+        <button onClick={() => setMobileMenu((v) => !v)} className="lg:hidden" title="Menu" aria-label="Ouvrir le menu"><Menu size={22} /></button>
+      </nav>
+      {mobileMenu && (
+        <div className="flex flex-col gap-4 border-b px-6 py-5 lg:hidden" style={{ borderColor: colors.line }}>
+          <a href="#fonctionnalites" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Fonctionnalités</a>
+          <a href="#tarifs" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Tarifs</a>
+          <button onClick={onContact} className="text-left text-sm font-medium">Contacter</button>
+          <button onClick={onLogin} className="text-left text-sm font-semibold">Connexion</button>
+          <button onClick={onGetStarted} className="rounded-lg px-4 py-2.5 text-center text-sm font-semibold text-white" style={{ background: colors.ink }}>Essai gratuit</button>
+        </div>
+      )}
+
+      {/* Hero */}
+      <section className="px-6 pb-16 pt-16 text-center sm:px-10 sm:pt-20 lg:px-16">
+        <div className="mx-auto mb-7 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold sm:text-sm" style={{ background: colors.paper, color: colors.inkSoft }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: colors.moss }} /> Nouveau : logiciel de bureau Mac & Windows
+        </div>
+        <h1 className="df-display mx-auto max-w-3xl text-4xl font-bold leading-tight tracking-tight sm:text-5xl lg:text-[58px]">
+          La gestion administrative, <span style={{ color: colors.brass }}>enfin simple</span> pour votre activité
+        </h1>
+        <p className="mx-auto mt-6 max-w-lg text-base sm:text-lg" style={{ color: colors.inkSoft }}>
+          Devis, factures, bons de commande et bien plus — créés en quelques clics, pensés pour les artisans et indépendants qui n'ont pas de temps à perdre.
+        </p>
+        <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <button onClick={onGetStarted} className="flex w-full items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-base font-semibold text-white sm:w-auto" style={{ background: colors.ink }}>
+            Essayer gratuitement <ArrowRight size={17} />
+          </button>
+          <a href="#fonctionnalites" className="w-full rounded-xl border px-7 py-3.5 text-center text-base font-semibold sm:w-auto" style={{ borderColor: colors.line }}>Voir les fonctionnalités</a>
+        </div>
+        <p className="mt-4 text-xs sm:text-sm" style={{ color: colors.inkSoft }}>Sans carte bancaire — configuré en 2 minutes</p>
+
+        {/* Aperçu produit stylisé */}
+        <div className="mx-auto mt-14 max-w-4xl rounded-2xl p-2.5 sm:p-3.5" style={{ background: colors.ink, boxShadow: "0 40px 80px -20px rgba(27,42,51,0.35)" }}>
+          <div className="flex flex-col gap-4 rounded-xl p-5 sm:flex-row sm:p-7" style={{ background: colors.paper }}>
+            <div className="hidden w-32 shrink-0 flex-col gap-2.5 sm:flex">
+              {[70, 90, 60, 80].map((w, i) => <div key={i} className="h-3 rounded" style={{ width: `${w}%`, background: "rgba(27,42,51,0.1)" }} />)}
+            </div>
+            <div className="flex-1 rounded-lg p-5 text-left" style={{ background: colors.surface }}>
+              <div className="mb-4 h-4 w-2/5 rounded" style={{ background: colors.paper }} />
+              <div className="mb-2.5 h-3 w-4/5 rounded" style={{ background: colors.paper }} />
+              <div className="mb-4 h-3 w-3/5 rounded" style={{ background: colors.paper }} />
+              <div className="flex items-center justify-between rounded-lg px-4 py-3 font-bold" style={{ background: colors.paper }}>
+                <span>Total TTC</span><span>3 450,00 €</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Fonctionnalités */}
+      <section id="fonctionnalites" className="px-6 py-20 sm:px-10 lg:px-16" style={{ background: colors.paper }}>
+        <div className="mx-auto mb-14 max-w-xl text-center">
+          <div className="mb-3 text-xs font-bold uppercase tracking-widest sm:text-sm" style={{ color: colors.brass }}>Fonctionnalités</div>
+          <h2 className="df-display text-3xl font-bold tracking-tight sm:text-4xl">Tout ce qu'il faut, rien de superflu</h2>
+          <p className="mt-3 text-base sm:text-lg" style={{ color: colors.inkSoft }}>Chaque outil est pensé pour un vrai besoin du métier, pas pour impressionner.</p>
+        </div>
+        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            { icon: FileText, title: "Devis & factures", desc: "Créés en quelques minutes, envoyés en un clic, toujours professionnels." },
+            { icon: ClipboardList, title: "Bons de commande", desc: "Gérez vos commandes fournisseurs sans jongler entre plusieurs outils." },
+            { icon: Users, title: "Suivi clients", desc: "Toutes vos coordonnées et l'historique de chaque client, au même endroit." },
+            { icon: TrendingUp, title: "Révisions de prix", desc: "Calculs automatiques, conformes aux indices officiels du secteur." },
+            { icon: Monitor, title: "Logiciel de bureau", desc: "Disponible aussi en application Mac et Windows, avec mise à jour automatique." },
+            { icon: Lock, title: "Sécurisé", desc: "Vos données et celles de vos clients, protégées et jamais partagées." },
+          ].map(({ icon: Icon, title, desc }) => (
+            <div key={title} className="rounded-2xl p-6" style={{ background: colors.surface }}>
+              <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><Icon size={20} /></div>
+              <h3 className="mb-1.5 text-base font-bold">{title}</h3>
+              <p className="text-sm" style={{ color: colors.inkSoft }}>{desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Tarifs (réutilise la logique existante, juste la présentation) */}
+      <section id="tarifs" className="px-6 py-20 sm:px-10 lg:px-16">
+        <div className="mx-auto mb-14 max-w-xl text-center">
+          <div className="mb-3 text-xs font-bold uppercase tracking-widest sm:text-sm" style={{ color: colors.brass }}>Tarifs</div>
+          <h2 className="df-display text-3xl font-bold tracking-tight sm:text-4xl">Un tarif simple, sans surprise</h2>
+        </div>
+        <div className="mx-auto flex max-w-5xl flex-wrap justify-center gap-5">
+          {visiblePlans.map((plan) => (
+            <div key={plan.id} className="w-full max-w-xs rounded-2xl p-6" style={{ border: `1px solid ${colors.line}` }}>
+              <h3 className="df-display text-lg font-bold">{plan.name}</h3>
+              <div className="my-3"><span className="df-display text-3xl font-bold">{plan.monthly}€</span><span className="text-sm" style={{ color: colors.inkSoft }}> /mois</span></div>
+              <button onClick={onGetStarted} className="mt-2 w-full rounded-lg py-2.5 text-sm font-semibold" style={{ background: colors.paper, color: colors.ink }}>Choisir</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Appel à l'action final */}
+      <section className="mx-6 mb-20 rounded-3xl px-6 py-14 text-center sm:mx-10 sm:px-10 lg:mx-16">
+        <div className="rounded-3xl px-6 py-14" style={{ background: colors.ink }}>
+          <h2 className="df-display text-2xl font-bold text-white sm:text-3xl">Prêt à simplifier votre gestion ?</h2>
+          <p className="mt-3 text-sm sm:text-base" style={{ color: "rgba(255,255,255,0.7)" }}>Essai gratuit, sans carte bancaire, configuré en 2 minutes.</p>
+          <button onClick={onGetStarted} className="mt-7 rounded-xl px-8 py-3.5 text-base font-bold" style={{ background: colors.brass, color: colors.ink }}>Créer mon compte gratuitement</button>
+        </div>
+      </section>
+
+      <footer className="border-t px-6 py-8 text-center text-xs sm:px-10 lg:px-16" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+        © 2026 {siteSettings.name} — <button onClick={onContact} className="underline" style={{ color: colors.inkSoft }}>Nous contacter</button>
+      </footer>
     </div>
   );
 }
@@ -8773,6 +8913,30 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
 
       {tab === "apparence" && (
         <div className="space-y-3">
+          <CollapsibleSection title="Page d'accueil" subtitle={siteSettings.landingPageVersion === "avancee" ? "Version avancée" : "Version classique"} icon={LayoutDashboard} defaultOpen>
+            <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+              Choisis la page vue par les visiteurs qui ne sont pas encore connectés — les deux restent disponibles, tu peux revenir en arrière à tout moment sans rien perdre.
+            </p>
+            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
+              <button
+                onClick={() => onUpdateSiteSettings({ landingPageVersion: "classique" })}
+                className="rounded-xl p-4 text-left"
+                style={{ border: `2px solid ${siteSettings.landingPageVersion !== "avancee" ? colors.brass : colors.line}`, background: colors.surface }}
+              >
+                <div className="flex items-center gap-2 text-sm font-semibold">Classique {siteSettings.landingPageVersion !== "avancee" && <Check size={14} style={{ color: colors.brass }} />}</div>
+                <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>La page d'origine du site, simple et directe.</p>
+              </button>
+              <button
+                onClick={() => onUpdateSiteSettings({ landingPageVersion: "avancee" })}
+                className="rounded-xl p-4 text-left"
+                style={{ border: `2px solid ${siteSettings.landingPageVersion === "avancee" ? colors.brass : colors.line}`, background: colors.surface }}
+              >
+                <div className="flex items-center gap-2 text-sm font-semibold">Avancée {siteSettings.landingPageVersion === "avancee" && <Check size={14} style={{ color: colors.brass }} />}</div>
+                <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Mise en page plus travaillée — aperçu produit, section fonctionnalités détaillée.</p>
+              </button>
+            </div>
+          </CollapsibleSection>
+
           <CollapsibleSection title="Apparence du site" subtitle={THEMES[siteSettings.theme]?.label} icon={Palette}>
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
               Choisis un thème de couleurs pour tout le site — le changement s'applique immédiatement pour tous les visiteurs.
