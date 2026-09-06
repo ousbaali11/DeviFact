@@ -11,7 +11,7 @@ import {
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
-  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Instagram,
+  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
 
@@ -158,6 +158,20 @@ function applyTheme(themeId) {
 
 // Ferme un menu déroulant/popover avec la touche Échap — au clavier,
 // jusqu'ici seul un clic en dehors du menu le fermait.
+// Dessinée à la main plutôt qu'importée d'une bibliothèque d'icônes —
+// lucide-react ne fournit pas d'icônes de marques (Instagram, etc.),
+// contrairement aux icônes génériques utilisées partout ailleurs sur
+// le site.
+function InstagramIcon({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+      <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+    </svg>
+  );
+}
+
 function useEscapeToClose(isOpen, onClose) {
   useEffect(() => {
     if (!isOpen) return;
@@ -3602,7 +3616,7 @@ function ContactView({ siteSettings, onBack }) {
         <div className="mb-8 flex gap-3">
           {siteSettings?.contactInstagramUrl && (
             <a href={siteSettings.contactInstagramUrl} target="_blank" rel="noopener noreferrer" className="flex h-12 w-12 items-center justify-center rounded-full" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.ink }} title="Instagram">
-              <Instagram size={22} />
+              <InstagramIcon size={22} />
             </a>
           )}
           <a href={`mailto:${siteSettings?.contactEmail || "contact@chantiflow.fr"}`} className="flex h-12 w-12 items-center justify-center rounded-full" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.ink }} title="Email">
