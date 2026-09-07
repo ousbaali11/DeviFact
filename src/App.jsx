@@ -3277,7 +3277,7 @@ function DeviFactAppInner() {
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} />
+        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} siteSettings={siteSettings} />
       </div>
     );
   }
@@ -3328,7 +3328,7 @@ function DeviFactAppInner() {
         <GlobalStyle />
         <TopNav {...navProps} />
         {hasAccess(account, "pro") ? (
-          <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} />
+          <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} siteSettings={siteSettings} />
         ) : (
           <LockedFeature onGoToPricing={() => setView("pricing")} />
         )}
@@ -7588,7 +7588,7 @@ function CountrySelect({ value, onChange, options, placeholder = "— Non préci
   );
 }
 
-function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing }) {
+function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing, siteSettings }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [nameError, setNameError] = useState(false);
@@ -7663,6 +7663,24 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
           <p className="df-display mt-3 text-lg font-semibold">Aucun client enregistré</p>
           <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Ajoute un client ici, ou enregistre-le directement depuis un devis.</p>
         </div>
+      ) : siteSettings?.landingPageVersion === "avancee" ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((c) => (
+            <div key={c.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+              <div className="flex items-start justify-between">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full df-display text-sm font-bold" style={{ background: colors.paper, color: colors.ink }}>{initials(c.name) || "?"}</div>
+                <div className="flex gap-2">
+                  <button onClick={() => startEdit(c)} disabled={isLocked} style={{ color: isLocked ? colors.line : colors.slate, cursor: isLocked ? "not-allowed" : "pointer" }}><Pencil size={15} /></button>
+                  <button onClick={() => onDelete(c.id)} disabled={isLocked} title="Supprimer le client" style={{ color: isLocked ? colors.line : colors.brick, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
+                </div>
+              </div>
+              <div className="truncate text-sm font-semibold">{c.name}</div>
+              <div className="truncate text-xs" style={{ color: colors.inkSoft }}>{c.email || "—"}</div>
+              <div className="text-xs" style={{ color: colors.inkSoft }}>{c.phone || "—"}</div>
+              <div className="df-mono mt-1 text-xs" style={{ color: colors.brassDark }}>{countDocs(c.id)} document(s)</div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           {filtered.map((c, idx) => (
@@ -7683,7 +7701,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
   );
 }
 
-function PrestationsView({ prestations, saving, onSave, onDelete }) {
+function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [designationError, setDesignationError] = useState(false);
@@ -7747,6 +7765,25 @@ function PrestationsView({ prestations, saving, onSave, onDelete }) {
           <Library size={28} style={{ color: colors.inkSoft }} />
           <p className="df-display mt-3 text-lg font-semibold">Aucune prestation enregistrée</p>
           <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Ajoute une prestation ici, ou depuis une ligne d'un devis avec l'icône signet.</p>
+        </div>
+      ) : siteSettings?.landingPageVersion === "avancee" ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((p) => (
+            <div key={p.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 truncate text-sm font-semibold">{p.designation}</div>
+                <div className="flex shrink-0 gap-2">
+                  <button onClick={() => startEdit(p)} style={{ color: colors.slate }}><Pencil size={15} /></button>
+                  <button onClick={() => { if (window.confirm(`Supprimer "${p.designation}" de la bibliothèque ?`)) onDelete(p.id); }} title="Supprimer" style={{ color: colors.brick }}><Trash2 size={15} /></button>
+                </div>
+              </div>
+              {p.category && <span className="w-fit rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: colors.paper, color: colors.inkSoft }}>{p.category}</span>}
+              <div className="flex items-baseline justify-between">
+                <span className="df-display text-lg font-bold">{eur(Number(p.unitPrice) || 0)}</span>
+                <span className="text-xs" style={{ color: colors.inkSoft }}>{p.unit} · TVA {p.tva}%</span>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
