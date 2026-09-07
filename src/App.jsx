@@ -10169,6 +10169,14 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
 
           <div className="mb-8 flex flex-wrap items-start justify-between gap-6 border-b pb-6" style={{ borderColor: colors.line }}>
             <div>
+              {siteSettings?.landingPageVersion === "avancee" && (() => {
+                const TypeIcon = docTypeIcon(localDoc.type);
+                return (
+                  <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: `${docTypeColor(localDoc.type)}18`, color: docTypeColor(localDoc.type) }}>
+                    <TypeIcon size={20} />
+                  </div>
+                );
+              })()}
               <div className="df-display text-3xl font-semibold uppercase tracking-wide">{docTypeLabel(localDoc.type)}</div>
               <input className="df-input df-mono mt-2 rounded-md px-2 py-1 text-sm" style={inputStyle} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
               <div className="mt-2 flex items-center gap-1.5">
@@ -10199,7 +10207,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
           </div>
 
           <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
+            <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}`, background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : "transparent" }}>
               <div className="mb-2 flex items-center justify-between">
                 <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Émetteur</div>
                 <div className="no-print flex gap-1 rounded-md p-0.5" style={{ background: colors.paper }}>
@@ -10217,7 +10225,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Téléphone" value={localDoc.company.phone} onChange={(e) => patchDeep("company", { phone: e.target.value })} />
               </div>
             </div>
-            <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
+            <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}`, background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : "transparent" }}>
               <div className="mb-2 flex items-center justify-between">
                 <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>{localDoc.type === "commande" ? "Fournisseur" : "Client"}</div>
                 <div className="no-print flex gap-1 rounded-md p-0.5" style={{ background: colors.paper }}>
