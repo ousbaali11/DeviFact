@@ -39,17 +39,16 @@ const colors = {
 // cette identité propre (anthracite + émeraude), pour un vrai
 // changement d'ambiance, pas juste une variante du même marine/laiton.
 const adv = {
-  ink: "#18181B",        // anthracite, remplace le bleu marine
+  ink: "#27272A",         // texte foncé (gris anthracite doux, jamais noir pur)
   inkSoft: "#71717A",
-  paper: "#F4F4F5",
+  paper: "#F9FAFB",       // fond général très clair
   surface: "#FFFFFF",
-  accent: "#0D9488",     // émeraude/sarcelle, remplace le laiton/orange
-  accentDark: "#0F766E",
-  accentSoft: "#CCFBF1",
-  indigo: "#6366F1",     // touche secondaire (au lieu du slate bleu)
-  moss: "#16A34A",
-  brick: "#DC2626",
+  sidebarBg: "#FFFFFF",   // barre latérale claire — plus de fond noir dominant
+  accent: "#4F46E5",      // indigo simple et clair, un seul accent, pas de turquoise
+  accentSoft: "#EEF2FF",
   line: "#E4E4E7",
+  brick: "#DC2626",
+  moss: "#16A34A",
 };
 
 // Bibliothèque de thèmes — valeurs réelles utilisées par chaque
@@ -3448,34 +3447,34 @@ function DeviFactAppInner() {
           </div>
         )}
         {siteSettings?.landingPageVersion === "avancee" ? (
-          <div className="mb-6 overflow-hidden rounded-3xl" style={{ background: adv.ink }}>
+          <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: adv.surface, borderColor: adv.line }}>
             <div className="p-6 sm:p-8">
-              <h1 className="df-display text-2xl font-bold text-white sm:text-3xl">Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
-              <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.65)" }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
+              <h1 className="df-display text-xl font-bold sm:text-2xl" style={{ color: adv.ink }}>Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
+              <p className="mt-1 text-xs" style={{ color: adv.inkSoft }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
               <div className="mt-6 flex flex-wrap gap-3">
                 {["devis", "facture", "commande", "situation"].map((id) => {
                   const svc = getService(id);
                   if (!svc) return null;
                   const SvcIcon = svc.icon;
                   return (
-                    <button key={id} onClick={() => openNewService(id)} className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold" style={{ background: "rgba(255,255,255,0.1)", color: "white" }}>
-                      <SvcIcon size={16} style={{ color: adv.accent }} /> {svc.label}
+                    <button key={id} onClick={() => openNewService(id)} className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold" style={{ background: adv.paper, color: adv.ink }}>
+                      <SvcIcon size={15} style={{ color: adv.accent }} /> {svc.label}
                     </button>
                   );
                 })}
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-px sm:grid-cols-3" style={{ background: "rgba(255,255,255,0.08)" }}>
+            <div className="grid grid-cols-1 gap-px sm:grid-cols-3" style={{ background: adv.line }}>
               {[
                 { icon: Inbox, label: "Devis en attente de réponse", value: stats.enAttenteCount, sub: eur(stats.montantEnAttente) },
                 { icon: AlertTriangle, label: "Factures impayées", value: stats.impayeesCount, sub: eur(stats.montantImpaye) },
                 { icon: TrendingUp, label: "Taux de signature des devis", value: stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`, sub: "devis envoyés → signés" },
               ].map(({ icon: Icon, label, value, sub }) => (
-                <div key={label} className="p-6" style={{ background: adv.ink }}>
-                  <Icon size={18} style={{ color: adv.accent }} />
-                  <div className="df-display mt-3 text-3xl font-bold text-white">{value}</div>
-                  <div className="mt-1 text-sm font-medium" style={{ color: "rgba(255,255,255,0.7)" }}>{label}</div>
-                  <div className="df-mono mt-1 text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>{sub}</div>
+                <div key={label} className="p-6" style={{ background: adv.surface }}>
+                  <Icon size={17} style={{ color: adv.accent }} />
+                  <div className="df-display mt-3 text-2xl font-bold" style={{ color: adv.ink }}>{value}</div>
+                  <div className="mt-1 text-xs font-medium" style={{ color: adv.inkSoft }}>{label}</div>
+                  <div className="df-mono mt-1 text-[11px]" style={{ color: adv.inkSoft }}>{sub}</div>
                 </div>
               ))}
             </div>
@@ -3932,7 +3931,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
           {siteSettings?.logo ? (
             <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth || 34, height: siteSettings.logoHeight || 34, objectFit: "contain" }} />
           ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-display text-sm font-bold" style={{ background: adv.ink, color: adv.accent }}>{initials(siteSettings?.name) || "C"}</div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-display text-sm font-bold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "C"}</div>
           )}
           <span className="df-display text-lg font-bold">{siteSettings?.name || "Chantiflow"}</span>
         </div>
@@ -3944,7 +3943,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
         </div>
         <div className="hidden items-center gap-3 lg:flex">
           <button onClick={onLogin} className="text-sm font-semibold">Connexion</button>
-          <button onClick={onGetStarted} className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white" style={{ background: adv.ink }}>Essai gratuit</button>
+          <button onClick={onGetStarted} className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white" style={{ background: adv.accent }}>Essai gratuit</button>
         </div>
         <button onClick={() => setMobileMenu((v) => !v)} className="lg:hidden" title="Menu" aria-label="Ouvrir le menu"><Menu size={22} /></button>
       </nav>
@@ -3954,7 +3953,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
           <a href="#tarifs" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Tarifs</a>
           <button onClick={onContact} className="text-left text-sm font-medium">Contacter</button>
           <button onClick={onLogin} className="text-left text-sm font-semibold">Connexion</button>
-          <button onClick={onGetStarted} className="rounded-lg px-4 py-2.5 text-center text-sm font-semibold text-white" style={{ background: adv.ink }}>Essai gratuit</button>
+          <button onClick={onGetStarted} className="rounded-lg px-4 py-2.5 text-center text-sm font-semibold text-white" style={{ background: adv.accent }}>Essai gratuit</button>
         </div>
       )}
 
@@ -3970,7 +3969,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
           Devis, factures, bons de commande et bien plus — créés en quelques clics, pensés pour les artisans et indépendants qui n'ont pas de temps à perdre.
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <button onClick={onGetStarted} className="flex w-full items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-base font-semibold text-white sm:w-auto" style={{ background: adv.ink }}>
+          <button onClick={onGetStarted} className="flex w-full items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-base font-semibold text-white sm:w-auto" style={{ background: adv.accent }}>
             Essayer gratuitement <ArrowRight size={17} />
           </button>
           <a href="#fonctionnalites" className="w-full rounded-xl border px-7 py-3.5 text-center text-base font-semibold sm:w-auto" style={{ borderColor: colors.line }}>Voir les fonctionnalités</a>
@@ -3978,7 +3977,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
         <p className="mt-4 text-xs sm:text-sm" style={{ color: adv.inkSoft }}>Sans carte bancaire — configuré en 2 minutes</p>
 
         {/* Aperçu produit stylisé */}
-        <div className="mx-auto mt-14 max-w-4xl rounded-2xl p-2.5 sm:p-3.5" style={{ background: adv.ink, boxShadow: "0 40px 80px -20px rgba(27,42,51,0.35)" }}>
+        <div className="mx-auto mt-14 max-w-4xl rounded-2xl border p-2.5 sm:p-3.5" style={{ background: adv.paper, borderColor: adv.line }}>
           <div className="flex flex-col gap-4 rounded-xl p-5 sm:flex-row sm:p-7" style={{ background: colors.paper }}>
             <div className="hidden w-32 shrink-0 flex-col gap-2.5 sm:flex">
               {[70, 90, 60, 80].map((w, i) => <div key={i} className="h-3 rounded" style={{ width: `${w}%`, background: "rgba(27,42,51,0.1)" }} />)}
@@ -4012,7 +4011,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
             { icon: Lock, title: "Sécurisé", desc: "Vos données et celles de vos clients, protégées et jamais partagées." },
           ].map(({ icon: Icon, title, desc }) => (
             <div key={title} className="rounded-2xl p-6" style={{ background: colors.surface }}>
-              <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><Icon size={20} /></div>
+              <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><Icon size={20} /></div>
               <h3 className="mb-1.5 text-base font-bold">{title}</h3>
               <p className="text-sm" style={{ color: adv.inkSoft }}>{desc}</p>
             </div>
@@ -4045,7 +4044,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
 
       {/* Appel à l'action final */}
       <section className="mx-6 mb-20 rounded-3xl px-6 py-14 text-center sm:mx-10 sm:px-10 lg:mx-16">
-        <div className="rounded-3xl px-6 py-14" style={{ background: adv.ink }}>
+        <div className="rounded-3xl px-6 py-14" style={{ background: adv.accent }}>
           <h2 className="df-display text-2xl font-bold text-white sm:text-3xl">Prêt à simplifier votre gestion ?</h2>
           <p className="mt-3 text-sm sm:text-base" style={{ color: "rgba(255,255,255,0.7)" }}>Essai gratuit, sans carte bancaire, configuré en 2 minutes.</p>
           <button onClick={onGetStarted} className="mt-7 rounded-xl px-8 py-3.5 text-base font-bold" style={{ background: adv.accent, color: adv.ink }}>Créer mon compte gratuitement</button>
@@ -4694,14 +4693,16 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   ];
   const tabs = [...mainTabs, ...rightTabs];
   const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const navBg = isAdvanced ? adv.ink : colors.ink;
-  // Pastille active : couleur d'accent pleine en version avancée
-  // (plus affirmé, plus "designé"), transparence blanche sinon
-  // (comportement d'origine, inchangé).
+  const navBg = isAdvanced ? adv.sidebarBg : colors.ink;
+  // Pastille active : fond indigo clair + texte indigo en version
+  // avancée (simple, clair, un seul accent) — transparence blanche
+  // sur fond sombre sinon (comportement d'origine, inchangé).
   const activeTabStyle = isAdvanced
-    ? { background: adv.accent, color: "white" }
+    ? { background: adv.accentSoft, color: adv.accent }
     : { background: "rgba(255,255,255,0.12)", color: "white" };
-  const inactiveTabStyle = { background: "transparent", color: "rgba(255,255,255,0.65)" };
+  const inactiveTabStyle = isAdvanced
+    ? { background: "transparent", color: adv.inkSoft }
+    : { background: "transparent", color: "rgba(255,255,255,0.65)" };
   function tabStyle(isActive) { return isActive ? activeTabStyle : inactiveTabStyle; }
   if (isAdvanced) {
     // Contenu de navigation partagé entre la barre latérale (grand
@@ -4714,28 +4715,28 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
         <div className="relative">
           <button
             onClick={() => setOrgMenuOpen((v) => !v)}
-            className="flex w-full items-center justify-between gap-1.5 rounded-lg px-3 py-2 text-xs font-medium"
-            style={{ background: "rgba(255,255,255,0.06)", color: "white" }}
+            className="flex w-full items-center justify-between gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium"
+            style={{ background: adv.paper, color: adv.ink }}
             title="Changer d'organisation"
           >
-            <span className="flex items-center gap-1.5 truncate"><Building2 size={13} /> Organisations</span>
+            <span className="flex items-center gap-1.5 truncate"><Building2 size={12} /> Organisations</span>
             <span className="flex shrink-0 items-center gap-1">
-              <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
-              <ChevronDown size={12} />
+              <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: adv.line }}>{ROLE_LABELS[account.role] || account.role}</span>
+              <ChevronDown size={11} />
             </span>
           </button>
           {orgMenuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
-              <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+              <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${adv.line}` }}>
                 {memberships.map((m) => (
-                  <button key={m.organizationId} onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs" style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}>
+                  <button key={m.organizationId} onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs" style={{ background: m.organizationId === account.organizationId ? adv.paper : "transparent", color: adv.ink }}>
                     <span className="truncate">{m.name || "Organisation"}</span>
-                    <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
+                    <span className="shrink-0 text-xs" style={{ color: adv.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
                   </button>
                 ))}
                 {!hasOwnOrg && (
-                  <button onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }} disabled={creatingOwnOrg} className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium" style={{ borderColor: colors.line, color: colors.brassDark }}>
+                  <button onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }} disabled={creatingOwnOrg} className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium" style={{ borderColor: adv.line, color: adv.accent }}>
                     {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
                   </button>
                 )}
@@ -4747,32 +4748,32 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
     })();
 
     const NavItem = ({ id, label, icon: Icon, locked }) => (
-      <button onClick={() => setView(id)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium" style={tabStyle(view === id)}>
-        <Icon size={16} /> <span className="truncate">{label}</span> {locked && <Lock size={11} className="ml-auto shrink-0" />}
+      <button onClick={() => setView(id)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
+        <Icon size={15} /> <span className="truncate">{label}</span> {locked && <Lock size={11} className="ml-auto shrink-0" />}
       </button>
     );
 
     return (
       <>
         {/* ───── Barre latérale — grand écran uniquement ───── */}
-        <div className="df-sidebar-nav hidden lg:flex" style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: "272px", background: adv.ink, flexDirection: "column", zIndex: 30 }}>
+        <div className="df-sidebar-nav hidden lg:flex" style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: "264px", background: adv.sidebarBg, borderRight: `1px solid ${adv.line}`, flexDirection: "column", zIndex: 30 }}>
           <button onClick={() => setView("dashboard")} className="flex items-center gap-2.5 px-5 py-5" title="Retour à l'accueil">
             {siteSettings?.logo ? (
               <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
             ) : (
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
             )}
-            <span className="df-display truncate text-base font-semibold text-white">{siteSettings?.name || "Chantiflow"}</span>
+            <span className="df-display truncate text-sm font-semibold" style={{ color: adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
           </button>
 
           <div className="px-4 pb-4">
-            <button onClick={onNewDevis} className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold" style={{ background: adv.accent, color: "white" }}>
-              <Plus size={16} /> Nouveau devis
+            <button onClick={onNewDevis} className="flex w-full items-center justify-center gap-2 rounded-xl py-2 text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>
+              <Plus size={15} /> Nouveau devis
             </button>
             <div className="mt-2 grid grid-cols-3 gap-1.5">
-              <button onClick={onNewFacture} className="rounded-lg py-1.5 text-[11px] font-medium" style={{ border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.8)" }}>Facture</button>
-              <button onClick={onNewProforma} className="rounded-lg py-1.5 text-[11px] font-medium" style={{ border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.8)" }}>Proforma</button>
-              <button onClick={onNewRevision} className="rounded-lg py-1.5 text-[11px] font-medium" style={{ border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.8)" }} title="Révision des prix">Révision</button>
+              <button onClick={onNewFacture} className="rounded-lg py-1.5 text-[10px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Facture</button>
+              <button onClick={onNewProforma} className="rounded-lg py-1.5 text-[10px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Proforma</button>
+              <button onClick={onNewRevision} className="rounded-lg py-1.5 text-[10px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }} title="Révision des prix">Révision</button>
             </div>
           </div>
 
@@ -4785,15 +4786,15 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                       value=""
                       onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
                       onClick={() => setView("company")}
-                      className="df-select w-full appearance-none rounded-lg py-2 pl-9 pr-3 text-left text-sm font-medium"
+                      className="df-select w-full appearance-none rounded-lg py-1.5 pl-9 pr-3 text-left text-xs font-medium"
                       style={{ ...tabStyle(view === id), border: "none" }}
                       title="Mon entreprise"
                     >
-                      <option value="" disabled hidden style={{ color: colors.ink }}>Mon entreprise</option>
-                      <option value="entreprise" style={{ color: colors.ink }}>Entreprise</option>
-                      <option value="particulier" style={{ color: colors.ink }}>Particulier</option>
+                      <option value="" disabled hidden style={{ color: adv.ink }}>Mon entreprise</option>
+                      <option value="entreprise" style={{ color: adv.ink }}>Entreprise</option>
+                      <option value="particulier" style={{ color: adv.ink }}>Particulier</option>
                     </select>
-                    <Building2 size={16} className="pointer-events-none absolute left-3" style={{ color: tabStyle(view === id).color }} />
+                    <Building2 size={15} className="pointer-events-none absolute left-3" style={{ color: tabStyle(view === id).color }} />
                   </div>
                 ) : id === "team" ? (
                   <Fragment key={id}>
@@ -4806,32 +4807,32 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
               )}
             </div>
 
-            <div className="my-3 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            <div className="my-3 border-t" style={{ borderColor: adv.line }} />
 
             <div className="flex flex-col gap-0.5">
               {rightTabs.map(({ id, label, icon: Icon }) => <NavItem key={id} id={id} label={label} icon={Icon} />)}
             </div>
           </div>
 
-          <div className="border-t px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+          <div className="border-t px-3 py-3" style={{ borderColor: adv.line }}>
             <div className="flex items-center gap-1">
               <div className="relative flex-1">
-                <button onClick={() => setServicesMenuOpen((v) => !v)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Tous les services">
-                  <Menu size={15} /> Tous les services
+                <button onClick={() => setServicesMenuOpen((v) => !v)} className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] font-medium" style={{ color: adv.inkSoft }} title="Tous les services">
+                  <Menu size={14} /> Tous les services
                 </button>
                 {servicesMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setServicesMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 z-20 mb-1 max-h-96 w-72 overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                      <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Tous les services</div>
+                    <div className="absolute bottom-full left-0 z-20 mb-1 max-h-96 w-72 overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${adv.line}` }}>
+                      <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: adv.inkSoft }}>Tous les services</div>
                       {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
                         const SIcon = s.icon;
                         return (
-                          <button key={s.id} onClick={() => { setServicesMenuOpen(false); onNewService(s.id); }} className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: colors.ink }}>
+                          <button key={s.id} onClick={() => { setServicesMenuOpen(false); onNewService(s.id); }} className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: adv.ink }}>
                             <SIcon size={15} className="mt-0.5 shrink-0" style={{ color: adv.accent }} />
                             <span className="min-w-0">
-                              <span className="block font-medium">{s.label}{!s.implemented && <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-normal" style={{ background: `${colors.inkSoft}18`, color: colors.inkSoft }}>bientôt</span>}</span>
-                              <span className="block truncate" style={{ color: colors.inkSoft }}>{s.description}</span>
+                              <span className="block font-medium">{s.label}{!s.implemented && <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-normal" style={{ background: adv.line, color: adv.inkSoft }}>bientôt</span>}</span>
+                              <span className="block truncate" style={{ color: adv.inkSoft }}>{s.description}</span>
                             </span>
                           </button>
                         );
@@ -4842,52 +4843,52 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
               </div>
               {!window.chantiflowDesktop && siteSettings?.desktopAppEnabled && (siteSettings?.desktopAppUrlWindows || siteSettings?.desktopAppUrlMac) && (
                 <div className="relative">
-                  <button onClick={() => setDesktopMenuOpen((v) => !v)} className="flex items-center gap-1 rounded-lg p-2" style={{ color: "rgba(255,255,255,0.65)" }} title="Télécharger le logiciel de bureau">
-                    <Monitor size={15} />
+                  <button onClick={() => setDesktopMenuOpen((v) => !v)} className="flex items-center gap-1 rounded-lg p-2" style={{ color: adv.inkSoft }} title="Télécharger le logiciel de bureau">
+                    <Monitor size={14} />
                   </button>
                   {desktopMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setDesktopMenuOpen(false)} />
-                      <div className="absolute bottom-full right-0 z-20 mb-1 w-52 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                        {siteSettings.desktopAppUrlWindows && <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: colors.ink }}><Monitor size={15} /> Version Windows</a>}
-                        {siteSettings.desktopAppUrlMac && <a href={siteSettings.desktopAppUrlMac} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: colors.ink }}><Monitor size={15} /> Version Mac</a>}
+                      <div className="absolute bottom-full right-0 z-20 mb-1 w-52 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${adv.line}` }}>
+                        {siteSettings.desktopAppUrlWindows && <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: adv.ink }}><Monitor size={15} /> Version Windows</a>}
+                        {siteSettings.desktopAppUrlMac && <a href={siteSettings.desktopAppUrlMac} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: adv.ink }}><Monitor size={15} /> Version Mac</a>}
                       </div>
                     </>
                   )}
                 </div>
               )}
-              <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg p-2" style={tabStyle(view === "contact")} title="Nous contacter"><Mail size={15} /></button>
+              <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg p-2" style={tabStyle(view === "contact")} title="Nous contacter"><Mail size={14} /></button>
             </div>
-            <button onClick={onLogout} className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ color: "rgba(255,255,255,0.65)" }}>
-              <LogOut size={16} /> Se déconnecter
+            <button onClick={onLogout} className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ color: adv.inkSoft }}>
+              <LogOut size={15} /> Se déconnecter
             </button>
           </div>
         </div>
 
-        {/* ───── Barre du haut — petit écran uniquement (identique à la version classique) ───── */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden" style={{ background: adv.ink }}>
+        {/* ───── Barre du haut — petit écran uniquement ───── */}
+        <div className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden" style={{ background: adv.sidebarBg, borderBottom: `1px solid ${adv.line}` }}>
           <button onClick={() => setView("dashboard")} className="flex min-w-0 items-center gap-2.5" title="Retour à l'accueil">
             {siteSettings?.logo ? (
               <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
             ) : (
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
             )}
-            <span className="df-display truncate text-sm font-semibold text-white">{siteSettings?.name || "Chantiflow"}</span>
+            <span className="df-display truncate text-xs font-semibold" style={{ color: adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
           </button>
-          <button onClick={onNewDevis} className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium" style={{ background: adv.accent, color: "white" }}><Plus size={14} /> Devis</button>
-          <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: "white" }}>{mobileNavOpen ? <X size={20} /> : <Menu size={20} />}</button>
+          <button onClick={onNewDevis} className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium" style={{ background: adv.accent, color: "white" }}><Plus size={13} /> Devis</button>
+          <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: adv.ink }}>{mobileNavOpen ? <X size={19} /> : <Menu size={19} />}</button>
         </div>
         {mobileNavOpen && (
-          <div className="lg:hidden" style={{ background: adv.ink }}>
+          <div className="lg:hidden" style={{ background: adv.sidebarBg, borderBottom: `1px solid ${adv.line}` }}>
             <div className="max-h-[70vh] overflow-y-auto px-3 pb-3">
               {tabs.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => { setView(id); setMobileNavOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm" style={tabStyle(view === id)}>
-                  <Icon size={16} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} className="ml-auto" />}
+                <button key={id} onClick={() => { setView(id); setMobileNavOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={tabStyle(view === id)}>
+                  <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} className="ml-auto" />}
                 </button>
               ))}
-              <div className="my-2 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }} />
-              <button onClick={() => setView("contact")} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm" style={{ color: "rgba(255,255,255,0.75)" }}><Mail size={16} /> Nous contacter</button>
-              <button onClick={onLogout} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm" style={{ color: "rgba(255,255,255,0.75)" }}><LogOut size={16} /> Se déconnecter</button>
+              <div className="my-2 border-t" style={{ borderColor: adv.line }} />
+              <button onClick={() => setView("contact")} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={{ color: adv.inkSoft }}><Mail size={15} /> Nous contacter</button>
+              <button onClick={onLogout} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={{ color: adv.inkSoft }}><LogOut size={15} /> Se déconnecter</button>
             </div>
           </div>
         )}
@@ -8104,7 +8105,7 @@ function AccountView({ account, siteSettings }) {
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><UserCircle size={18} /></div>
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><UserCircle size={18} /></div>
         )}
         <h1 className="df-display text-2xl font-semibold">Mon compte</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Tes informations personnelles, saisies à l'inscription.</p>
@@ -8281,7 +8282,7 @@ function ApiView({ account, siteSettings }) {
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><KeyRound size={18} /></div>
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><KeyRound size={18} /></div>
         )}
         <h1 className="df-display text-2xl font-semibold">Accès API</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Récupère tes devis, factures et clients depuis un logiciel externe (comptabilité, CRM...).</p>
@@ -8434,7 +8435,7 @@ function TeamView({ account, siteSettings }) {
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><Users size={18} /></div>
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><Users size={18} /></div>
         )}
         <h1 className="df-display text-2xl font-semibold">Équipe</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>
@@ -8801,7 +8802,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <div className="mb-6 text-center">
         {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><CreditCard size={18} /></div>
+          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><CreditCard size={18} /></div>
         )}
         <h1 className="df-display text-2xl font-semibold">Choisir un forfait</h1>
         <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Tarifs indicatifs — à affiner selon l'étude de la concurrence.</p>
@@ -9290,7 +9291,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         {isAdvanced ? (
           <div className="sticky top-6 flex w-56 shrink-0 flex-col gap-0.5">
             {TABS.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => setTab(id)} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium" style={{ background: tab === id ? adv.ink : "transparent", color: tab === id ? "white" : colors.inkSoft }}>
+              <button key={id} onClick={() => setTab(id)} className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: tab === id ? adv.accentSoft : "transparent", color: tab === id ? adv.accent : adv.inkSoft }}>
                 <Icon size={15} /> {label}
               </button>
             ))}
