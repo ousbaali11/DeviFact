@@ -4880,7 +4880,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
 
         {/* ───── Barre du haut — petit écran uniquement ───── */}
         <div className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden" style={{ background: adv.sidebarBg, borderBottom: `1px solid ${adv.line}` }}>
-          <button onClick={() => setView("dashboard")} className="flex min-w-0 items-center gap-2.5" title="Retour à l'accueil">
+          <button onClick={() => setView("dashboard")} className="flex min-w-0 flex-1 items-center gap-2.5" title="Retour à l'accueil">
             {siteSettings?.logo ? (
               <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
             ) : (
@@ -4888,8 +4888,10 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             )}
             <span className="df-display truncate text-xs font-semibold" style={{ color: adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
           </button>
-          <button onClick={onNewDevis} className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium" style={{ background: adv.accent, color: "white" }}><Plus size={13} /> Devis</button>
-          <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: adv.ink }}>{mobileNavOpen ? <X size={19} /> : <Menu size={19} />}</button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button onClick={onNewDevis} className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium" style={{ background: adv.accent, color: "white" }}><Plus size={13} /> Devis</button>
+            <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: adv.ink }}>{mobileNavOpen ? <X size={19} /> : <Menu size={19} />}</button>
+          </div>
         </div>
         {mobileNavOpen && (
           <div className="lg:hidden" style={{ background: adv.sidebarBg, borderBottom: `1px solid ${adv.line}` }}>
