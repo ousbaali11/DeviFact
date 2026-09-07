@@ -1803,6 +1803,12 @@ function DeviFactAppInner() {
   const [companyProfile, setCompanyProfile] = useState(emptyCompanyProfile());
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Empêche d'afficher la page d'accueil (ou toute page) avec la
+  // version par défaut ("classique") pendant la fraction de seconde où
+  // le vrai réglage n'est pas encore arrivé de la base de données —
+  // sans ça, un "flash" de la mauvaise version apparaît brièvement à
+  // chaque rechargement, avant de basculer sur la bonne.
+  const [siteSettingsLoaded, setSiteSettingsLoaded] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingClients, setSavingClients] = useState(false);
@@ -2203,7 +2209,13 @@ function DeviFactAppInner() {
 
   useEffect(() => {
     (async () => {
-      await Promise.all([loadPlans(), loadSiteSettings()]);
+      try {
+        await Promise.all([loadPlans(), loadSiteSettings()]);
+      } finally {
+        // Toujours levé, même si une erreur imprévue survient — pour
+        // ne jamais bloquer indéfiniment l'affichage du site.
+        setSiteSettingsLoaded(true);
+      }
     })();
 
     // Seule source de vérité pour les données propres à l'utilisateur :
@@ -3018,7 +3030,7 @@ function DeviFactAppInner() {
     if (pendingDoc && pendingDoc.id !== activeId) setPendingDoc(null);
   }, [activeId, pendingDoc]);
 
-  if (loading) {
+  if (loading || !siteSettingsLoaded) {
     return (
       <div className="flex min-h-full w-full items-center justify-center py-24" style={{ background: colors.paper }}>
         <GlobalStyle />
