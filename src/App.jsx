@@ -1480,6 +1480,13 @@ const GlobalStyle = () => (
     .df-display { font-family: 'Space Grotesk', sans-serif; }
     .df-mono { font-family: 'IBM Plex Mono', monospace; }
     .df-input:focus, .df-select:focus, .df-textarea:focus { outline: none; border-color: ${colors.brass} !important; box-shadow: 0 0 0 3px rgba(184,118,62,0.15); }
+    /* Décale tout le contenu à droite quand une barre latérale (version
+       avancée) est présente — uniquement à partir de la largeur où
+       elle s'affiche réellement (voir lg:flex sur .df-sidebar-nav),
+       jamais sur les pages sans navigation (accueil, connexion). */
+    @media (min-width: 1024px) {
+      .df-root:has(> .df-sidebar-nav) { padding-left: 272px; }
+    }
     @keyframes df-marquee {
       0% { transform: translateX(-100vw); opacity: 0; }
       8% { opacity: 1; }
@@ -4696,6 +4703,197 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
     : { background: "rgba(255,255,255,0.12)", color: "white" };
   const inactiveTabStyle = { background: "transparent", color: "rgba(255,255,255,0.65)" };
   function tabStyle(isActive) { return isActive ? activeTabStyle : inactiveTabStyle; }
+  if (isAdvanced) {
+    // Contenu de navigation partagé entre la barre latérale (grand
+    // écran) et le menu déroulant mobile — évite d'avoir deux fois la
+    // même liste à maintenir séparément.
+    const orgSwitcher = (() => {
+      const memberships = account?.memberships || [];
+      const hasOwnOrg = memberships.some((m) => m.role === "owner");
+      return (
+        <div className="relative">
+          <button
+            onClick={() => setOrgMenuOpen((v) => !v)}
+            className="flex w-full items-center justify-between gap-1.5 rounded-lg px-3 py-2 text-xs font-medium"
+            style={{ background: "rgba(255,255,255,0.06)", color: "white" }}
+            title="Changer d'organisation"
+          >
+            <span className="flex items-center gap-1.5 truncate"><Building2 size={13} /> Organisations</span>
+            <span className="flex shrink-0 items-center gap-1">
+              <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
+              <ChevronDown size={12} />
+            </span>
+          </button>
+          {orgMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
+              <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                {memberships.map((m) => (
+                  <button key={m.organizationId} onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs" style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}>
+                    <span className="truncate">{m.name || "Organisation"}</span>
+                    <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
+                  </button>
+                ))}
+                {!hasOwnOrg && (
+                  <button onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }} disabled={creatingOwnOrg} className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium" style={{ borderColor: colors.line, color: colors.brassDark }}>
+                    {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      );
+    })();
+
+    const NavItem = ({ id, label, icon: Icon, locked }) => (
+      <button onClick={() => setView(id)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium" style={tabStyle(view === id)}>
+        <Icon size={16} /> <span className="truncate">{label}</span> {locked && <Lock size={11} className="ml-auto shrink-0" />}
+      </button>
+    );
+
+    return (
+      <>
+        {/* ───── Barre latérale — grand écran uniquement ───── */}
+        <div className="df-sidebar-nav hidden lg:flex" style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: "272px", background: adv.ink, flexDirection: "column", zIndex: 30 }}>
+          <button onClick={() => setView("dashboard")} className="flex items-center gap-2.5 px-5 py-5" title="Retour à l'accueil">
+            {siteSettings?.logo ? (
+              <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
+            ) : (
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
+            )}
+            <span className="df-display truncate text-base font-semibold text-white">{siteSettings?.name || "Chantiflow"}</span>
+          </button>
+
+          <div className="px-4 pb-4">
+            <button onClick={onNewDevis} className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold" style={{ background: adv.accent, color: "white" }}>
+              <Plus size={16} /> Nouveau devis
+            </button>
+            <div className="mt-2 grid grid-cols-3 gap-1.5">
+              <button onClick={onNewFacture} className="rounded-lg py-1.5 text-[11px] font-medium" style={{ border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.8)" }}>Facture</button>
+              <button onClick={onNewProforma} className="rounded-lg py-1.5 text-[11px] font-medium" style={{ border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.8)" }}>Proforma</button>
+              <button onClick={onNewRevision} className="rounded-lg py-1.5 text-[11px] font-medium" style={{ border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.8)" }} title="Révision des prix">Révision</button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-3">
+            <div className="flex flex-col gap-0.5">
+              {mainTabs.map(({ id, label, icon: Icon }) =>
+                id === "company" ? (
+                  <div key={id} className="relative flex items-center">
+                    <select
+                      value=""
+                      onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
+                      onClick={() => setView("company")}
+                      className="df-select w-full appearance-none rounded-lg py-2 pl-9 pr-3 text-left text-sm font-medium"
+                      style={{ ...tabStyle(view === id), border: "none" }}
+                      title="Mon entreprise"
+                    >
+                      <option value="" disabled hidden style={{ color: colors.ink }}>Mon entreprise</option>
+                      <option value="entreprise" style={{ color: colors.ink }}>Entreprise</option>
+                      <option value="particulier" style={{ color: colors.ink }}>Particulier</option>
+                    </select>
+                    <Building2 size={16} className="pointer-events-none absolute left-3" style={{ color: tabStyle(view === id).color }} />
+                  </div>
+                ) : id === "team" ? (
+                  <Fragment key={id}>
+                    <NavItem id={id} label={label} icon={Icon} />
+                    {orgSwitcher}
+                  </Fragment>
+                ) : (
+                  <NavItem key={id} id={id} label={label} icon={Icon} locked={id === "prestations" && !hasAccess(account, "pro")} />
+                )
+              )}
+            </div>
+
+            <div className="my-3 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }} />
+
+            <div className="flex flex-col gap-0.5">
+              {rightTabs.map(({ id, label, icon: Icon }) => <NavItem key={id} id={id} label={label} icon={Icon} />)}
+            </div>
+          </div>
+
+          <div className="border-t px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+            <div className="flex items-center gap-1">
+              <div className="relative flex-1">
+                <button onClick={() => setServicesMenuOpen((v) => !v)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Tous les services">
+                  <Menu size={15} /> Tous les services
+                </button>
+                {servicesMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setServicesMenuOpen(false)} />
+                    <div className="absolute bottom-full left-0 z-20 mb-1 max-h-96 w-72 overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                      <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Tous les services</div>
+                      {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
+                        const SIcon = s.icon;
+                        return (
+                          <button key={s.id} onClick={() => { setServicesMenuOpen(false); onNewService(s.id); }} className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: colors.ink }}>
+                            <SIcon size={15} className="mt-0.5 shrink-0" style={{ color: adv.accent }} />
+                            <span className="min-w-0">
+                              <span className="block font-medium">{s.label}{!s.implemented && <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-normal" style={{ background: `${colors.inkSoft}18`, color: colors.inkSoft }}>bientôt</span>}</span>
+                              <span className="block truncate" style={{ color: colors.inkSoft }}>{s.description}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+              {!window.chantiflowDesktop && siteSettings?.desktopAppEnabled && (siteSettings?.desktopAppUrlWindows || siteSettings?.desktopAppUrlMac) && (
+                <div className="relative">
+                  <button onClick={() => setDesktopMenuOpen((v) => !v)} className="flex items-center gap-1 rounded-lg p-2" style={{ color: "rgba(255,255,255,0.65)" }} title="Télécharger le logiciel de bureau">
+                    <Monitor size={15} />
+                  </button>
+                  {desktopMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setDesktopMenuOpen(false)} />
+                      <div className="absolute bottom-full right-0 z-20 mb-1 w-52 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
+                        {siteSettings.desktopAppUrlWindows && <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: colors.ink }}><Monitor size={15} /> Version Windows</a>}
+                        {siteSettings.desktopAppUrlMac && <a href={siteSettings.desktopAppUrlMac} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: colors.ink }}><Monitor size={15} /> Version Mac</a>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg p-2" style={tabStyle(view === "contact")} title="Nous contacter"><Mail size={15} /></button>
+            </div>
+            <button onClick={onLogout} className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ color: "rgba(255,255,255,0.65)" }}>
+              <LogOut size={16} /> Se déconnecter
+            </button>
+          </div>
+        </div>
+
+        {/* ───── Barre du haut — petit écran uniquement (identique à la version classique) ───── */}
+        <div className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden" style={{ background: adv.ink }}>
+          <button onClick={() => setView("dashboard")} className="flex min-w-0 items-center gap-2.5" title="Retour à l'accueil">
+            {siteSettings?.logo ? (
+              <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
+            ) : (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
+            )}
+            <span className="df-display truncate text-sm font-semibold text-white">{siteSettings?.name || "Chantiflow"}</span>
+          </button>
+          <button onClick={onNewDevis} className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium" style={{ background: adv.accent, color: "white" }}><Plus size={14} /> Devis</button>
+          <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: "white" }}>{mobileNavOpen ? <X size={20} /> : <Menu size={20} />}</button>
+        </div>
+        {mobileNavOpen && (
+          <div className="lg:hidden" style={{ background: adv.ink }}>
+            <div className="max-h-[70vh] overflow-y-auto px-3 pb-3">
+              {tabs.map(({ id, label, icon: Icon }) => (
+                <button key={id} onClick={() => { setView(id); setMobileNavOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm" style={tabStyle(view === id)}>
+                  <Icon size={16} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} className="ml-auto" />}
+                </button>
+              ))}
+              <div className="my-2 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }} />
+              <button onClick={() => setView("contact")} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm" style={{ color: "rgba(255,255,255,0.75)" }}><Mail size={16} /> Nous contacter</button>
+              <button onClick={onLogout} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm" style={{ color: "rgba(255,255,255,0.75)" }}><LogOut size={16} /> Se déconnecter</button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: navBg }}>
       <div className="flex min-w-0 grow items-center gap-6">
