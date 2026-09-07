@@ -194,15 +194,16 @@ function InstagramIcon({ size = 20 }) {
 // comme "Terminé" une fois cliqué. Reste discret et informatif une
 // fois déjà cliqué, plutôt que de disparaître (pour qu'on sache
 // toujours où on en est en revenant sur ce document plus tard).
-function FinalizeButton({ doc, onFinalize }) {
+function FinalizeButton({ doc, onFinalize, siteSettings }) {
   const isDone = doc?.workStage === "termine";
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
   return (
     <div className="no-print flex items-center justify-end gap-2 border-t px-6 py-4" style={{ borderColor: colors.line }}>
       {isDone && <span className="text-xs" style={{ color: colors.inkSoft }}>Marqué comme terminé — modifie-le et enregistre à nouveau si besoin.</span>}
       <button
         onClick={onFinalize}
         className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium"
-        style={{ background: isDone ? colors.moss : colors.brass, color: isDone ? "white" : colors.ink }}
+        style={isDone ? { background: isAdvanced ? adv.moss : colors.moss, color: "white" } : isAdvanced ? { background: adv.accent, color: "white" } : { background: colors.brass, color: colors.ink }}
       >
         {isDone ? <Check size={16} /> : null} {isDone ? "Terminé" : "Enregistrer"}
       </button>
@@ -5883,7 +5884,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
       <PrintRevision ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -6213,7 +6214,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
       <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -6551,7 +6552,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
       <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -6894,7 +6895,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
       <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -7189,7 +7190,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
       <PrintContrat ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -7457,7 +7458,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
       <PrintRelance ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -7781,7 +7782,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
       <PrintPlanning ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -11093,7 +11094,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
           </div>
         </div>
       </div>
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
       <PrintDocument ref={printRef} doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
