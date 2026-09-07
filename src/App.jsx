@@ -3593,7 +3593,7 @@ function DeviFactAppInner() {
             <p className="df-display mt-3 text-lg font-semibold">{documents.length === 0 ? "Aucun document pour l'instant" : "Aucun résultat"}</p>
             <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>{documents.length === 0 ? "Crée ton premier devis ou ta première facture." : "Essaie une autre recherche ou un autre filtre."}</p>
             {documents.length === 0 && (
-              <button onClick={() => openNew("devis")} className="mt-4 flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
+              <button onClick={() => openNew("devis")} className="mt-4 flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink }}>
                 <Plus size={15} /> Créer un devis
               </button>
             )}
@@ -4227,7 +4227,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin, onContact }) 
 
       {/* CTA final */}
       <section className="px-6 pb-16">
-        <div className="mx-auto max-w-4xl rounded-2xl p-10 text-center" style={{ background: colors.ink, color: "white" }}>
+        <div className="mx-auto max-w-4xl rounded-2xl p-10 text-center" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>
           <h2 className="df-display text-2xl font-semibold sm:text-3xl">Prêt à arrêter de perdre du temps sur vos devis ?</h2>
           <p className="mt-2 text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>Créez votre compte en une minute, sans carte bancaire.</p>
           <button onClick={onGetStarted} className="mt-6 rounded-lg px-6 py-3 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Commencer gratuitement</button>
@@ -5571,7 +5571,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
@@ -5630,7 +5630,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
 
           <div className="mb-4 flex items-center justify-between">
             <label className="block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Secteurs du chantier</label>
-            <button onClick={addSector} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: colors.ink, color: "white" }}>
+            <button onClick={addSector} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>
               <Plus size={13} /> Ajouter un secteur
             </button>
           </div>
@@ -5684,7 +5684,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                   <div className="mb-3 rounded-lg p-3" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
                     <div className="mb-2 flex items-center justify-between">
                       <label className="text-xs font-semibold" style={{ color: colors.slate }}>Termes de la formule (un par indice utilisé)</label>
-                      <button onClick={() => addTerm(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Terme</button>
+                      <button onClick={() => addTerm(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Terme</button>
                     </div>
                     <div className="space-y-2">
                       {(sec.terms || []).map((t, tIdx) => (
@@ -5798,7 +5798,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
 
                               <div className="mb-2 flex items-center justify-between">
                                 <label className="text-xs" style={{ color: colors.inkSoft }}>Mois inclus dans ce décompte ({totalJours} jour{totalJours > 1 ? "s" : ""} au total)</label>
-                                <button onClick={() => addMois(sec.id, d.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={11} /> Mois</button>
+                                <button onClick={() => addMois(sec.id, d.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={11} /> Mois</button>
                               </div>
                               <div className="space-y-1.5">
                                 {(d.mois || []).map((m, mIdx) => (
@@ -5835,7 +5835,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                       </div>
                       <div className="mt-2 flex items-center justify-end gap-1.5">
                         <button onClick={() => addBlankRow(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}><Minus size={12} /> Ligne vide</button>
-                        <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
+                        <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
                       </div>
                     </div>
                   )}
@@ -6086,7 +6086,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
               <ArrowRight size={15} /> Situation suivante
             </button>
           )}
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -6151,7 +6151,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
 
           <div className="mb-3 flex items-center justify-between">
             <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Postes du marché</label>
-            <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Poste</button>
+            <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Poste</button>
           </div>
           <div className="mb-4 space-y-2">
             {localDoc.items.map((l) => {
@@ -6433,7 +6433,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -6502,7 +6502,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
             <div className="mb-6">
               <div className="mb-2 flex items-center justify-between">
                 <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Réserves</label>
-                <button onClick={addReserve} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Réserve</button>
+                <button onClick={addReserve} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Réserve</button>
               </div>
               <div className="space-y-2">
                 {(localDoc.reserves || []).map((r) => (
@@ -6772,7 +6772,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -6852,7 +6852,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
           <div className="mb-6">
             <div className="mb-2 flex items-center justify-between">
               <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Matériel utilisé</label>
-              <button onClick={addMateriel} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Matériel</button>
+              <button onClick={addMateriel} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Matériel</button>
             </div>
             <div className="space-y-2">
               {(localDoc.materielsUtilises || []).map((m) => (
@@ -7087,7 +7087,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -7356,7 +7356,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -7659,7 +7659,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -7716,7 +7716,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
 
           <div className="mb-3 flex items-center justify-between">
             <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tâches</label>
-            <button onClick={addTache} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Tâche</button>
+            <button onClick={addTache} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Tâche</button>
           </div>
           <div className="mb-6 space-y-2">
             {(localDoc.taches || []).map((t) => {
@@ -7991,7 +7991,7 @@ function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings }
           <h1 className="df-display text-2xl font-semibold">Bibliothèque de prestations</h1>
           <p className="text-sm" style={{ color: colors.inkSoft }}>Vos prestations types, prêtes à insérer dans n'importe quel devis ou facture.</p>
         </div>
-        <button onClick={startNew} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.ink }}>
+        <button onClick={startNew} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink }}>
           <Plus size={15} /> Nouvelle prestation
         </button>
       </div>
@@ -8175,7 +8175,7 @@ function AccountView({ account, siteSettings }) {
 
         {passwordError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{passwordError}</p>}
         {passwordSaved && <p className="mb-2 text-xs" style={{ color: colors.moss }}>Mot de passe mis à jour.</p>}
-        <button onClick={savePassword} disabled={savingPassword} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.ink, color: "white", opacity: savingPassword ? 0.7 : 1 }}>
+        <button onClick={savePassword} disabled={savingPassword} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white", opacity: savingPassword ? 0.7 : 1 }}>
           {savingPassword ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Mettre à jour le mot de passe
         </button>
       </div>
@@ -8296,7 +8296,7 @@ function ApiView({ account, siteSettings }) {
           </div>
           <div className="flex items-center gap-2 rounded-lg p-3" style={{ background: "white", border: `1px solid ${colors.line}` }}>
             <code className="df-mono grow break-all text-xs">{revealedKey}</code>
-            <button onClick={copyKey} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: colors.ink, color: "white" }}>
+            <button onClick={copyKey} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>
               {copied ? "Copié !" : "Copier"}
             </button>
           </div>
@@ -8894,15 +8894,15 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
               {isCurrent ? (
                 <button disabled className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.paper, color: colors.inkSoft }}>Forfait actuel</button>
               ) : plan.id === "gratuit" ? (
-                <button onClick={onChooseFree} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Choisir ce forfait</button>
+                <button onClick={onChooseFree} className="rounded-lg py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>Choisir ce forfait</button>
               ) : plan.id === "entreprise" ? (
-                <a href={`mailto:${siteSettings?.contactEmail || "contact@chantiflow.fr"}?subject=Forfait%20Entreprise`} className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Nous contacter</a>
+                <a href={`mailto:${siteSettings?.contactEmail || "contact@chantiflow.fr"}?subject=Forfait%20Entreprise`} className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>Nous contacter</a>
               ) : price === 0 ? (
                 <button
                   onClick={async () => { setActivatingPlanId(plan.id); await onChooseZeroPrice(plan.id, billing); setActivatingPlanId(null); }}
                   disabled={activatingPlanId === plan.id}
                   className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium"
-                  style={{ background: colors.ink, color: "white", opacity: activatingPlanId === plan.id ? 0.7 : 1 }}
+                  style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white", opacity: activatingPlanId === plan.id ? 0.7 : 1 }}
                 >
                   {activatingPlanId === plan.id ? <Loader2 size={14} className="animate-spin" /> : null} {activatingPlanId === plan.id ? "Activation…" : "Activer (0€)"}
                 </button>
@@ -10411,7 +10411,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
               <ArrowRightLeft size={15} /> Convertir en facture
             </button>
           )}
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
@@ -10841,7 +10841,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
               <button onClick={addSection} className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }}>
                 <LayoutList size={13} /> Titre de section
               </button>
-              <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-white" style={{ background: colors.ink }}>
+              <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-white" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink }}>
                 <Plus size={13} /> Ligne
               </button>
             </div>
