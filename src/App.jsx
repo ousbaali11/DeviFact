@@ -3421,28 +3421,46 @@ function DeviFactAppInner() {
             <button onClick={() => setView("pricing")} className={freeLimitReached ? "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" : "text-xs font-medium underline"} style={freeLimitReached ? { background: colors.brick } : { color: colors.brassDark }}>Passer à un forfait payant</button>
           </div>
         )}
-        {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-6">
-            <h1 className="df-display text-2xl font-bold">Tableau de bord</h1>
-            <p className="text-sm" style={{ color: colors.inkSoft }}>Vue d'ensemble de ton activité.</p>
+        {siteSettings?.landingPageVersion === "avancee" ? (
+          <div className="mb-6 overflow-hidden rounded-3xl" style={{ background: colors.ink }}>
+            <div className="p-6 sm:p-8">
+              <h1 className="df-display text-2xl font-bold text-white sm:text-3xl">Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
+              <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.65)" }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                {["devis", "facture", "commande", "situation"].map((id) => {
+                  const svc = getService(id);
+                  if (!svc) return null;
+                  const SvcIcon = svc.icon;
+                  return (
+                    <button key={id} onClick={() => openNewService(id)} className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold" style={{ background: "rgba(255,255,255,0.1)", color: "white" }}>
+                      <SvcIcon size={16} style={{ color: colors.brass }} /> {svc.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-px sm:grid-cols-3" style={{ background: "rgba(255,255,255,0.08)" }}>
+              {[
+                { icon: Inbox, label: "Devis en attente de réponse", value: stats.enAttenteCount, sub: eur(stats.montantEnAttente) },
+                { icon: AlertTriangle, label: "Factures impayées", value: stats.impayeesCount, sub: eur(stats.montantImpaye) },
+                { icon: TrendingUp, label: "Taux de signature des devis", value: stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`, sub: "devis envoyés → signés" },
+              ].map(({ icon: Icon, label, value, sub }) => (
+                <div key={label} className="p-6" style={{ background: colors.ink }}>
+                  <Icon size={18} style={{ color: colors.brass }} />
+                  <div className="df-display mt-3 text-3xl font-bold text-white">{value}</div>
+                  <div className="mt-1 text-sm font-medium" style={{ color: "rgba(255,255,255,0.7)" }}>{label}</div>
+                  <div className="df-mono mt-1 text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>{sub}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
+            <StatCard label="Factures impayées" value={stats.impayeesCount} sub={eur(stats.montantImpaye)} color={colors.brick} />
+            <StatCard label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
           </div>
         )}
-        {/* Stats */}
-        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {siteSettings?.landingPageVersion === "avancee" ? (
-            <>
-              <StatCardAvancee icon={Inbox} label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
-              <StatCardAvancee icon={AlertTriangle} label="Factures impayées" value={stats.impayeesCount} sub={eur(stats.montantImpaye)} color={colors.brick} />
-              <StatCardAvancee icon={TrendingUp} label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
-            </>
-          ) : (
-            <>
-              <StatCard label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
-              <StatCard label="Factures impayées" value={stats.impayeesCount} sub={eur(stats.montantImpaye)} color={colors.brick} />
-              <StatCard label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
-            </>
-          )}
-        </div>
 
         {reminders.length > 0 && !hasAccess(account, "pro") && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-3" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
@@ -3554,6 +3572,58 @@ function DeviFactAppInner() {
               </button>
             )}
           </div>
+        ) : siteSettings?.landingPageVersion === "avancee" ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {visibleFiltered.map((d) => {
+              const isRevision = d.type === "revision";
+              const isSituation = d.type === "situation";
+              const totalTTC = isRevision ? computeRevision(d).montantRevise
+                : isSituation ? computeSituation(d).netAPayer
+                : d.type === "contrat" ? (Number(d.montantTotalHT) || 0) * (1 + (Number(d.tva) || 0) / 100)
+                : d.type === "relance" ? (Number(d.montantDu) || 0)
+                : computeTotals(d).totalTTC;
+              const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
+              const TypeIconComp = docTypeIcon(d.type);
+              return (
+                <div key={d.id} className="flex flex-col gap-3 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: colors.surface, border: `1px solid ${selectedIds.includes(d.id) ? colors.brass : colors.line}` }}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor(d.type)}18`, color: docTypeColor(d.type) }}><TypeIconComp size={16} /></div>
+                      <div>
+                        <button onClick={() => openDoc(d.id)} className="df-mono block text-left text-sm font-semibold hover:underline">{d.docNumber}</button>
+                        <div className="text-xs" style={{ color: colors.inkSoft }}>{fr(d.updatedAt)}</div>
+                      </div>
+                    </div>
+                    <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} style={{ accentColor: colors.brass }} aria-label={`Sélectionner ${d.docNumber}`} />
+                  </div>
+                  <div className="truncate text-sm font-medium">{d.client.name || <span style={{ color: colors.inkSoft }}>Client non renseigné</span>}</div>
+                  <div className="df-display text-xl font-bold">{formatMoney(totalTTC, d.currency)}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: d.workStage === "termine" ? `${colors.moss}18` : `${colors.inkSoft}18`, color: d.workStage === "termine" ? colors.moss : colors.inkSoft }}>
+                      {d.workStage === "termine" ? <Check size={11} /> : null} {d.workStage === "termine" ? "Terminé" : "Brouillon"}
+                    </span>
+                    <select
+                      value={d.status}
+                      onChange={(e) => updateDoc(d.id, { status: e.target.value })}
+                      className="df-select rounded-full px-2 py-0.5 text-xs font-medium"
+                      style={{ background: `${statusColor(d.status)}1A`, color: statusColor(d.status), border: `1px solid ${statusColor(d.status)}55` }}
+                    >
+                      {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div className="mt-1 flex justify-end gap-3 border-t pt-3" style={{ borderColor: colors.line }}>
+                    <button onClick={() => duplicateDoc(d.id)} disabled={isLocked} title={isLocked ? "Verrouillé — passe à un forfait payant" : "Dupliquer"} style={{ color: colors.inkSoft, opacity: isLocked ? 0.4 : 1, cursor: isLocked ? "not-allowed" : "pointer" }}><Copy size={15} /></button>
+                    <button onClick={() => deleteDoc(d.id)} disabled={isLocked} title={isLocked ? "Verrouillé — passe à un forfait payant" : "Supprimer"} style={{ color: colors.brick, opacity: isLocked ? 0.4 : 1, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length > visibleCount && (
+              <button onClick={() => setVisibleCount((c) => c + PAGE_SIZE)} className="flex items-center justify-center rounded-2xl p-4 text-sm font-medium" style={{ background: colors.surface, border: `1px dashed ${colors.line}`, color: colors.slate }}>
+                Charger {Math.min(PAGE_SIZE, filtered.length - visibleCount)} de plus ({filtered.length - visibleCount} restant{filtered.length - visibleCount > 1 ? "s" : ""})
+              </button>
+            )}
+          </div>
         ) : (
           <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
@@ -3570,7 +3640,7 @@ function DeviFactAppInner() {
               const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
               const TypeIconComp = docTypeIcon(d.type);
               return (
-                <div key={d.id} className={siteSettings?.landingPageVersion === "avancee" ? "flex flex-wrap items-center gap-3 px-4 py-3.5 transition-colors hover:bg-[rgba(0,0,0,0.02)]" : "flex flex-wrap items-center gap-3 px-4 py-3"} style={{ borderTop: idx ? `1px solid ${colors.line}` : "none", background: selectedIds.includes(d.id) ? "rgba(184,118,62,0.06)" : "transparent" }}>
+                <div key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none", background: selectedIds.includes(d.id) ? "rgba(184,118,62,0.06)" : "transparent" }}>
                   <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} style={{ accentColor: colors.brass }} aria-label={`Sélectionner ${d.docNumber}`} />
                   <div className="flex items-center gap-2" style={{ color: docTypeColor(d.type) }}>
                     <TypeIconComp size={16} />
