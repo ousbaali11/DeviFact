@@ -4667,6 +4667,15 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
     { id: "account", label: "Mon compte", icon: UserCircle },
   ];
   const tabs = [...mainTabs, ...rightTabs];
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  // Pastille active : couleur d'accent pleine en version avancée
+  // (plus affirmé, plus "designé"), transparence blanche sinon
+  // (comportement d'origine, inchangé).
+  const activeTabStyle = isAdvanced
+    ? { background: colors.brass, color: colors.ink }
+    : { background: "rgba(255,255,255,0.12)", color: "white" };
+  const inactiveTabStyle = { background: "transparent", color: "rgba(255,255,255,0.65)" };
+  function tabStyle(isActive) { return isActive ? activeTabStyle : inactiveTabStyle; }
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
       <div className="flex min-w-0 grow items-center gap-6">
@@ -4688,18 +4697,18 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                     onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
                     onClick={() => setView("company")}
                     className="df-select appearance-none rounded-lg py-1.5 pl-8 pr-3 text-xs font-medium"
-                    style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)", border: "none" }}
+                    style={{ ...tabStyle(view === id), border: "none" }}
                     title="Mon entreprise"
                   >
                     <option value="" disabled hidden style={{ color: colors.ink }}>Entreprise/Particulier</option>
                     <option value="entreprise" style={{ color: colors.ink }}>Entreprise</option>
                     <option value="particulier" style={{ color: colors.ink }}>Particulier</option>
                   </select>
-                  <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: view === id ? "white" : "rgba(255,255,255,0.65)" }} />
+                  <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: tabStyle(view === id).color }} />
                 </div>
               ) : id === "team" ? (
                 <Fragment key={id}>
-                  <button onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                  <button onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
                     <Icon size={15} /> {label}
                   </button>
                   {(() => {
@@ -4751,7 +4760,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                   })()}
                 </Fragment>
               ) : (
-                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
                   <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} />}
                 </button>
               )
@@ -4760,7 +4769,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1">
               {rightTabs.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: view === id ? "rgba(255,255,255,0.12)" : "transparent", color: view === id ? "white" : "rgba(255,255,255,0.65)" }}>
+                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
                   <Icon size={15} /> {label}
                 </button>
               ))}
@@ -4772,13 +4781,13 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
         <button onClick={onNewDevis} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: colors.brass, color: colors.ink }}>
           <Plus size={15} /> Devis
         </button>
-        <button onClick={onNewFacture} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white" style={{ background: colors.slate }}>
+        <button onClick={onNewFacture} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { border: "1px solid rgba(255,255,255,0.3)", color: "white" } : { background: colors.slate, color: "white" }}>
           <Plus size={15} /> Facture
         </button>
-        <button onClick={onNewProforma} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
+        <button onClick={onNewProforma} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { border: "1px solid rgba(255,255,255,0.3)", color: "white" } : { background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
           <Plus size={15} /> Proforma
         </button>
-        <button onClick={onNewRevision} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: colors.slate, color: "white" }} title="Nouvelle révision des prix">
+        <button onClick={onNewRevision} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { border: "1px solid rgba(255,255,255,0.3)", color: "white" } : { background: colors.slate, color: "white" }} title="Nouvelle révision des prix">
           <TrendingUp size={15} /> Révision des prix
         </button>
         <div className="relative">
@@ -4840,11 +4849,11 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             )}
           </div>
         )}
-        <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "contact" ? "white" : "rgba(255,255,255,0.65)", background: view === "contact" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Nous contacter">
+        <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={tabStyle(view === "contact")} title="Nous contacter">
           <Mail size={15} />
         </button>
         {account?.isAdmin && (
-          <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: view === "admin" ? "white" : "rgba(255,255,255,0.65)", background: view === "admin" ? "rgba(255,255,255,0.12)" : "transparent" }} title="Admin">
+          <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={tabStyle(view === "admin")} title="Admin">
             <Shield size={15} />
           </button>
         )}
