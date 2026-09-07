@@ -3918,7 +3918,13 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
           {visiblePlans.map((plan) => (
             <div key={plan.id} className="w-full max-w-xs rounded-2xl p-6" style={{ border: `1px solid ${colors.line}` }}>
               <h3 className="df-display text-lg font-bold">{plan.name}</h3>
-              <div className="my-3"><span className="df-display text-3xl font-bold">{plan.monthly}€</span><span className="text-sm" style={{ color: colors.inkSoft }}> /mois</span></div>
+              <div className="my-3">
+                {plan.monthly === null || plan.monthly === undefined ? (
+                  <span className="df-display text-xl font-bold">Sur devis</span>
+                ) : (
+                  <><span className="df-display text-3xl font-bold">{plan.monthly}€</span><span className="text-sm" style={{ color: colors.inkSoft }}> /mois</span></>
+                )}
+              </div>
               <button onClick={onGetStarted} className="mt-2 w-full rounded-lg py-2.5 text-sm font-semibold" style={{ background: colors.paper, color: colors.ink }}>Choisir</button>
             </div>
           ))}
@@ -3935,7 +3941,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
       </section>
 
       <footer className="border-t px-6 py-8 text-center text-xs sm:px-10 lg:px-16" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-        © 2026 {siteSettings.name} — <button onClick={onContact} className="underline" style={{ color: colors.inkSoft }}>Nous contacter</button>
+        © 2026 {siteSettings?.name || "Chantiflow"} — <button onClick={onContact} className="underline" style={{ color: colors.inkSoft }}>Nous contacter</button>
       </footer>
     </div>
   );
