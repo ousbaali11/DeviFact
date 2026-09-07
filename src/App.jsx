@@ -3473,19 +3473,19 @@ function DeviFactAppInner() {
         )}
 
         {/* Filtres */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        <div className={siteSettings?.landingPageVersion === "avancee" ? "mb-5 flex flex-wrap items-center gap-3 rounded-2xl p-3" : "mb-4 flex flex-wrap items-center gap-3"} style={siteSettings?.landingPageVersion === "avancee" ? { background: colors.surface, border: `1px solid ${colors.line}` } : {}}>
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}`, minWidth: siteSettings?.landingPageVersion === "avancee" ? "220px" : "auto" }}>
             <Search size={15} style={{ color: colors.inkSoft }} />
-            <input className="df-input bg-transparent text-sm outline-none" placeholder="Rechercher un client ou un numéro..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input className="df-input w-full bg-transparent text-sm outline-none" placeholder="Rechercher un client ou un numéro..." value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <div className="flex gap-1 rounded-lg p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="flex gap-1 rounded-lg p-1" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}` }}>
             {[["tous", "Tous"], ["devis", "Devis"], ["facture", "Factures"], ["proforma", "Proforma"], ["revision", "Révisions"]].map(([id, label]) => (
               <button key={id} onClick={() => setTypeFilter(id)} className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: typeFilter === id ? colors.ink : "transparent", color: typeFilter === id ? "white" : colors.inkSoft }}>
                 {label}
               </button>
             ))}
           </div>
-          <div className="flex gap-1 rounded-lg p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          <div className="flex gap-1 rounded-lg p-1" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}` }}>
             {[["tous", "Tous"], ["brouillon", "Brouillons"], ["termine", "Terminés"]].map(([id, label]) => (
               <button key={id} onClick={() => setStageFilter(id)} className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: stageFilter === id ? colors.ink : "transparent", color: stageFilter === id ? "white" : colors.inkSoft }}>
                 {label}
@@ -3570,7 +3570,7 @@ function DeviFactAppInner() {
               const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
               const TypeIconComp = docTypeIcon(d.type);
               return (
-                <div key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none", background: selectedIds.includes(d.id) ? "rgba(184,118,62,0.06)" : "transparent" }}>
+                <div key={d.id} className={siteSettings?.landingPageVersion === "avancee" ? "flex flex-wrap items-center gap-3 px-4 py-3.5 transition-colors hover:bg-[rgba(0,0,0,0.02)]" : "flex flex-wrap items-center gap-3 px-4 py-3"} style={{ borderTop: idx ? `1px solid ${colors.line}` : "none", background: selectedIds.includes(d.id) ? "rgba(184,118,62,0.06)" : "transparent" }}>
                   <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} style={{ accentColor: colors.brass }} aria-label={`Sélectionner ${d.docNumber}`} />
                   <div className="flex items-center gap-2" style={{ color: docTypeColor(d.type) }}>
                     <TypeIconComp size={16} />
