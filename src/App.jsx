@@ -5339,7 +5339,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
           <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
@@ -5844,7 +5844,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
           {!hasNextSituation && !isLocked && (
@@ -6191,7 +6191,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
           <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
@@ -6525,7 +6525,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
           <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
@@ -6835,7 +6835,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
           <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
@@ -7099,7 +7099,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
           <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
@@ -7397,7 +7397,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
           <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
@@ -9909,7 +9909,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
 
-      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
         <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-white">
           <ArrowLeft size={16} /> Tableau de bord
         </button>
