@@ -5372,6 +5372,11 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
           <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: colors.line }}>
             <div>
+              {siteSettings?.landingPageVersion === "avancee" && (
+                <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("revision")}18`, color: docTypeColor("revision") }}>
+                  <TrendingUp size={17} />
+                </div>
+              )}
               <h1 className="df-display text-xl font-semibold">Révision de prix</h1>
               {localDoc.country && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>{localDoc.country}</span>}
               <span className="ml-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.slate}18`, color: colors.slate }}>{sectorLines.length} secteur{sectorLines.length > 1 ? "s" : ""}</span>
@@ -5882,6 +5887,11 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
           <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: colors.line }}>
             <div>
+              {siteSettings?.landingPageVersion === "avancee" && (
+                <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("situation")}18`, color: docTypeColor("situation") }}>
+                  <BarChart3 size={17} />
+                </div>
+              )}
               <h1 className="df-display text-xl font-semibold">Situation de travaux N° {localDoc.numeroSituation || 1}</h1>
               {localDoc.previousSituationId && <span className="text-xs" style={{ color: colors.inkSoft }}>Suite de la situation précédente — cumul repris automatiquement</span>}
             </div>
@@ -6222,6 +6232,11 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          {siteSettings?.landingPageVersion === "avancee" && (
+            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("pv_reception")}18`, color: docTypeColor("pv_reception") }}>
+              <ClipboardCheck size={17} />
+            </div>
+          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Procès-verbal de réception de travaux</h1>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -6556,6 +6571,11 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          {siteSettings?.landingPageVersion === "avancee" && (
+            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("rapport")}18`, color: docTypeColor("rapport") }}>
+              <Wrench size={17} />
+            </div>
+          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Rapport d'intervention</h1>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -6873,6 +6893,11 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          {siteSettings?.landingPageVersion === "avancee" && (
+            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("contrat")}18`, color: docTypeColor("contrat") }}>
+              <FileSignature size={17} />
+            </div>
+          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Contrat de chantier</h1>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -7137,6 +7162,11 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          {siteSettings?.landingPageVersion === "avancee" && (
+            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("relance")}18`, color: docTypeColor("relance") }}>
+              <AlertTriangle size={17} />
+            </div>
+          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Mise en demeure de payer</h1>
 
           <div className="mb-6 max-w-xs">
@@ -7428,6 +7458,11 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
+          {siteSettings?.landingPageVersion === "avancee" && (
+            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("planning")}18`, color: docTypeColor("planning") }}>
+              <Calendar size={17} />
+            </div>
+          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Planning de chantier</h1>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
