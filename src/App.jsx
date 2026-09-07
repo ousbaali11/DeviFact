@@ -3297,7 +3297,7 @@ function DeviFactAppInner() {
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <TeamView account={account} />
+        <TeamView account={account} siteSettings={siteSettings} />
       </div>
     );
   }
@@ -3307,7 +3307,7 @@ function DeviFactAppInner() {
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <ApiView account={account} />
+        <ApiView account={account} siteSettings={siteSettings} />
       </div>
     );
   }
@@ -3317,7 +3317,7 @@ function DeviFactAppInner() {
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <AccountView account={account} />
+        <AccountView account={account} siteSettings={siteSettings} />
       </div>
     );
   }
@@ -7809,7 +7809,7 @@ function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings }
 const ROLE_LABELS = { owner: "Propriétaire", editor: "Éditeur", viewer: "Lecteur" };
 const ROLE_COLORS = { owner: colors.brassDark, editor: colors.moss, viewer: colors.slate };
 
-function AccountView({ account }) {
+function AccountView({ account, siteSettings }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -7841,6 +7841,9 @@ function AccountView({ account }) {
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <div className="mb-6">
+        {siteSettings?.landingPageVersion === "avancee" && (
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><UserCircle size={18} /></div>
+        )}
         <h1 className="df-display text-2xl font-semibold">Mon compte</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Tes informations personnelles, saisies à l'inscription.</p>
       </div>
@@ -7916,7 +7919,7 @@ function AccountView({ account }) {
   );
 }
 
-function ApiView({ account }) {
+function ApiView({ account, siteSettings }) {
   const [keys, setKeys] = useState(null);
   const [newKeyName, setNewKeyName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -8015,6 +8018,9 @@ function ApiView({ account }) {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="mb-6">
+        {siteSettings?.landingPageVersion === "avancee" && (
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><KeyRound size={18} /></div>
+        )}
         <h1 className="df-display text-2xl font-semibold">Accès API</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Récupère tes devis, factures et clients depuis un logiciel externe (comptabilité, CRM...).</p>
       </div>
@@ -8086,7 +8092,7 @@ function ApiView({ account }) {
   );
 }
 
-function TeamView({ account }) {
+function TeamView({ account, siteSettings }) {
   const [members, setMembers] = useState(null);
   const [membersError, setMembersError] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -8165,6 +8171,9 @@ function TeamView({ account }) {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="mb-6">
+        {siteSettings?.landingPageVersion === "avancee" && (
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><Users size={18} /></div>
+        )}
         <h1 className="df-display text-2xl font-semibold">Équipe</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>
           {isOwner
@@ -8529,6 +8538,9 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <div className="mb-6 text-center">
+        {siteSettings?.landingPageVersion === "avancee" && (
+          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><CreditCard size={18} /></div>
+        )}
         <h1 className="df-display text-2xl font-semibold">Choisir un forfait</h1>
         <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Tarifs indicatifs — à affiner selon l'étude de la concurrence.</p>
       </div>
