@@ -9133,7 +9133,118 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         </div>
       )}
 
-      {tab === "utilisateurs" && (
+      {tab === "utilisateurs" && siteSettings?.landingPageVersion === "avancee" && (
+        <div>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="df-display text-lg font-semibold">Tous les utilisateurs du site</h2>
+            <div className="flex items-center gap-3">
+              <span className="text-xs" style={{ color: colors.inkSoft }}>{allUsers.length} compte(s)</span>
+              <button onClick={onRefreshUsers} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.paper, color: colors.slate }} title="Recharger la liste">
+                <RotateCcw size={12} /> Rafraîchir
+              </button>
+            </div>
+          </div>
+          {allUsersError && (
+            <div className="mb-4 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brick}0D`, color: colors.brick, border: `1px solid ${colors.brick}30` }}>
+              Impossible de charger la liste ({allUsersError}). La migration migration_admin_voir_utilisateurs.sql a-t-elle bien été lancée dans Supabase ?
+            </div>
+          )}
+          {allUsers.length === 0 ? (
+            <p className="text-sm" style={{ color: colors.inkSoft }}>Aucun utilisateur pour l'instant.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {allUsers.map((u) => {
+                const deadline = u.created_at ? new Date(new Date(u.created_at).getTime() + 8 * 7 * 24 * 60 * 60 * 1000) : null;
+                const expired = u.expiresAt && new Date(u.expiresAt) < new Date();
+                return (
+                  <div key={u.id} className="rounded-2xl p-4" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{u.email}</div>
+                        <div className="text-xs" style={{ color: colors.inkSoft }}>{[u.first_name, u.last_name].filter(Boolean).join(" ") || u.company_name || "—"}</div>
+                      </div>
+                      {u.is_admin && <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
+                    </div>
+
+                    <div className="mb-3 flex flex-wrap items-center gap-2 border-y py-3" style={{ borderColor: colors.line }}>
+                      {u.organizationId ? (
+                        <>
+                          <select
+                            value={u.plan}
+                            onChange={(e) => onSetUserPlan(u.organizationId, e.target.value)}
+                            disabled={savingUserPlanId === u.organizationId}
+                            className="df-select rounded-md px-2 py-1 text-xs"
+                            style={{ border: `1px solid ${colors.line}` }}
+                          >
+                            {PLANS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                          {savingUserPlanId === u.organizationId && <Loader2 size={12} className="animate-spin" style={{ color: colors.inkSoft }} />}
+                          {u.plan !== "gratuit" && (
+                            <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: u.paymentStatus === "payé" ? `${colors.moss}18` : `${colors.brick}18`, color: u.paymentStatus === "payé" ? colors.moss : colors.brick }}>
+                              {u.paymentStatus === "payé" ? "Payé" : "Impayé"}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs" style={{ color: colors.inkSoft }}>Aucune organisation</span>
+                      )}
+                    </div>
+
+                    <div className="mb-3 grid grid-cols-2 gap-2">
+                      <label className="text-xs" style={{ color: colors.inkSoft }}>
+                        Payé le
+                        <input
+                          type="date"
+                          className="df-input df-mono mt-0.5 block w-full rounded-md px-2 py-1 text-xs"
+                          style={{ border: `1px solid ${colors.line}` }}
+                          value={u.paidAt ? u.paidAt.slice(0, 10) : ""}
+                          disabled={!u.organizationId}
+                          onChange={(e) => onSetUserPaidAt(u.organizationId, e.target.value)}
+                        />
+                      </label>
+                      <label className="text-xs" style={{ color: colors.inkSoft }}>
+                        Expire le
+                        <input
+                          type="date"
+                          className="df-input df-mono mt-0.5 block w-full rounded-md px-2 py-1 text-xs"
+                          style={{ border: `1px solid ${expired ? colors.brick : colors.line}`, color: expired ? colors.brick : colors.ink }}
+                          value={u.expiresAt ? u.expiresAt.slice(0, 10) : ""}
+                          disabled={!u.organizationId}
+                          onChange={(e) => onSetUserExpiresAt(u.organizationId, e.target.value)}
+                        />
+                        {expired && <span className="text-xs font-medium" style={{ color: colors.brick }}>Expiré</span>}
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      {u.confirmed_at ? (
+                        <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.moss }}><Check size={13} /> Confirmé</span>
+                      ) : (
+                        <div>
+                          <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brick }}><AlertTriangle size={13} /> Non confirmé</span>
+                          {deadline && <span className="block text-xs" style={{ color: colors.inkSoft }}>Suppression auto le {fr(deadline)}</span>}
+                        </div>
+                      )}
+                      {!u.confirmed_at && (
+                        <button
+                          onClick={() => onResendConfirmation(u.id)}
+                          disabled={resendingConfirmationId === u.id}
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white"
+                          style={{ background: colors.slate, opacity: resendingConfirmationId === u.id ? 0.7 : 1 }}
+                        >
+                          {resendingConfirmationId === u.id ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} Relancer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "utilisateurs" && siteSettings?.landingPageVersion !== "avancee" && (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tous les utilisateurs du site</span>
@@ -9275,7 +9386,78 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         </div>
       )}
 
-      {tab === "forfaits" && (
+      {tab === "forfaits" && (siteSettings?.landingPageVersion === "avancee" ? (
+        <div>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="df-display text-lg font-semibold">Forfaits & tarifs</h2>
+              <p className="text-xs" style={{ color: colors.inkSoft }}>Prix affiché, visibilité publique, filigrane, et nombre de documents autorisés.</p>
+            </div>
+            {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
+          </div>
+          <div className="mb-4 flex items-start gap-2 rounded-xl p-3" style={{ background: `${colors.brick}0D`, border: `1px solid ${colors.brick}30` }}>
+            <AlertTriangle size={13} style={{ color: colors.brick, marginTop: "2px", flexShrink: 0 }} />
+            <p className="text-xs" style={{ color: colors.brick }}>
+              Si tu réduis le nombre de documents d'un forfait en dessous de ce qu'un compte a déjà créé, ce compte se verrouille automatiquement (sans perdre ses documents) jusqu'à passer à un forfait payant.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {plans.map((plan) => (
+              <div key={plan.id} className="rounded-2xl p-4" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                <div className="mb-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold">{plan.name}</div>
+                    <div className="text-xs" style={{ color: colors.inkSoft }}>{plan.tagline}</div>
+                  </div>
+                  <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: plan.hidden ? `${colors.brick}18` : `${colors.moss}18`, color: plan.hidden ? colors.brick : colors.moss }}>{plan.hidden ? "Masqué" : "Visible"}</span>
+                </div>
+                <div className="mb-3 flex flex-wrap items-center gap-3 border-y py-3" style={{ borderColor: colors.line }}>
+                  {plan.monthly !== null ? (
+                    <>
+                      <PriceInput label="Mensuel €" value={plan.monthly} onSave={(v) => onUpdatePlanPrice(plan.id, "monthly", v)} />
+                      <PriceInput label="Annuel €" value={plan.annual} onSave={(v) => onUpdatePlanPrice(plan.id, "annual", v)} />
+                    </>
+                  ) : (
+                    <span className="text-xs" style={{ color: colors.inkSoft }}>Sur devis</span>
+                  )}
+                  <label className="text-xs" style={{ color: colors.inkSoft }}>
+                    Documents max
+                    <input
+                      type="number" min="0" placeholder="Illimité"
+                      className="df-input df-mono mt-0.5 block w-20 rounded-md px-2 py-1 text-sm"
+                      style={{ border: `1px solid ${colors.line}` }}
+                      defaultValue={plan.limit === Infinity ? "" : plan.limit}
+                      key={`${plan.id}-${plan.limit}`}
+                      onBlur={(e) => onUpdatePlanLimit(plan.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                    />
+                  </label>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-medium" style={{ color: plan.watermarkEnabled === false ? colors.inkSoft : colors.brassDark }}>Filigrane</span>
+                    <button
+                      onClick={() => onToggleWatermark(plan.id)}
+                      title={plan.watermarkEnabled === false ? "Activer le filigrane pour ce forfait" : "Retirer le filigrane pour ce forfait"}
+                      style={{ color: plan.watermarkEnabled === false ? colors.line : colors.brassDark }}
+                    >
+                      {plan.watermarkEnabled === false ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => onTogglePlan(plan.id)}
+                    title={plan.hidden ? "Rendre visible" : "Masquer ce forfait"}
+                    className="flex items-center gap-1.5"
+                    style={{ color: plan.hidden ? colors.inkSoft : colors.moss }}
+                  >
+                    {plan.hidden ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Forfaits & tarifs</span>
@@ -9341,7 +9523,8 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
             </div>
           ))}
         </div>
-      )}
+      ))}
+
 
       {tab === "paiement" && (
         <div className="space-y-4">
