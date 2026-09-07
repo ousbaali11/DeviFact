@@ -9037,9 +9037,19 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
             </div>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard label="Ton compte" value={account ? 1 : 0} sub={account?.email || "—"} color={colors.slate} />
-            <StatCard label="Documents créés" value={documents.length} sub={eur(totalTTC) + " au total"} color={colors.moss} />
-            <StatCard label="Clients enregistrés" value={clients.length} sub={companyProfile.name || "Entreprise non renseignée"} color={colors.brassDark} />
+            {siteSettings?.landingPageVersion === "avancee" ? (
+              <>
+                <StatCardAvancee icon={UserCircle} label="Ton compte" value={account ? 1 : 0} sub={account?.email || "—"} color={colors.slate} />
+                <StatCardAvancee icon={FileText} label="Documents créés" value={documents.length} sub={eur(totalTTC) + " au total"} color={colors.moss} />
+                <StatCardAvancee icon={Users} label="Clients enregistrés" value={clients.length} sub={companyProfile.name || "Entreprise non renseignée"} color={colors.brassDark} />
+              </>
+            ) : (
+              <>
+                <StatCard label="Ton compte" value={account ? 1 : 0} sub={account?.email || "—"} color={colors.slate} />
+                <StatCard label="Documents créés" value={documents.length} sub={eur(totalTTC) + " au total"} color={colors.moss} />
+                <StatCard label="Clients enregistrés" value={clients.length} sub={companyProfile.name || "Entreprise non renseignée"} color={colors.brassDark} />
+              </>
+            )}
           </div>
         </>
       )}
