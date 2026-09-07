@@ -9317,15 +9317,26 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         <p className="text-sm" style={{ color: colors.inkSoft }}>Vue d'ensemble, gestion des forfaits et du compte.</p>
       </div>
 
-      <div className={isAdvanced ? "flex items-start gap-8" : ""}>
+      <div className={isAdvanced ? "flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8" : ""}>
         {isAdvanced ? (
-          <div className="sticky top-6 flex w-56 shrink-0 flex-col gap-0.5">
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => setTab(id)} className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: tab === id ? adv.accentSoft : "transparent", color: tab === id ? adv.accent : adv.inkSoft }}>
-                <Icon size={15} /> {label}
-              </button>
-            ))}
-          </div>
+          <>
+            {/* Petit écran : barre horizontale déroulante (même principe qu'en classique) — la barre latérale verticale prendrait presque toute la largeur d'un téléphone. */}
+            <div className="flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1 lg:hidden" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
+              {TABS.map(({ id, label, icon: Icon }) => (
+                <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? adv.accentSoft : "transparent", color: tab === id ? adv.accent : adv.inkSoft }}>
+                  <Icon size={13} /> {label}
+                </button>
+              ))}
+            </div>
+            {/* Grand écran : vraie barre latérale verticale */}
+            <div className="sticky top-6 hidden w-56 shrink-0 flex-col gap-0.5 lg:flex">
+              {TABS.map(({ id, label, icon: Icon }) => (
+                <button key={id} onClick={() => setTab(id)} className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: tab === id ? adv.accentSoft : "transparent", color: tab === id ? adv.accent : adv.inkSoft }}>
+                  <Icon size={15} /> {label}
+                </button>
+              ))}
+            </div>
+          </>
         ) : (
           <div className="mb-6 flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
             {TABS.map(({ id, label, icon: Icon }) => (
