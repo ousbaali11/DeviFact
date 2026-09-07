@@ -3534,16 +3534,16 @@ function DeviFactAppInner() {
             <Search size={15} style={{ color: colors.inkSoft }} />
             <input className="df-input w-full bg-transparent text-sm outline-none" placeholder="Rechercher un client ou un numéro..." value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <div className="flex gap-1 rounded-lg p-1" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}` }}>
+          <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg p-1" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
             {[["tous", "Tous"], ["devis", "Devis"], ["facture", "Factures"], ["proforma", "Proforma"], ["revision", "Révisions"]].map(([id, label]) => (
-              <button key={id} onClick={() => setTypeFilter(id)} className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: typeFilter === id ? colors.ink : "transparent", color: typeFilter === id ? "white" : colors.inkSoft }}>
+              <button key={id} onClick={() => setTypeFilter(id)} className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: typeFilter === id ? colors.ink : "transparent", color: typeFilter === id ? "white" : colors.inkSoft }}>
                 {label}
               </button>
             ))}
           </div>
-          <div className="flex gap-1 rounded-lg p-1" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}` }}>
+          <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg p-1" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
             {[["tous", "Tous"], ["brouillon", "Brouillons"], ["termine", "Terminés"]].map(([id, label]) => (
-              <button key={id} onClick={() => setStageFilter(id)} className="rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: stageFilter === id ? colors.ink : "transparent", color: stageFilter === id ? "white" : colors.inkSoft }}>
+              <button key={id} onClick={() => setStageFilter(id)} className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: stageFilter === id ? colors.ink : "transparent", color: stageFilter === id ? "white" : colors.inkSoft }}>
                 {label}
               </button>
             ))}
