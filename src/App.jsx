@@ -33,6 +33,25 @@ const colors = {
   line: "var(--df-line, #DAE1DC)",
 };
 
+// Palette dédiée à la version "Avancée" — volontairement indépendante
+// du système de thèmes (13 thèmes, voir THEMES plus bas) : peu importe
+// le thème choisi par ailleurs, l'interface avancée garde toujours
+// cette identité propre (anthracite + émeraude), pour un vrai
+// changement d'ambiance, pas juste une variante du même marine/laiton.
+const adv = {
+  ink: "#18181B",        // anthracite, remplace le bleu marine
+  inkSoft: "#71717A",
+  paper: "#F4F4F5",
+  surface: "#FFFFFF",
+  accent: "#0D9488",     // émeraude/sarcelle, remplace le laiton/orange
+  accentDark: "#0F766E",
+  accentSoft: "#CCFBF1",
+  indigo: "#6366F1",     // touche secondaire (au lieu du slate bleu)
+  moss: "#16A34A",
+  brick: "#DC2626",
+  line: "#E4E4E7",
+};
+
 // Bibliothèque de thèmes — valeurs réelles utilisées par chaque
 // variable CSS ci-dessus. "classique" reprend exactement les couleurs
 // d'origine du site (rien ne change si l'admin ne touche à rien).
@@ -3422,7 +3441,7 @@ function DeviFactAppInner() {
           </div>
         )}
         {siteSettings?.landingPageVersion === "avancee" ? (
-          <div className="mb-6 overflow-hidden rounded-3xl" style={{ background: colors.ink }}>
+          <div className="mb-6 overflow-hidden rounded-3xl" style={{ background: adv.ink }}>
             <div className="p-6 sm:p-8">
               <h1 className="df-display text-2xl font-bold text-white sm:text-3xl">Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
               <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.65)" }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
@@ -3433,7 +3452,7 @@ function DeviFactAppInner() {
                   const SvcIcon = svc.icon;
                   return (
                     <button key={id} onClick={() => openNewService(id)} className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold" style={{ background: "rgba(255,255,255,0.1)", color: "white" }}>
-                      <SvcIcon size={16} style={{ color: colors.brass }} /> {svc.label}
+                      <SvcIcon size={16} style={{ color: adv.accent }} /> {svc.label}
                     </button>
                   );
                 })}
@@ -3445,8 +3464,8 @@ function DeviFactAppInner() {
                 { icon: AlertTriangle, label: "Factures impayées", value: stats.impayeesCount, sub: eur(stats.montantImpaye) },
                 { icon: TrendingUp, label: "Taux de signature des devis", value: stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`, sub: "devis envoyés → signés" },
               ].map(({ icon: Icon, label, value, sub }) => (
-                <div key={label} className="p-6" style={{ background: colors.ink }}>
-                  <Icon size={18} style={{ color: colors.brass }} />
+                <div key={label} className="p-6" style={{ background: adv.ink }}>
+                  <Icon size={18} style={{ color: adv.accent }} />
                   <div className="df-display mt-3 text-3xl font-bold text-white">{value}</div>
                   <div className="mt-1 text-sm font-medium" style={{ color: "rgba(255,255,255,0.7)" }}>{label}</div>
                   <div className="df-mono mt-1 text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>{sub}</div>
@@ -3897,7 +3916,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
   const [mobileMenu, setMobileMenu] = useState(false);
   const visiblePlans = plans.filter((p) => !p.hidden);
   return (
-    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.surface, color: colors.ink }}>
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.surface, color: adv.ink }}>
       <GlobalStyle />
 
       {/* Barre de navigation */}
@@ -3906,11 +3925,11 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
           {siteSettings?.logo ? (
             <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth || 34, height: siteSettings.logoHeight || 34, objectFit: "contain" }} />
           ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-display text-sm font-bold" style={{ background: colors.ink, color: colors.brass }}>{initials(siteSettings?.name) || "C"}</div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-display text-sm font-bold" style={{ background: adv.ink, color: adv.accent }}>{initials(siteSettings?.name) || "C"}</div>
           )}
           <span className="df-display text-lg font-bold">{siteSettings?.name || "Chantiflow"}</span>
         </div>
-        <div className="hidden items-center gap-8 text-sm font-medium lg:flex" style={{ color: colors.inkSoft }}>
+        <div className="hidden items-center gap-8 text-sm font-medium lg:flex" style={{ color: adv.inkSoft }}>
           <a href="#fonctionnalites">Fonctionnalités</a>
           <a href="#tarifs">Tarifs</a>
           <a href="#faq">FAQ</a>
@@ -3918,7 +3937,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
         </div>
         <div className="hidden items-center gap-3 lg:flex">
           <button onClick={onLogin} className="text-sm font-semibold">Connexion</button>
-          <button onClick={onGetStarted} className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white" style={{ background: colors.ink }}>Essai gratuit</button>
+          <button onClick={onGetStarted} className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white" style={{ background: adv.ink }}>Essai gratuit</button>
         </div>
         <button onClick={() => setMobileMenu((v) => !v)} className="lg:hidden" title="Menu" aria-label="Ouvrir le menu"><Menu size={22} /></button>
       </nav>
@@ -3928,31 +3947,31 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
           <a href="#tarifs" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Tarifs</a>
           <button onClick={onContact} className="text-left text-sm font-medium">Contacter</button>
           <button onClick={onLogin} className="text-left text-sm font-semibold">Connexion</button>
-          <button onClick={onGetStarted} className="rounded-lg px-4 py-2.5 text-center text-sm font-semibold text-white" style={{ background: colors.ink }}>Essai gratuit</button>
+          <button onClick={onGetStarted} className="rounded-lg px-4 py-2.5 text-center text-sm font-semibold text-white" style={{ background: adv.ink }}>Essai gratuit</button>
         </div>
       )}
 
       {/* Hero */}
       <section className="px-6 pb-16 pt-16 text-center sm:px-10 sm:pt-20 lg:px-16">
-        <div className="mx-auto mb-7 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold sm:text-sm" style={{ background: colors.paper, color: colors.inkSoft }}>
+        <div className="mx-auto mb-7 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold sm:text-sm" style={{ background: colors.paper, color: adv.inkSoft }}>
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: colors.moss }} /> Nouveau : logiciel de bureau Mac & Windows
         </div>
         <h1 className="df-display mx-auto max-w-3xl text-4xl font-bold leading-tight tracking-tight sm:text-5xl lg:text-[58px]">
-          La gestion administrative, <span style={{ color: colors.brass }}>enfin simple</span> pour votre activité
+          La gestion administrative, <span style={{ color: adv.accent }}>enfin simple</span> pour votre activité
         </h1>
-        <p className="mx-auto mt-6 max-w-lg text-base sm:text-lg" style={{ color: colors.inkSoft }}>
+        <p className="mx-auto mt-6 max-w-lg text-base sm:text-lg" style={{ color: adv.inkSoft }}>
           Devis, factures, bons de commande et bien plus — créés en quelques clics, pensés pour les artisans et indépendants qui n'ont pas de temps à perdre.
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <button onClick={onGetStarted} className="flex w-full items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-base font-semibold text-white sm:w-auto" style={{ background: colors.ink }}>
+          <button onClick={onGetStarted} className="flex w-full items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-base font-semibold text-white sm:w-auto" style={{ background: adv.ink }}>
             Essayer gratuitement <ArrowRight size={17} />
           </button>
           <a href="#fonctionnalites" className="w-full rounded-xl border px-7 py-3.5 text-center text-base font-semibold sm:w-auto" style={{ borderColor: colors.line }}>Voir les fonctionnalités</a>
         </div>
-        <p className="mt-4 text-xs sm:text-sm" style={{ color: colors.inkSoft }}>Sans carte bancaire — configuré en 2 minutes</p>
+        <p className="mt-4 text-xs sm:text-sm" style={{ color: adv.inkSoft }}>Sans carte bancaire — configuré en 2 minutes</p>
 
         {/* Aperçu produit stylisé */}
-        <div className="mx-auto mt-14 max-w-4xl rounded-2xl p-2.5 sm:p-3.5" style={{ background: colors.ink, boxShadow: "0 40px 80px -20px rgba(27,42,51,0.35)" }}>
+        <div className="mx-auto mt-14 max-w-4xl rounded-2xl p-2.5 sm:p-3.5" style={{ background: adv.ink, boxShadow: "0 40px 80px -20px rgba(27,42,51,0.35)" }}>
           <div className="flex flex-col gap-4 rounded-xl p-5 sm:flex-row sm:p-7" style={{ background: colors.paper }}>
             <div className="hidden w-32 shrink-0 flex-col gap-2.5 sm:flex">
               {[70, 90, 60, 80].map((w, i) => <div key={i} className="h-3 rounded" style={{ width: `${w}%`, background: "rgba(27,42,51,0.1)" }} />)}
@@ -3972,9 +3991,9 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
       {/* Fonctionnalités */}
       <section id="fonctionnalites" className="px-6 py-20 sm:px-10 lg:px-16" style={{ background: colors.paper }}>
         <div className="mx-auto mb-14 max-w-xl text-center">
-          <div className="mb-3 text-xs font-bold uppercase tracking-widest sm:text-sm" style={{ color: colors.brass }}>Fonctionnalités</div>
+          <div className="mb-3 text-xs font-bold uppercase tracking-widest sm:text-sm" style={{ color: adv.accent }}>Fonctionnalités</div>
           <h2 className="df-display text-3xl font-bold tracking-tight sm:text-4xl">Tout ce qu'il faut, rien de superflu</h2>
-          <p className="mt-3 text-base sm:text-lg" style={{ color: colors.inkSoft }}>Chaque outil est pensé pour un vrai besoin du métier, pas pour impressionner.</p>
+          <p className="mt-3 text-base sm:text-lg" style={{ color: adv.inkSoft }}>Chaque outil est pensé pour un vrai besoin du métier, pas pour impressionner.</p>
         </div>
         <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {[
@@ -3986,9 +4005,9 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
             { icon: Lock, title: "Sécurisé", desc: "Vos données et celles de vos clients, protégées et jamais partagées." },
           ].map(({ icon: Icon, title, desc }) => (
             <div key={title} className="rounded-2xl p-6" style={{ background: colors.surface }}>
-              <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><Icon size={20} /></div>
+              <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><Icon size={20} /></div>
               <h3 className="mb-1.5 text-base font-bold">{title}</h3>
-              <p className="text-sm" style={{ color: colors.inkSoft }}>{desc}</p>
+              <p className="text-sm" style={{ color: adv.inkSoft }}>{desc}</p>
             </div>
           ))}
         </div>
@@ -3997,7 +4016,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
       {/* Tarifs (réutilise la logique existante, juste la présentation) */}
       <section id="tarifs" className="px-6 py-20 sm:px-10 lg:px-16">
         <div className="mx-auto mb-14 max-w-xl text-center">
-          <div className="mb-3 text-xs font-bold uppercase tracking-widest sm:text-sm" style={{ color: colors.brass }}>Tarifs</div>
+          <div className="mb-3 text-xs font-bold uppercase tracking-widest sm:text-sm" style={{ color: adv.accent }}>Tarifs</div>
           <h2 className="df-display text-3xl font-bold tracking-tight sm:text-4xl">Un tarif simple, sans surprise</h2>
         </div>
         <div className="mx-auto flex max-w-5xl flex-wrap justify-center gap-5">
@@ -4008,10 +4027,10 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
                 {plan.monthly === null || plan.monthly === undefined ? (
                   <span className="df-display text-xl font-bold">Sur devis</span>
                 ) : (
-                  <><span className="df-display text-3xl font-bold">{plan.monthly}€</span><span className="text-sm" style={{ color: colors.inkSoft }}> /mois</span></>
+                  <><span className="df-display text-3xl font-bold">{plan.monthly}€</span><span className="text-sm" style={{ color: adv.inkSoft }}> /mois</span></>
                 )}
               </div>
-              <button onClick={onGetStarted} className="mt-2 w-full rounded-lg py-2.5 text-sm font-semibold" style={{ background: colors.paper, color: colors.ink }}>Choisir</button>
+              <button onClick={onGetStarted} className="mt-2 w-full rounded-lg py-2.5 text-sm font-semibold" style={{ background: colors.paper, color: adv.ink }}>Choisir</button>
             </div>
           ))}
         </div>
@@ -4019,15 +4038,15 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
 
       {/* Appel à l'action final */}
       <section className="mx-6 mb-20 rounded-3xl px-6 py-14 text-center sm:mx-10 sm:px-10 lg:mx-16">
-        <div className="rounded-3xl px-6 py-14" style={{ background: colors.ink }}>
+        <div className="rounded-3xl px-6 py-14" style={{ background: adv.ink }}>
           <h2 className="df-display text-2xl font-bold text-white sm:text-3xl">Prêt à simplifier votre gestion ?</h2>
           <p className="mt-3 text-sm sm:text-base" style={{ color: "rgba(255,255,255,0.7)" }}>Essai gratuit, sans carte bancaire, configuré en 2 minutes.</p>
-          <button onClick={onGetStarted} className="mt-7 rounded-xl px-8 py-3.5 text-base font-bold" style={{ background: colors.brass, color: colors.ink }}>Créer mon compte gratuitement</button>
+          <button onClick={onGetStarted} className="mt-7 rounded-xl px-8 py-3.5 text-base font-bold" style={{ background: adv.accent, color: adv.ink }}>Créer mon compte gratuitement</button>
         </div>
       </section>
 
-      <footer className="border-t px-6 py-8 text-center text-xs sm:px-10 lg:px-16" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-        © 2026 {siteSettings?.name || "Chantiflow"} — <button onClick={onContact} className="underline" style={{ color: colors.inkSoft }}>Nous contacter</button>
+      <footer className="border-t px-6 py-8 text-center text-xs sm:px-10 lg:px-16" style={{ borderColor: colors.line, color: adv.inkSoft }}>
+        © 2026 {siteSettings?.name || "Chantiflow"} — <button onClick={onContact} className="underline" style={{ color: adv.inkSoft }}>Nous contacter</button>
       </footer>
     </div>
   );
@@ -4668,22 +4687,23 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   ];
   const tabs = [...mainTabs, ...rightTabs];
   const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  const navBg = isAdvanced ? adv.ink : colors.ink;
   // Pastille active : couleur d'accent pleine en version avancée
   // (plus affirmé, plus "designé"), transparence blanche sinon
   // (comportement d'origine, inchangé).
   const activeTabStyle = isAdvanced
-    ? { background: colors.brass, color: colors.ink }
+    ? { background: adv.accent, color: "white" }
     : { background: "rgba(255,255,255,0.12)", color: "white" };
   const inactiveTabStyle = { background: "transparent", color: "rgba(255,255,255,0.65)" };
   function tabStyle(isActive) { return isActive ? activeTabStyle : inactiveTabStyle; }
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink }}>
+    <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: navBg }}>
       <div className="flex min-w-0 grow items-center gap-6">
         <button onClick={() => setView("dashboard")} className="flex shrink-0 items-center gap-3" title="Retour à l'accueil">
           {siteSettings?.logo ? (
             <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
           ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: colors.brass, color: colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: isAdvanced ? adv.accent : colors.brass, color: isAdvanced ? "white" : colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
           )}
           <span className="df-display text-lg font-semibold tracking-wide text-white">{siteSettings?.name || "Chantiflow"}</span>
         </button>
@@ -4778,7 +4798,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={onNewDevis} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: colors.brass, color: colors.ink }}>
+        <button onClick={onNewDevis} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { background: adv.accent, color: "white" } : { background: colors.brass, color: colors.ink }}>
           <Plus size={15} /> Devis
         </button>
         <button onClick={onNewFacture} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { border: "1px solid rgba(255,255,255,0.3)", color: "white" } : { background: colors.slate, color: "white" }}>
@@ -7886,7 +7906,7 @@ function AccountView({ account, siteSettings }) {
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><UserCircle size={18} /></div>
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><UserCircle size={18} /></div>
         )}
         <h1 className="df-display text-2xl font-semibold">Mon compte</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Tes informations personnelles, saisies à l'inscription.</p>
@@ -8063,7 +8083,7 @@ function ApiView({ account, siteSettings }) {
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><KeyRound size={18} /></div>
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><KeyRound size={18} /></div>
         )}
         <h1 className="df-display text-2xl font-semibold">Accès API</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Récupère tes devis, factures et clients depuis un logiciel externe (comptabilité, CRM...).</p>
@@ -8216,7 +8236,7 @@ function TeamView({ account, siteSettings }) {
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><Users size={18} /></div>
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><Users size={18} /></div>
         )}
         <h1 className="df-display text-2xl font-semibold">Équipe</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>
@@ -8583,7 +8603,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <div className="mb-6 text-center">
         {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: colors.ink, color: colors.brass }}><CreditCard size={18} /></div>
+          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.ink, color: adv.accent }}><CreditCard size={18} /></div>
         )}
         <h1 className="df-display text-2xl font-semibold">Choisir un forfait</h1>
         <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Tarifs indicatifs — à affiner selon l'étude de la concurrence.</p>
@@ -9033,7 +9053,11 @@ function DesktopAppSettings({ siteSettings, saving, onSave }) {
 
 function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [tab, setTab] = useState("apercu");
+  const [tab, setTab] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_lastAdminTab")) || "apercu");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("devifact_lastAdminTab", tab);
+  }, [tab]);
   const totalTTC = documents.reduce((s, d) => s + (
     d.type === "revision" ? computeRevision(d).montantRevise
     : d.type === "situation" ? computeSituation(d).netAPayer
