@@ -3421,11 +3421,27 @@ function DeviFactAppInner() {
             <button onClick={() => setView("pricing")} className={freeLimitReached ? "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" : "text-xs font-medium underline"} style={freeLimitReached ? { background: colors.brick } : { color: colors.brassDark }}>Passer à un forfait payant</button>
           </div>
         )}
+        {siteSettings?.landingPageVersion === "avancee" && (
+          <div className="mb-6">
+            <h1 className="df-display text-2xl font-bold">Tableau de bord</h1>
+            <p className="text-sm" style={{ color: colors.inkSoft }}>Vue d'ensemble de ton activité.</p>
+          </div>
+        )}
         {/* Stats */}
         <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
-          <StatCard label="Factures impayées" value={stats.impayeesCount} sub={eur(stats.montantImpaye)} color={colors.brick} />
-          <StatCard label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
+          {siteSettings?.landingPageVersion === "avancee" ? (
+            <>
+              <StatCardAvancee icon={Inbox} label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
+              <StatCardAvancee icon={AlertTriangle} label="Factures impayées" value={stats.impayeesCount} sub={eur(stats.montantImpaye)} color={colors.brick} />
+              <StatCardAvancee icon={TrendingUp} label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
+            </>
+          ) : (
+            <>
+              <StatCard label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
+              <StatCard label="Factures impayées" value={stats.impayeesCount} sub={eur(stats.montantImpaye)} color={colors.brick} />
+              <StatCard label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
+            </>
+          )}
         </div>
 
         {reminders.length > 0 && !hasAccess(account, "pro") && (
@@ -9396,6 +9412,19 @@ function StatCard({ label, value, sub, color }) {
       <div className="text-xs font-medium uppercase tracking-wide" style={{ color: colors.inkSoft }}>{label}</div>
       <div className="df-display mt-1 text-2xl font-semibold" style={{ color }}>{value}</div>
       <div className="df-mono mt-0.5 text-xs" style={{ color: colors.inkSoft }}>{sub}</div>
+    </div>
+  );
+}
+
+function StatCardAvancee({ label, value, sub, color, icon: Icon }) {
+  return (
+    <div className="rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: `${color}18`, color }}>
+        <Icon size={18} />
+      </div>
+      <div className="df-display text-2xl font-bold">{value}</div>
+      <div className="mt-0.5 text-sm font-medium" style={{ color: colors.inkSoft }}>{label}</div>
+      <div className="df-mono mt-2 text-xs" style={{ color }}>{sub}</div>
     </div>
   );
 }
