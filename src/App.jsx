@@ -3893,7 +3893,7 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
         <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {[
             { icon: FileText, title: "Devis & factures", desc: "Créés en quelques minutes, envoyés en un clic, toujours professionnels." },
-            { icon: ClipboardList, title: "Bons de commande", desc: "Gérez vos commandes fournisseurs sans jongler entre plusieurs outils." },
+            { icon: ClipboardCheck, title: "Bons de commande", desc: "Gérez vos commandes fournisseurs sans jongler entre plusieurs outils." },
             { icon: Users, title: "Suivi clients", desc: "Toutes vos coordonnées et l'historique de chaque client, au même endroit." },
             { icon: TrendingUp, title: "Révisions de prix", desc: "Calculs automatiques, conformes aux indices officiels du secteur." },
             { icon: Monitor, title: "Logiciel de bureau", desc: "Disponible aussi en application Mac et Windows, avec mise à jour automatique." },
