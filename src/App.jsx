@@ -9277,20 +9277,34 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
     { id: "danger", label: "Zone dangereuse", icon: AlertTriangle },
   ];
 
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <div className={isAdvanced ? "mx-auto max-w-6xl px-4 py-8 sm:px-6" : "mx-auto max-w-4xl px-4 py-8 sm:px-6"}>
       <div className="mb-6">
-        <h1 className="df-display flex items-center gap-2 text-2xl font-semibold"><Shield size={22} style={{ color: colors.brassDark }} /> Espace Admin</h1>
+        <h1 className="df-display flex items-center gap-2 text-2xl font-semibold"><Shield size={22} style={{ color: isAdvanced ? adv.accent : colors.brassDark }} /> Espace Admin</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Vue d'ensemble, gestion des forfaits et du compte.</p>
       </div>
 
-      <div className="mb-6 flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? colors.ink : "transparent", color: tab === id ? "white" : colors.inkSoft }}>
-            <Icon size={13} /> {label}
-          </button>
-        ))}
-      </div>
+      <div className={isAdvanced ? "flex items-start gap-8" : ""}>
+        {isAdvanced ? (
+          <div className="sticky top-6 flex w-56 shrink-0 flex-col gap-0.5">
+            {TABS.map(({ id, label, icon: Icon }) => (
+              <button key={id} onClick={() => setTab(id)} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium" style={{ background: tab === id ? adv.ink : "transparent", color: tab === id ? "white" : colors.inkSoft }}>
+                <Icon size={15} /> {label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="mb-6 flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
+            {TABS.map(({ id, label, icon: Icon }) => (
+              <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? colors.ink : "transparent", color: tab === id ? "white" : colors.inkSoft }}>
+                <Icon size={13} /> {label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className={isAdvanced ? "min-w-0 flex-1" : "w-full"}>
 
       {tab === "apercu" && (
         <>
@@ -9856,6 +9870,8 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
         )}
       </div>
       )}
+        </div>
+      </div>
     </div>
   );
 }
