@@ -4894,6 +4894,23 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
         {mobileNavOpen && (
           <div className="lg:hidden" style={{ background: adv.sidebarBg, borderBottom: `1px solid ${adv.line}` }}>
             <div className="max-h-[70vh] overflow-y-auto px-3 pb-3">
+              <div className="grid grid-cols-3 gap-1.5 py-2">
+                <button onClick={() => { setMobileNavOpen(false); onNewFacture(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Facture</button>
+                <button onClick={() => { setMobileNavOpen(false); onNewProforma(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Proforma</button>
+                <button onClick={() => { setMobileNavOpen(false); onNewRevision(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }} title="Révision des prix">Révision</button>
+              </div>
+              <div className="mb-1 mt-1 px-3 text-[10px] font-semibold uppercase tracking-wide" style={{ color: adv.inkSoft }}>Tous les services</div>
+              <div className="mb-2 grid grid-cols-2 gap-1">
+                {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
+                  const SIcon = s.icon;
+                  return (
+                    <button key={s.id} onClick={() => { setMobileNavOpen(false); onNewService(s.id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-[11px]" style={{ background: adv.paper, color: adv.ink }}>
+                      <SIcon size={13} className="shrink-0" style={{ color: adv.accent }} /> <span className="truncate">{s.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="my-2 border-t" style={{ borderColor: adv.line }} />
               {tabs.map(({ id, label, icon: Icon }) => (
                 <button key={id} onClick={() => { setView(id); setMobileNavOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={tabStyle(view === id)}>
                   <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} className="ml-auto" />}
