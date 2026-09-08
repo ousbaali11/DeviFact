@@ -43,7 +43,7 @@ const adv = {
   inkSoft: "#71717A",
   paper: "#F9FAFB",       // fond général très clair
   surface: "#FFFFFF",
-  sidebarBg: "#FFFFFF",   // barre latérale claire — plus de fond noir dominant
+  sidebarBg: "linear-gradient(to bottom, #EEF4FF, #FFFFFF)",   // dégradé bleu clair → blanc, ne dépend jamais du thème choisi
   accent: "#4F46E5",      // indigo simple et clair, un seul accent, pas de turquoise
   accentSoft: "#EEF2FF",
   line: "#E4E4E7",
@@ -3480,7 +3480,7 @@ function DeviFactAppInner() {
           </div>
         )}
         {siteSettings?.landingPageVersion === "avancee" ? (
-          <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: adv.surface, borderColor: adv.line }}>
+          <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: "linear-gradient(to bottom, #EEF4FF, #FFFFFF)", borderColor: adv.line }}>
             <div className="p-6 sm:p-8">
               <h1 className="df-display text-xl font-bold sm:text-2xl" style={{ color: adv.ink }}>Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
               <p className="mt-1 text-xs" style={{ color: adv.inkSoft }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
