@@ -2218,11 +2218,45 @@ function DeviFactAppInner() {
       }
     })();
 
+    // Vérification directe et explicite de la session, dès le
+    // démarrage — la source la plus fiable qui soit, plutôt que de
+    // dépendre du tout premier événement envoyé par l'écouteur
+    // ci-dessous. Sans ça, si cet événement arrive une première fois
+    // avec une session encore vide (avant que la vraie session
+    // enregistrée ait fini d'être relue en arrière-plan), le site
+    // affiche à tort la page d'accueil pendant un instant, avant de
+    // finalement revenir sur le compte connecté une fois la vraie
+    // information arrivée — exactement l'effet de "flash" à éviter.
+    (async () => {
+      try {
+        const { data: { session } } = await db.auth.getSession();
+        if (session?.user) {
+          currentUserIdRef.current = session.user.id;
+          const profile = await loadProfile(session.user.id, session.user.email);
+          setActiveOrganization(profile?.organizationId || null);
+          await loadUserData();
+          setAccount(profile);
+        } else {
+          setAccount(null);
+        }
+      } catch (err) {
+        console.error("Erreur lors de la vérification initiale de la session :", err);
+        setAccount(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
+
     // Seule source de vérité pour les données propres à l'utilisateur :
     // se déclenche à l'ouverture (avec la session actuelle, s'il y en a
     // une), à chaque connexion/inscription, et à chaque déconnexion —
     // qu'il s'agisse du même utilisateur ou d'un utilisateur différent.
     const { data: authListener } = db.auth.onAuthStateChange(async (_event, session) => {
+      // "INITIAL_SESSION" est déjà géré ci-dessus, de façon plus fiable
+      // (vérification directe, pas dépendante de l'ordre d'arrivée des
+      // événements) — ne le retraite jamais ici, pour ne jamais annuler
+      // par erreur ce qui vient d'être établi juste au-dessus.
+      if (_event === "INITIAL_SESSION") return;
       try {
         if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
         if (session?.user) {
@@ -2240,31 +2274,16 @@ function DeviFactAppInner() {
             return;
           }
           currentUserIdRef.current = session.user.id;
-          // "INITIAL_SESSION" = premier chargement d'une session déjà
-          // existante (typiquement : la personne recharge la page).
-          // currentUserIdRef repart forcément à null à chaque
-          // rechargement (simple mémoire, pas persistante) — sans cette
-          // distinction, ce cas serait à tort traité comme une nouvelle
-          // connexion, et clearUserData() effacerait la page où la
-          // personne se trouvait (voir la mémorisation de position plus
-          // bas). On ne vide donc QUE pour un vrai changement de compte.
-          if (_event !== "INITIAL_SESSION") {
-            clearUserData();
-          }
+          clearUserData();
           const profile = await loadProfile(session.user.id, session.user.email);
           setActiveOrganization(profile?.organizationId || null);
           await loadUserData();
           setAccount(profile);
         } else {
-          // Ne traite "pas de session" comme vraiment définitif que
-          // pour les événements qui le confirment réellement
-          // ("INITIAL_SESSION" = vérification terminée au chargement,
-          // "SIGNED_OUT" = déconnexion explicite). Un événement
-          // intermédiaire avec session vide, avant que la vraie
-          // session enregistrée ait fini d'être relue, ne doit jamais
-          // faire passer par la page d'accueil — même brièvement —
-          // avant de revenir sur le compte connecté juste après.
-          if (_event === "INITIAL_SESSION" || _event === "SIGNED_OUT" || !currentUserIdRef.current) {
+          // Ne traite "pas de session" comme vraiment définitif que pour
+          // une vraie déconnexion explicite — la vérification initiale
+          // (ci-dessus) s'est déjà chargée du cas du premier chargement.
+          if (_event === "SIGNED_OUT" || !currentUserIdRef.current) {
             currentUserIdRef.current = null;
             clearUserData();
             setAccount(null);
