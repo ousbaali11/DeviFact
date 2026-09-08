@@ -2274,6 +2274,7 @@ function DeviFactAppInner() {
             return;
           }
           currentUserIdRef.current = session.user.id;
+          setLoading(true);
           clearUserData();
           const profile = await loadProfile(session.user.id, session.user.email);
           setActiveOrganization(profile?.organizationId || null);
@@ -9303,6 +9304,17 @@ function DesktopAppSettings({ siteSettings, saving, onSave }) {
 
 function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Chaque carte utilisateur est repliée par défaut (juste l'essentiel
+  // visible) — évite une page immense dès qu'il y a beaucoup de
+  // comptes. Un identifiant présent dans cet ensemble = carte dépliée.
+  const [expandedUserIds, setExpandedUserIds] = useState(() => new Set());
+  function toggleUserExpanded(id) {
+    setExpandedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
   const [tab, setTab] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_lastAdminTab")) || "apercu");
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -9490,86 +9502,94 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
               {allUsers.map((u) => {
                 const deadline = u.created_at ? new Date(new Date(u.created_at).getTime() + 8 * 7 * 24 * 60 * 60 * 1000) : null;
                 const expired = u.expiresAt && new Date(u.expiresAt) < new Date();
+                const isExpanded = expandedUserIds.has(u.id);
                 return (
-                  <div key={u.id} className="rounded-2xl p-4" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-                    <div className="mb-3 flex items-start justify-between gap-2">
+                  <div key={u.id} className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                    <button onClick={() => toggleUserExpanded(u.id)} className="flex w-full items-start justify-between gap-2 p-4 text-left">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold">{u.email}</div>
                         <div className="text-xs" style={{ color: colors.inkSoft }}>{[u.first_name, u.last_name].filter(Boolean).join(" ") || u.company_name || "—"}</div>
                       </div>
-                      {u.is_admin && <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
-                    </div>
-
-                    <div className="mb-3 flex flex-wrap items-center gap-2 border-y py-3" style={{ borderColor: colors.line }}>
-                      {u.organizationId ? (
-                        <>
-                          <select
-                            value={u.plan}
-                            onChange={(e) => onSetUserPlan(u.organizationId, e.target.value)}
-                            disabled={savingUserPlanId === u.organizationId}
-                            className="df-select rounded-md px-2 py-1 text-xs"
-                            style={{ border: `1px solid ${colors.line}` }}
-                          >
-                            {PLANS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                          </select>
-                          {savingUserPlanId === u.organizationId && <Loader2 size={12} className="animate-spin" style={{ color: colors.inkSoft }} />}
-                          {u.plan !== "gratuit" && (
-                            <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: u.paymentStatus === "payé" ? `${colors.moss}18` : `${colors.brick}18`, color: u.paymentStatus === "payé" ? colors.moss : colors.brick }}>
-                              {u.paymentStatus === "payé" ? "Payé" : "Impayé"}
-                            </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {u.is_admin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
+                        {!u.confirmed_at && <AlertTriangle size={14} style={{ color: colors.brick }} />}
+                        <ChevronDown size={16} style={{ color: colors.inkSoft, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="px-4 pb-4">
+                        <div className="mb-3 flex flex-wrap items-center gap-2 border-y py-3" style={{ borderColor: colors.line }}>
+                          {u.organizationId ? (
+                            <>
+                              <select
+                                value={u.plan}
+                                onChange={(e) => onSetUserPlan(u.organizationId, e.target.value)}
+                                disabled={savingUserPlanId === u.organizationId}
+                                className="df-select rounded-md px-2 py-1 text-xs"
+                                style={{ border: `1px solid ${colors.line}` }}
+                              >
+                                {PLANS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                              </select>
+                              {savingUserPlanId === u.organizationId && <Loader2 size={12} className="animate-spin" style={{ color: colors.inkSoft }} />}
+                              {u.plan !== "gratuit" && (
+                                <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: u.paymentStatus === "payé" ? `${colors.moss}18` : `${colors.brick}18`, color: u.paymentStatus === "payé" ? colors.moss : colors.brick }}>
+                                  {u.paymentStatus === "payé" ? "Payé" : "Impayé"}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-xs" style={{ color: colors.inkSoft }}>Aucune organisation</span>
                           )}
-                        </>
-                      ) : (
-                        <span className="text-xs" style={{ color: colors.inkSoft }}>Aucune organisation</span>
-                      )}
-                    </div>
-
-                    <div className="mb-3 grid grid-cols-2 gap-2">
-                      <label className="text-xs" style={{ color: colors.inkSoft }}>
-                        Payé le
-                        <input
-                          type="date"
-                          className="df-input df-mono mt-0.5 block w-full rounded-md px-2 py-1 text-xs"
-                          style={{ border: `1px solid ${colors.line}` }}
-                          value={u.paidAt ? u.paidAt.slice(0, 10) : ""}
-                          disabled={!u.organizationId}
-                          onChange={(e) => onSetUserPaidAt(u.organizationId, e.target.value)}
-                        />
-                      </label>
-                      <label className="text-xs" style={{ color: colors.inkSoft }}>
-                        Expire le
-                        <input
-                          type="date"
-                          className="df-input df-mono mt-0.5 block w-full rounded-md px-2 py-1 text-xs"
-                          style={{ border: `1px solid ${expired ? colors.brick : colors.line}`, color: expired ? colors.brick : colors.ink }}
-                          value={u.expiresAt ? u.expiresAt.slice(0, 10) : ""}
-                          disabled={!u.organizationId}
-                          onChange={(e) => onSetUserExpiresAt(u.organizationId, e.target.value)}
-                        />
-                        {expired && <span className="text-xs font-medium" style={{ color: colors.brick }}>Expiré</span>}
-                      </label>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      {u.confirmed_at ? (
-                        <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.moss }}><Check size={13} /> Confirmé</span>
-                      ) : (
-                        <div>
-                          <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brick }}><AlertTriangle size={13} /> Non confirmé</span>
-                          {deadline && <span className="block text-xs" style={{ color: colors.inkSoft }}>Suppression auto le {fr(deadline)}</span>}
                         </div>
-                      )}
-                      {!u.confirmed_at && (
-                        <button
-                          onClick={() => onResendConfirmation(u.id)}
-                          disabled={resendingConfirmationId === u.id}
-                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white"
-                          style={{ background: colors.slate, opacity: resendingConfirmationId === u.id ? 0.7 : 1 }}
-                        >
-                          {resendingConfirmationId === u.id ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} Relancer
-                        </button>
-                      )}
-                    </div>
+
+                        <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <label className="text-xs" style={{ color: colors.inkSoft }}>
+                            Payé le
+                            <input
+                              type="date"
+                              className="df-input df-mono mt-0.5 block w-full rounded-md px-2 py-1 text-xs"
+                              style={{ border: `1px solid ${colors.line}` }}
+                              value={u.paidAt ? u.paidAt.slice(0, 10) : ""}
+                              disabled={!u.organizationId}
+                              onChange={(e) => onSetUserPaidAt(u.organizationId, e.target.value)}
+                            />
+                          </label>
+                          <label className="text-xs" style={{ color: colors.inkSoft }}>
+                            Expire le
+                            <input
+                              type="date"
+                              className="df-input df-mono mt-0.5 block w-full rounded-md px-2 py-1 text-xs"
+                              style={{ border: `1px solid ${expired ? colors.brick : colors.line}`, color: expired ? colors.brick : colors.ink }}
+                              value={u.expiresAt ? u.expiresAt.slice(0, 10) : ""}
+                              disabled={!u.organizationId}
+                              onChange={(e) => onSetUserExpiresAt(u.organizationId, e.target.value)}
+                            />
+                            {expired && <span className="text-xs font-medium" style={{ color: colors.brick }}>Expiré</span>}
+                          </label>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          {u.confirmed_at ? (
+                            <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.moss }}><Check size={13} /> Confirmé</span>
+                          ) : (
+                            <div>
+                              <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brick }}><AlertTriangle size={13} /> Non confirmé</span>
+                              {deadline && <span className="block text-xs" style={{ color: colors.inkSoft }}>Suppression auto le {fr(deadline)}</span>}
+                            </div>
+                          )}
+                          {!u.confirmed_at && (
+                            <button
+                              onClick={() => onResendConfirmation(u.id)}
+                              disabled={resendingConfirmationId === u.id}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white"
+                              style={{ background: colors.slate, opacity: resendingConfirmationId === u.id ? 0.7 : 1 }}
+                            >
+                              {resendingConfirmationId === u.id ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} Relancer
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
