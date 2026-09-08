@@ -42,8 +42,8 @@ const adv = {
   ink: "#27272A",         // texte foncé (gris anthracite doux, jamais noir pur)
   inkSoft: "#71717A",
   paper: "#F9FAFB",       // fond général très clair
-  surface: "#FFFFFF",
-  sidebarBg: "linear-gradient(to bottom, #EEF4FF, #FFFFFF)",   // dégradé bleu clair → blanc, ne dépend jamais du thème choisi
+  surface: "linear-gradient(to bottom, #BFDBFE, #FFFFFF)",   // dégradé bleu clair → blanc, appliqué à toute case/carte/champ blanc par défaut
+  sidebarBg: "linear-gradient(to bottom, #BFDBFE, #FFFFFF)",   // dégradé bleu clair → blanc, ne dépend jamais du thème choisi
   accent: "#4F46E5",      // indigo simple et clair, un seul accent, pas de turquoise
   accentSoft: "#EEF2FF",
   line: "#E4E4E7",
@@ -3480,7 +3480,7 @@ function DeviFactAppInner() {
           </div>
         )}
         {siteSettings?.landingPageVersion === "avancee" ? (
-          <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: "linear-gradient(to bottom, #EEF4FF, #FFFFFF)", borderColor: adv.line }}>
+          <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: "linear-gradient(to bottom, #BFDBFE, #FFFFFF)", borderColor: adv.line }}>
             <div className="p-6 sm:p-8">
               <h1 className="df-display text-xl font-bold sm:text-2xl" style={{ color: adv.ink }}>Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
               <p className="mt-1 text-xs" style={{ color: adv.inkSoft }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
@@ -3643,7 +3643,7 @@ function DeviFactAppInner() {
               const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
               const TypeIconComp = docTypeIcon(d.type);
               return (
-                <div key={d.id} className="flex flex-col gap-3 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: colors.surface, border: `1px solid ${selectedIds.includes(d.id) ? colors.brass : colors.line}` }}>
+                <div key={d.id} className="flex flex-col gap-3 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${selectedIds.includes(d.id) ? colors.brass : colors.line}` }}>
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor(d.type)}18`, color: docTypeColor(d.type) }}><TypeIconComp size={16} /></div>
@@ -7981,7 +7981,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
       ) : siteSettings?.landingPageVersion === "avancee" ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((c) => (
-            <div key={c.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <div key={c.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
               <div className="flex items-start justify-between">
                 <div className="flex h-9 w-9 items-center justify-center rounded-full df-display text-sm font-bold" style={{ background: colors.paper, color: colors.ink }}>{initials(c.name) || "?"}</div>
                 <div className="flex gap-2">
@@ -8084,7 +8084,7 @@ function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings }
       ) : siteSettings?.landingPageVersion === "avancee" ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((p) => (
-            <div key={p.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <div key={p.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 truncate text-sm font-semibold">{p.designation}</div>
                 <div className="flex shrink-0 gap-2">
@@ -9504,7 +9504,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                 const expired = u.expiresAt && new Date(u.expiresAt) < new Date();
                 const isExpanded = expandedUserIds.has(u.id);
                 return (
-                  <div key={u.id} className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                  <div key={u.id} className="overflow-hidden rounded-2xl" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
                     <button onClick={() => toggleUserExpanded(u.id)} className="flex w-full items-start justify-between gap-2 p-4 text-left">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold">{u.email}</div>
@@ -9757,7 +9757,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {plans.map((plan) => (
-              <div key={plan.id} className="rounded-2xl p-4" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+              <div key={plan.id} className="rounded-2xl p-4" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
                 <div className="mb-3 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-semibold">{plan.name}</div>
