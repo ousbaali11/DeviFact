@@ -1397,6 +1397,7 @@ function newDocument(type, documents) {
     issueDate: new Date().toISOString().slice(0, 10),
     currency: "EUR",
     validityDays: 30,
+    showValidity: true,
     dueDays: 30,
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
@@ -1545,7 +1546,9 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
             <span style={mono}>{doc.docNumber || "—"}/{new Date(doc.issueDate).getFullYear()}</span>
           </div>
           <div style={{ fontSize: "9.5pt", color: inkSoft, marginTop: "4px" }}>Date d'émission : {frLong(doc.issueDate)}</div>
-          <div style={{ fontSize: "9.5pt", color: inkSoft }}>{doc.type !== "facture" ? `Valable jusqu'au ${frLong(validityDate)}` : `Échéance : ${frLong(dueDate)}`}</div>
+          {(doc.type === "facture" || doc.showValidity !== false) && (
+            <div style={{ fontSize: "9.5pt", color: inkSoft }}>{doc.type !== "facture" ? `Valable jusqu'au ${frLong(validityDate)}` : `Échéance : ${frLong(dueDate)}`}</div>
+          )}
         </div>
         <div style={{ textAlign: "right" }}>
           {doc.company.logo && (
@@ -10413,7 +10416,9 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     const rows = [];
     rows.push([docTypeLabel(localDoc.type).toUpperCase(), localDoc.docNumber]);
     rows.push(["Date d'émission", frLong(localDoc.issueDate)]);
-    rows.push([localDoc.type !== "facture" ? "Valable jusqu'au" : "Échéance", frLong(localDoc.type !== "facture" ? validityDate : dueDate)]);
+    if (localDoc.type === "facture" || localDoc.showValidity !== false) {
+      rows.push([localDoc.type !== "facture" ? "Valable jusqu'au" : "Échéance", frLong(localDoc.type !== "facture" ? validityDate : dueDate)]);
+    }
     rows.push(["Devise", localDoc.currency || "EUR"]);
     rows.push([]);
     rows.push(["Émetteur", localDoc.company.name]);
@@ -10549,6 +10554,11 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 <>
                   <label className="self-center text-right" style={{ color: colors.inkSoft }}>Validité (jours)</label>
                   <input type="number" className="df-input df-mono rounded-md px-2 py-1" style={inputStyle} value={localDoc.validityDays} onChange={(e) => patch({ validityDays: Number(e.target.value) || 0 })} />
+                  <span></span>
+                  <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}>
+                    <input type="checkbox" checked={localDoc.showValidity !== false} onChange={(e) => patch({ showValidity: e.target.checked })} style={{ accentColor: colors.brass }} />
+                    Afficher "Valable jusqu'au..." sur le document
+                  </label>
                 </>
               ) : (
                 <>
@@ -10557,7 +10567,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 </>
               )}
               <div className="col-span-2 text-right text-xs" style={{ color: colors.inkSoft }}>
-                {localDoc.type !== "facture" ? `Valable jusqu'au ${frLong(validityDate)}` : `Paiement attendu avant le ${frLong(dueDate)}`}
+                {localDoc.type !== "facture" ? (localDoc.showValidity !== false ? `Valable jusqu'au ${frLong(validityDate)}` : null) : `Paiement attendu avant le ${frLong(dueDate)}`}
               </div>
             </div>
           </div>
