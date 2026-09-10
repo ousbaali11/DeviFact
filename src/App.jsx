@@ -11,7 +11,7 @@ import {
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
-  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor,
+  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Mic,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
 
@@ -207,6 +207,86 @@ function FinalizeButton({ doc, onFinalize, siteSettings }) {
       >
         {isDone ? <Check size={16} /> : null} {isDone ? "Terminé" : "Enregistrer"}
       </button>
+    </div>
+  );
+}
+
+// Palette de commandes (Ctrl+K / Cmd+K) — recherche rapide parmi
+// toutes les actions et pages du site, sans naviguer dans les menus.
+// Devient vite indispensable dès qu'il y a beaucoup de services (15
+// ici) — un réflexe déjà bien installé sur les sites pros modernes.
+function CommandPalette({ isOpen, onClose, commands }) {
+  const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const inputRef = useRef(null);
+  useEscapeToClose(isOpen, onClose);
+
+  useEffect(() => {
+    if (isOpen) { setQuery(""); setSelectedIndex(0); setTimeout(() => inputRef.current?.focus(), 10); }
+  }, [isOpen]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return commands;
+    const q = query.toLowerCase();
+    return commands.filter((c) => c.label.toLowerCase().includes(q) || (c.keywords || "").toLowerCase().includes(q));
+  }, [query, commands]);
+
+  useEffect(() => { setSelectedIndex(0); }, [query]);
+
+  function runSelected() {
+    const cmd = filtered[selectedIndex];
+    if (cmd) { cmd.action(); onClose(); }
+  }
+
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-start justify-center pt-24" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose} role="presentation">
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl shadow-2xl" style={{ background: "white" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Palette de commandes">
+        <div className="flex items-center gap-3 border-b px-4 py-3" style={{ borderColor: colors.line }}>
+          <Search size={17} style={{ color: colors.inkSoft }} aria-hidden="true" />
+          <input
+            ref={inputRef}
+            className="w-full bg-transparent text-sm outline-none"
+            placeholder="Rechercher une action ou une page..."
+            aria-label="Rechercher une action ou une page"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="command-palette-list"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1)); }
+              else if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((i) => Math.max(i - 1, 0)); }
+              else if (e.key === "Enter") { e.preventDefault(); runSelected(); }
+            }}
+          />
+          <span className="rounded border px-1.5 py-0.5 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>Échap</span>
+        </div>
+        <div id="command-palette-list" role="listbox" aria-label="Résultats" className="max-h-80 overflow-y-auto p-2">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-6 text-center text-sm" style={{ color: colors.inkSoft }}>Aucun résultat pour "{query}".</p>
+          ) : (
+            filtered.map((cmd, i) => {
+              const CmdIcon = cmd.icon;
+              return (
+                <button
+                  key={cmd.id}
+                  role="option"
+                  aria-selected={i === selectedIndex}
+                  onClick={() => { cmd.action(); onClose(); }}
+                  onMouseEnter={() => setSelectedIndex(i)}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm"
+                  style={{ background: i === selectedIndex ? colors.paper : "transparent", color: colors.ink }}
+                >
+                  {CmdIcon && <CmdIcon size={16} style={{ color: colors.inkSoft, flexShrink: 0 }} aria-hidden="true" />}
+                  <span className="min-w-0 flex-1 truncate">{cmd.label}</span>
+                  {cmd.hint && <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{cmd.hint}</span>}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1825,6 +1905,24 @@ function DeviFactAppInner() {
   // fluctuation) — sert à afficher un bandeau clair et à bloquer toute
   // modification tant que la vraie connexion n'est pas revenue.
   const [offlineMode, setOfflineMode] = useState(false);
+  // Notification après qu'une facture a été créée automatiquement à
+  // partir d'un devis passé au statut "signé" — jamais de navigation
+  // forcée surprise, juste un message clair avec un lien pour l'ouvrir
+  // si la personne le souhaite.
+  const [autoFactureNotice, setAutoFactureNotice] = useState(null);
+  // Palette de commandes (Ctrl+K / Cmd+K) — accessible depuis n'importe
+  // quelle page une fois connecté.
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCommandPaletteOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingClients, setSavingClients] = useState(false);
@@ -2713,6 +2811,30 @@ function DeviFactAppInner() {
     // Cas normal : le document existe déjà réellement (a déjà eu du
     // contenu à un moment donné) — mise à jour habituelle.
     if (documents.some((d) => d.id === id)) {
+      const original = documents.find((d) => d.id === id);
+      // Devis qui vient tout juste de passer à "signé" (jamais si déjà
+      // signé avant, pour ne pas créer une facture à chaque petite
+      // modification ultérieure) : génère automatiquement la facture
+      // correspondante, sans naviguer ailleurs ni interrompre ce que la
+      // personne était en train de faire — juste une notification.
+      if (original && original.type === "devis" && patch.status === "signé" && original.status !== "signé") {
+        const updatedOriginal = { ...original, ...patch, updatedAt: Date.now() };
+        const invoice = {
+          ...updatedOriginal,
+          id: nextId("doc"),
+          type: "facture",
+          docNumber: nextNumber(documents, "facture"),
+          issueDate: new Date().toISOString().slice(0, 10),
+          status: "brouillon",
+          workStage: "brouillon",
+          linkedDevisId: updatedOriginal.id,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        persist([invoice, ...documents.map((d) => (d.id === id ? updatedOriginal : d))]);
+        setAutoFactureNotice({ docNumber: invoice.docNumber, id: invoice.id });
+        return;
+      }
       persist(documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
       return;
     }
@@ -3344,7 +3466,26 @@ function DeviFactAppInner() {
       return;
     }
   }
-  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); } };
+  const paletteCommands = useMemo(() => {
+    const cmds = [
+      { id: "nav-dashboard", label: "Aller au Tableau de bord", icon: LayoutDashboard, action: () => setView("dashboard") },
+      { id: "nav-chantiers", label: "Aller à Chantiers", icon: MapPinned, action: () => setView("chantiers") },
+      { id: "nav-clients", label: "Aller à Clients", icon: Users, action: () => setView("clients") },
+      { id: "nav-prestations", label: "Aller à Bibliothèque", icon: Library, action: () => setView("prestations") },
+      { id: "nav-company", label: "Aller à Mon entreprise", icon: Building2, action: () => setView("company") },
+      { id: "nav-team", label: "Aller à Équipe", icon: UserPlus, action: () => setView("team") },
+      { id: "nav-account", label: "Aller à Mon compte", icon: UserCircle, action: () => setView("account") },
+      { id: "nav-pricing", label: "Aller à Abonnement", icon: CreditCard, action: () => setView("pricing") },
+      { id: "nav-contact", label: "Nous contacter", icon: Mail, action: () => setView("contact") },
+      ...(account?.isAdmin ? [{ id: "nav-admin", label: "Aller à Admin", icon: Shield, action: () => setView("admin") }] : []),
+    ];
+    SERVICES.filter((s) => visibleServices.includes(s.id) && s.implemented).forEach((s) => {
+      cmds.push({ id: `new-${s.id}`, label: `Nouveau : ${s.label}`, icon: s.icon, hint: "Créer", keywords: s.description, action: () => openNewService(s.id) });
+    });
+    return cmds;
+  }, [account, visibleServices]);
+
+  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands };
 
   if (view === "revision-sector") {
     const countryInfo = getRevisionCountryInfo(revisionCountry);
@@ -3600,6 +3741,19 @@ function DeviFactAppInner() {
             <div>
               <p className="text-sm font-medium" style={{ color: colors.brick }}>Mode hors ligne — dernière copie connue</p>
               <p className="text-xs" style={{ color: colors.inkSoft }}>Impossible de joindre le serveur. Tu consultes une copie de tes documents enregistrée lors de ta dernière connexion — elle peut ne plus être à jour, et aucune modification n'est possible tant que la connexion n'est pas revenue.</p>
+            </div>
+          </div>
+        )}
+
+        {autoFactureNotice && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}40` }}>
+            <div className="flex items-center gap-2">
+              <Check size={16} style={{ color: colors.moss, flexShrink: 0 }} />
+              <p className="text-sm font-medium" style={{ color: colors.moss }}>Devis signé — la facture {autoFactureNotice.docNumber} a été créée automatiquement.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => { openDoc(autoFactureNotice.id); setAutoFactureNotice(null); }} className="text-xs font-semibold underline" style={{ color: colors.moss }}>Ouvrir</button>
+              <button onClick={() => setAutoFactureNotice(null)} style={{ color: colors.inkSoft }}><X size={14} /></button>
             </div>
           </div>
         )}
@@ -4786,7 +4940,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   );
 }
 
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType }) {
+function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType, commandPaletteOpen, setCommandPaletteOpen, paletteCommands }) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -5029,6 +5183,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             </div>
           </div>
         )}
+        <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} commands={paletteCommands} />
       </>
     );
   }
@@ -5248,6 +5403,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           </>
         )}
       </div>
+      <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} commands={paletteCommands} />
     </div>
   );
 }
@@ -10291,6 +10447,34 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
   const [libraryQuery, setLibraryQuery] = useState("");
   const [aiOpen, setAiOpen] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
+  // Dictée vocale — utilise la reconnaissance vocale déjà intégrée au
+  // navigateur (gratuite, aucun service payant), pour décrire le
+  // chantier à voix haute plutôt que de taper. Pas disponible sur tous
+  // les navigateurs (Firefox notamment) — le bouton reste simplement
+  // caché dans ce cas, sans rien casser.
+  const [isListening, setIsListening] = useState(false);
+  const speechRecognitionRef = useRef(null);
+  const SpeechRecognitionAPI = typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+  function toggleVoiceInput() {
+    if (!SpeechRecognitionAPI) return;
+    if (isListening) {
+      speechRecognitionRef.current?.stop();
+      return;
+    }
+    const recognition = new SpeechRecognitionAPI();
+    recognition.lang = "fr-FR";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setAiDescription((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+    speechRecognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
+  }
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
   const canvasRef = useRef(null);
@@ -11131,6 +11315,16 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                       value={aiDescription}
                       onChange={(e) => setAiDescription(e.target.value)}
                     />
+                    {SpeechRecognitionAPI && (
+                      <button
+                        onClick={toggleVoiceInput}
+                        className="mt-1.5 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium"
+                        style={{ background: isListening ? colors.brick : colors.paper, color: isListening ? "white" : colors.inkSoft }}
+                        title={isListening ? "Arrêter la dictée" : "Décrire à voix haute"}
+                      >
+                        <Mic size={12} className={isListening ? "animate-pulse" : ""} /> {isListening ? "Écoute en cours... (clique pour arrêter)" : "Dicter à voix haute"}
+                      </button>
+                    )}
                     {aiError && <p className="mt-1 text-xs" style={{ color: colors.brick }}>{aiError}</p>}
                     <div className="mt-2 flex justify-end gap-2">
                       <button onClick={() => setAiOpen(false)} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ color: colors.inkSoft }}>Annuler</button>
