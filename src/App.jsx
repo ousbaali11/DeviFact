@@ -1944,6 +1944,30 @@ function DeviFactAppInner() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+  // IMPORTANT : ce calcul doit impérativement rester ICI, avant tout
+  // "return" conditionnel plus bas (écran de chargement, page de
+  // connexion...) — un Hook React (useMemo) ne doit JAMAIS être sauté
+  // sur certains rendus et exécuté sur d'autres, sous peine d'une
+  // vraie erreur de React (déjà rencontrée une fois, corrigée ici).
+  const visibleServices = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
+  const paletteCommands = useMemo(() => {
+    const cmds = [
+      { id: "nav-dashboard", label: "Aller au Tableau de bord", icon: LayoutDashboard, action: () => setView("dashboard") },
+      { id: "nav-chantiers", label: "Aller à Chantiers", icon: MapPinned, action: () => setView("chantiers") },
+      { id: "nav-clients", label: "Aller à Clients", icon: Users, action: () => setView("clients") },
+      { id: "nav-prestations", label: "Aller à Bibliothèque", icon: Library, action: () => setView("prestations") },
+      { id: "nav-company", label: "Aller à Mon entreprise", icon: Building2, action: () => setView("company") },
+      { id: "nav-team", label: "Aller à Équipe", icon: UserPlus, action: () => setView("team") },
+      { id: "nav-account", label: "Aller à Mon compte", icon: UserCircle, action: () => setView("account") },
+      { id: "nav-pricing", label: "Aller à Abonnement", icon: CreditCard, action: () => setView("pricing") },
+      { id: "nav-contact", label: "Nous contacter", icon: Mail, action: () => setView("contact") },
+      ...(account?.isAdmin ? [{ id: "nav-admin", label: "Aller à Admin", icon: Shield, action: () => setView("admin") }] : []),
+    ];
+    SERVICES.filter((s) => visibleServices.includes(s.id) && s.implemented).forEach((s) => {
+      cmds.push({ id: `new-${s.id}`, label: `Nouveau : ${s.label}`, icon: s.icon, hint: "Créer", keywords: s.description, action: () => openNewService(s.id) });
+    });
+    return cmds;
+  }, [account, visibleServices]);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingClients, setSavingClients] = useState(false);
@@ -3473,7 +3497,6 @@ function DeviFactAppInner() {
     );
   }
 
-  const visibleServices = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
   function openNewService(serviceId) {
     const svc = getService(serviceId);
     if (!svc) return;
@@ -3487,24 +3510,6 @@ function DeviFactAppInner() {
       return;
     }
   }
-  const paletteCommands = useMemo(() => {
-    const cmds = [
-      { id: "nav-dashboard", label: "Aller au Tableau de bord", icon: LayoutDashboard, action: () => setView("dashboard") },
-      { id: "nav-chantiers", label: "Aller à Chantiers", icon: MapPinned, action: () => setView("chantiers") },
-      { id: "nav-clients", label: "Aller à Clients", icon: Users, action: () => setView("clients") },
-      { id: "nav-prestations", label: "Aller à Bibliothèque", icon: Library, action: () => setView("prestations") },
-      { id: "nav-company", label: "Aller à Mon entreprise", icon: Building2, action: () => setView("company") },
-      { id: "nav-team", label: "Aller à Équipe", icon: UserPlus, action: () => setView("team") },
-      { id: "nav-account", label: "Aller à Mon compte", icon: UserCircle, action: () => setView("account") },
-      { id: "nav-pricing", label: "Aller à Abonnement", icon: CreditCard, action: () => setView("pricing") },
-      { id: "nav-contact", label: "Nous contacter", icon: Mail, action: () => setView("contact") },
-      ...(account?.isAdmin ? [{ id: "nav-admin", label: "Aller à Admin", icon: Shield, action: () => setView("admin") }] : []),
-    ];
-    SERVICES.filter((s) => visibleServices.includes(s.id) && s.implemented).forEach((s) => {
-      cmds.push({ id: `new-${s.id}`, label: `Nouveau : ${s.label}`, icon: s.icon, hint: "Créer", keywords: s.description, action: () => openNewService(s.id) });
-    });
-    return cmds;
-  }, [account, visibleServices]);
 
   const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode };
 
