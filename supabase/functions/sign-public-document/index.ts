@@ -20,10 +20,13 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
   try {
-    const { token, signatureName, signatureDrawing } = await req.json();
+    const { token, signatureName, signatureDrawing, secondSignatureName } = await req.json();
     if (!token || (!signatureName?.trim() && !signatureDrawing)) {
       return new Response(JSON.stringify({ error: "Signature manquante." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    // Second signataire (optionnel) : un nom en plus, signé en une seule
+    // étape avec le premier — stocké tel quel sur le document.
+    const secondName = typeof secondSignatureName === "string" ? secondSignatureName.trim() : "";
 
     const { data: link, error: linkError } = await dbAdmin
       .from("public_document_links")
@@ -56,7 +59,7 @@ serve(async (req) => {
     documents[docIndex] = {
       ...original,
       status: "signé",
-      signature: { mode: signatureDrawing ? "dessin" : "texte", name: signatureName || "", drawing: signatureDrawing || null, signedRemotely: true },
+      signature: { mode: signatureDrawing ? "dessin" : "texte", name: signatureName || "", drawing: signatureDrawing || null, signedRemotely: true, ...(secondName ? { secondName } : {}) },
       updatedAt: Date.now(),
     };
 

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo, forwardRef, Fragment, Component } from "react";
+import { flushSync } from "react-dom";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
+import QRCode from "qrcode";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
@@ -13,6 +15,7 @@ import {
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
   Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Mic, Sun, Moon, Link2,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
+  Maximize2, Minimize2,
 } from "lucide-react";
 
 // Chaque couleur pointe vers une variable CSS (définie par le thème
@@ -1622,6 +1625,10 @@ const GlobalStyle = () => (
     }
     .df-marquee-text { display: inline-block; white-space: nowrap; animation: df-marquee 11s linear infinite; }
     .print-doc { display: none; }
+    /* Mode présentation : le document seul, en plein écran (tablette
+       posée devant le client) — on réutilise le rendu PDF classique. */
+    .df-presentation { position: fixed; inset: 0; z-index: 1000; overflow: auto; -webkit-overflow-scrolling: touch; }
+    .df-presentation .print-doc { display: block; margin: 0 auto; box-shadow: 0 8px 30px rgba(0,0,0,0.18); }
     @media print {
       @page { size: A4; margin: 0; }
       html, body { background: white !important; }
@@ -1632,7 +1639,15 @@ const GlobalStyle = () => (
   `}</style>
 );
 
-const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true }, ref) {
+// Lien public d'un document (signature ou paiement en ligne, sans
+// compte) et QR code correspondant, généré localement (aucun service
+// externe) pour être imprimé sur le PDF classique.
+function publicDocumentUrl(token) {
+  return `${window.location.origin}${window.location.pathname}?voir-document=${token}`;
+}
+const PUBLIC_QR_OPTIONS = { margin: 0, width: 300, errorCorrectionLevel: "M", color: { dark: "#1B2A33", light: "#FFFFFF" } };
+
+const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true, publicQr = null }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
   const dueDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
@@ -1886,14 +1901,33 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
         )}
       </div>
 
-      {/* Signature — bas à droite, uniquement si une signature existe */}
-      {((doc.signature?.mode === "texte" && doc.signature?.name) ||
+      {/* QR code du lien public — bas à gauche (devis/factures uniquement)
+          — et signature — bas à droite, uniquement si une signature existe */}
+      {(publicQr?.dataUrl ||
+        (doc.signature?.mode === "texte" && doc.signature?.name) ||
         (doc.signature?.mode === "dessin" && doc.signature?.drawing) ||
         (doc.signature?.mode === "image" && doc.signature?.image)) && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "20px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: "20px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
+          <div>
+            {publicQr?.dataUrl && (
+              <div style={{ width: "2cm" }}>
+                <img src={publicQr.dataUrl} alt="QR code" style={{ width: "2cm", height: "2cm", display: "block" }} />
+                <div style={{ fontSize: "6.5pt", color: inkSoft, marginTop: "3px", lineHeight: 1.2, textAlign: "center" }}>
+                  {doc.type === "facture" ? "Scannez pour payer en ligne" : "Scannez pour signer en ligne"}
+                </div>
+              </div>
+            )}
+          </div>
+          {((doc.signature?.mode === "texte" && doc.signature?.name) ||
+            (doc.signature?.mode === "dessin" && doc.signature?.drawing) ||
+            (doc.signature?.mode === "image" && doc.signature?.image)) && (
           <div style={{ width: "230px", border: `1px solid ${line}`, borderRadius: "4px", padding: "10px 14px", minHeight: "70px" }}>
             {doc.signature?.mode === "texte" && doc.signature?.name && (
               <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontStyle: "italic" }}>{doc.signature.name}</div>
+            )}
+            {/* Second signataire (signature en ligne à deux noms) */}
+            {doc.signature?.mode === "texte" && doc.signature?.name && doc.signature?.secondName && (
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontStyle: "italic", marginTop: "4px" }}>{doc.signature.secondName}</div>
             )}
             {doc.signature?.mode === "dessin" && doc.signature?.drawing && (
               <img src={doc.signature.drawing} alt="Signature" style={{ height: "60px" }} />
@@ -1902,6 +1936,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
               <img src={doc.signature.image} alt="Signature" style={{ height: "60px", objectFit: "contain" }} />
             )}
           </div>
+          )}
         </div>
       )}
     </div>
@@ -4167,6 +4202,8 @@ export default function DeviFactApp() {
 function PublicDocumentView({ token }) {
   const [state, setState] = useState({ loading: true, error: null, document: null, siteName: "", signedAt: null, paidAt: null });
   const [signatureName, setSignatureName] = useState("");
+  const [secondSigner, setSecondSigner] = useState(false);
+  const [secondSignatureName, setSecondSignatureName] = useState("");
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState(null);
   const [signed, setSigned] = useState(false);
@@ -4188,10 +4225,13 @@ function PublicDocumentView({ token }) {
 
   async function handleSign() {
     if (!signatureName.trim()) { setSignError("Merci d'indiquer ton nom pour signer."); return; }
+    if (secondSigner && !secondSignatureName.trim()) { setSignError("Merci d'indiquer le nom du second signataire."); return; }
     setSigning(true);
     setSignError(null);
     try {
-      const { data, error } = await db.functions.invoke("sign-public-document", { body: { token, signatureName: signatureName.trim() } });
+      const body = { token, signatureName: signatureName.trim() };
+      if (secondSigner) body.secondSignatureName = secondSignatureName.trim();
+      const { data, error } = await db.functions.invoke("sign-public-document", { body });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       setSigned(true);
@@ -4265,6 +4305,19 @@ function PublicDocumentView({ token }) {
                   value={signatureName}
                   onChange={(e) => setSignatureName(e.target.value)}
                 />
+                <label className="mb-2 flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}>
+                  <input type="checkbox" checked={secondSigner} onChange={(e) => setSecondSigner(e.target.checked)} />
+                  Ajouter un second signataire
+                </label>
+                {secondSigner && (
+                  <input
+                    className="df-input mb-2 w-full rounded-md px-3 py-2 text-sm"
+                    style={{ border: `1px solid ${colors.line}` }}
+                    placeholder="Nom complet du second signataire"
+                    value={secondSignatureName}
+                    onChange={(e) => setSecondSignatureName(e.target.value)}
+                  />
+                )}
                 {signError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{signError}</p>}
                 <button onClick={handleSign} disabled={signing} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.brassDark, opacity: signing ? 0.7 : 1 }}>
                   {signing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {signing ? "Signature en cours..." : "Signer et accepter le devis"}
@@ -10994,14 +11047,72 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     onSavePrestation({ id: nextId("pr"), designation: it.designation, category: "", unit: it.unit, unitPrice: it.unitPrice, tva: it.tva });
   }
   const [publicLinkState, setPublicLinkState] = useState({ loading: false, url: null, error: null });
+
+  // QR code imprimé sur le PDF classique : il pointe vers le lien
+  // public du document (devis → signature, facture → paiement). Le lien
+  // le plus récent est réutilisé s'il existe ; sinon il est créé au
+  // moment du téléchargement du PDF, jamais avant.
+  const hasPublicLinkType = doc.type === "devis" || doc.type === "facture";
+  const [publicQr, setPublicQr] = useState(null); // { url, dataUrl }
+  const publicQrLoadRef = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    setPublicQr(null);
+    publicQrLoadRef.current = null;
+    if (!hasPublicLinkType || !account?.organizationId) return;
+    const load = (async () => {
+      try {
+        const { data, error } = await db.from("public_document_links").select("token").eq("document_id", doc.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+        if (error || !data?.token || cancelled) return null;
+        const url = publicDocumentUrl(data.token);
+        const dataUrl = await QRCode.toDataURL(url, PUBLIC_QR_OPTIONS);
+        const qr = { url, dataUrl };
+        if (!cancelled) setPublicQr(qr);
+        return qr;
+      } catch (err) {
+        console.warn("Lien public existant non chargé (pas de QR code)", err);
+        return null;
+      }
+    })();
+    publicQrLoadRef.current = load;
+    return () => { cancelled = true; };
+  }, [doc.id, hasPublicLinkType, account?.organizationId]);
+
+  // Garantit un QR code avant la capture du PDF : réutilise le lien
+  // chargé, sinon en crée un (même logique que le bouton « Lien de
+  // signature/paiement »). En cas d'échec, le PDF est produit sans QR.
+  async function ensurePublicQr() {
+    if (!hasPublicLinkType || !account?.organizationId) return null;
+    if (publicQr) return publicQr;
+    if (publicQrLoadRef.current) {
+      const loaded = await publicQrLoadRef.current;
+      if (loaded) return loaded;
+    }
+    try {
+      const { data, error } = await db.from("public_document_links").insert({ organization_id: account.organizationId, document_id: localDoc.id }).select("token").single();
+      if (error) throw error;
+      const url = publicDocumentUrl(data.token);
+      const dataUrl = await QRCode.toDataURL(url, PUBLIC_QR_OPTIONS);
+      const qr = { url, dataUrl };
+      // Rendu synchrone : le QR doit être dans le DOM avant la capture.
+      flushSync(() => setPublicQr(qr));
+      return qr;
+    } catch (err) {
+      console.warn("QR code non ajouté au PDF (lien public indisponible)", err);
+      return null;
+    }
+  }
+
   async function generatePublicLink() {
     setPublicLinkState({ loading: true, url: null, error: null });
     try {
       const { data, error } = await db.from("public_document_links").insert({ organization_id: account.organizationId, document_id: localDoc.id }).select("token").single();
       if (error) throw error;
-      const url = `${window.location.origin}${window.location.pathname}?voir-document=${data.token}`;
+      const url = publicDocumentUrl(data.token);
       await navigator.clipboard.writeText(url).catch(() => {});
       setPublicLinkState({ loading: false, url, error: null });
+      // Le QR code du PDF suit toujours le lien le plus récent.
+      QRCode.toDataURL(url, PUBLIC_QR_OPTIONS).then((dataUrl) => setPublicQr({ url, dataUrl })).catch(() => {});
     } catch (err) {
       console.error("Erreur de génération du lien public", err);
       setPublicLinkState({ loading: false, url: null, error: "Impossible de générer le lien pour l'instant." });
@@ -11111,10 +11222,63 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
   const printRef = useRef(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
 
+  // Mode présentation : le document seul, plein écran, sans aucun
+  // bouton d'administration — pensé pour une tablette posée devant le
+  // client. Sortie par le bouton « Quitter » ou la touche Échap.
+  const [presentationMode, setPresentationMode] = useState(false);
+  const [presentationZoom, setPresentationZoom] = useState(1);
+  function enterPresentation() {
+    setPresentationMode(true);
+    const root = document.documentElement;
+    const request = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (request) {
+      try {
+        const result = request.call(root);
+        if (result && typeof result.catch === "function") result.catch(() => {});
+      } catch { /* plein écran refusé par le navigateur : l'affichage plein fenêtre suffit */ }
+    }
+  }
+  function exitPresentation() {
+    setPresentationMode(false);
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if ((document.fullscreenElement || document.webkitFullscreenElement) && exit) {
+      try {
+        const result = exit.call(document);
+        if (result && typeof result.catch === "function") result.catch(() => {});
+      } catch { /* rien à faire */ }
+    }
+  }
+  useEscapeToClose(presentationMode, exitPresentation);
+  useEffect(() => {
+    if (!presentationMode) return;
+    // Si le navigateur quitte lui-même le plein écran (geste système,
+    // Échap intercepté par le navigateur), on quitte aussi le mode.
+    function onFullscreenChange() {
+      if (!(document.fullscreenElement || document.webkitFullscreenElement)) setPresentationMode(false);
+    }
+    // Le document fait 210 mm de large : sur un écran plus étroit, on
+    // le réduit pour qu'il tienne en largeur.
+    function onResize() {
+      setPresentationZoom(Math.min(1, (window.innerWidth - 24) / 794));
+    }
+    onResize();
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [presentationMode]);
+
   async function downloadPdf() {
     const el = printRef.current;
     if (!el || pdfGenerating) return;
     setPdfGenerating(true);
+
+    // QR code du lien public (créé maintenant s'il n'existe pas encore).
+    await ensurePublicQr();
 
     // L'élément est masqué en dehors de l'impression classique — on le
     // rend temporairement visible (hors champ visuel) pour pouvoir le
@@ -11298,6 +11462,9 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
               {publicLinkState.loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />} {publicLinkState.loading ? "Génération…" : localDoc.type === "devis" ? "Lien de signature" : "Lien de paiement"}
             </button>
           )}
+          <button onClick={enterPresentation} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }} title="Afficher le document seul en plein écran, pour le présenter au client (Échap pour quitter)">
+            <Maximize2 size={15} /> Présentation
+          </button>
           {publicLinkState.url && (
             <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.moss }}><Check size={13} /> Lien copié — colle-le dans ton email au client</span>
           )}
@@ -12102,7 +12269,12 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 </div>
                 <div className="rounded-xl p-4" style={{ border: `1px dashed ${colors.line}` }}>
                   {localDoc.signature.mode === "texte" && (
-                    <input className="df-input df-display w-full max-w-sm rounded-md px-3 py-2 text-lg italic" style={inputStyle} placeholder="Tapez votre nom pour signer" value={localDoc.signature.name} onChange={(e) => patchDeep("signature", { name: e.target.value })} />
+                    <>
+                      <input className="df-input df-display w-full max-w-sm rounded-md px-3 py-2 text-lg italic" style={inputStyle} placeholder="Tapez votre nom pour signer" value={localDoc.signature.name} onChange={(e) => patchDeep("signature", { name: e.target.value })} />
+                      {localDoc.signature.secondName && (
+                        <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Second signataire : <span className="df-display italic" style={{ color: colors.ink }}>{localDoc.signature.secondName}</span></p>
+                      )}
+                    </>
                   )}
                   {localDoc.signature.mode === "dessin" && (
                     <div>
@@ -12131,7 +12303,18 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
         </div>
       </div>
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintDocument ref={printRef} doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+      <PrintDocument ref={printRef} doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+
+      {presentationMode && (
+        <div className="df-presentation no-print" style={{ background: colors.ink }}>
+          <button onClick={exitPresentation} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ position: "fixed", top: 12, right: 12, zIndex: 1, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.35)" }} title="Quitter le mode présentation (Échap)">
+            <Minimize2 size={15} /> Quitter
+          </button>
+          <div style={{ padding: "24px 12px 48px", zoom: presentationZoom }}>
+            <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
