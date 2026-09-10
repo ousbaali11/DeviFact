@@ -1747,7 +1747,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
               </div>
             ))}
             <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
-              <span>{doc.type === "bpu" ? "Montant total estimatif" : "Net à payer"}</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
+              <span>{doc.type === "bpu" ? "Montant total estimatif" : "Total TTC"}</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
             </div>
             {Number(doc.acompte) > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontWeight: 700, color: brassDark }}>
