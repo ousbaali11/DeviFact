@@ -92,6 +92,15 @@ function parseLatestObservations(xml: string): Record<string, { period: string; 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
+  // Même protection que les autres tâches automatiques (voir
+  // cleanup-unconfirmed-accounts) : uniquement déclenchable avec le
+  // secret partagé, jamais publiquement depuis internet.
+  const providedSecret = req.headers.get("x-cron-secret") || "";
+  const expectedSecret = Deno.env.get("CRON_SECRET") || "";
+  if (!expectedSecret || providedSecret !== expectedSecret) {
+    return new Response(JSON.stringify({ error: "Non autorisé" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+
   try {
     const { data: tracked, error: trackedError } = await dbAdmin
       .from("tracked_indices")

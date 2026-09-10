@@ -1,0 +1,35 @@
+# Configuration du projet Supabase (lue par la CLI lors des déploiements).
+#
+# Les deux fonctions ci-dessous reçoivent des notifications envoyées
+# directement par Stripe et PayPal — ces services n'envoient jamais de
+# jeton de session Supabase. Avec la vérification de jeton activée (le
+# réglage par défaut), la passerelle Supabase rejetait leurs appels avec
+# "401 Missing authorization header" AVANT même que le code de la
+# fonction ne s'exécute : aucun paiement ne pouvait donc activer un
+# forfait. Chaque fonction vérifie elle-même la signature Stripe/PayPal,
+# ce qui reste la vraie protection.
+#
+# À appliquer en redéployant ces deux fonctions :
+#   supabase functions deploy stripe-webhook --project-ref ieshjvzmpbxtqielhaii
+#   supabase functions deploy paypal-webhook --project-ref ieshjvzmpbxtqielhaii
+
+# ⚠️ À NE PAS OUBLIER le jour où le site passe aux nouvelles clés
+# Supabase au format "sb_publishable_..." (à la place de l'ancienne clé
+# "anon" au format JWT "eyJ...") : ces nouvelles clés ne sont PAS des
+# jetons JWT. Les fonctions publiques appelées sans compte
+# (get-public-document, sign-public-document, create-invoice-payment,
+# send-contact-message, auto-confirm-user, send-confirmation-email) ne
+# passent aujourd'hui la passerelle que parce que le navigateur envoie
+# l'ancienne clé JWT. Après migration, il faudra leur ajouter ici, sur
+# le même modèle que les deux webhooks ci-dessous :
+#   [functions.<nom-de-la-fonction>]
+#   verify_jwt = false
+# puis les redéployer — sinon elles répondront "401 Invalid JWT".
+
+project_id = "ieshjvzmpbxtqielhaii"
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.paypal-webhook]
+verify_jwt = false

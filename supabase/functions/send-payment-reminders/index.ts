@@ -75,7 +75,11 @@ serve(async (req) => {
         let changed = false;
 
         for (const doc of documents) {
-          if (doc.type !== "facture" || doc.status === "payée") continue;
+          // Exactement la même règle que le bouton de relance manuelle du
+          // tableau de bord : uniquement les factures "envoyée" — jamais
+          // un brouillon (jamais transmis au client), ni une facture déjà
+          // payée ou en retard traitée à part.
+          if (doc.type !== "facture" || doc.status !== "envoyée") continue;
           if (doc.remindersEnabled === false) continue; // désactivé explicitement sur cette facture
           if (!doc.client?.email) continue;
 

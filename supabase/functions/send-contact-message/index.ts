@@ -44,6 +44,17 @@ serve(async (req) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return new Response(JSON.stringify({ error: "Adresse email invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    // Limites de longueur — refuse franchement plutôt que de tronquer en
+    // silence, pour ne jamais enregistrer ou envoyer un message amputé.
+    const MAX_LENGTHS: Record<string, number> = { nom: 200, prenom: 200, email: 200, telephone: 50, objet: 200, message: 5000 };
+    const tooLong = Object.entries(MAX_LENGTHS).find(([field, max]) => {
+      const value = { nom, prenom, email, telephone, objet, message }[field];
+      return typeof value === "string" && value.length > max;
+    });
+    if (tooLong) {
+      const labels: Record<string, string> = { nom: "Le nom", prenom: "Le prénom", email: "L'email", telephone: "Le téléphone", objet: "L'objet", message: "Le message" };
+      return new Response(JSON.stringify({ error: `${labels[tooLong[0]]} est trop long (maximum ${tooLong[1]} caractères).` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Récupère l'adresse de réception configurée dans Admin — jamais
     // codée en dur, pour que le site continue de fonctionner même si

@@ -58,11 +58,21 @@ serve(async (req) => {
     // si le client ouvre le lien dans deux onglets) — une mise à jour
     // conditionnelle, qui échoue silencieusement si un paiement vient
     // déjà d'être lancé il y a moins de 15 minutes.
-    const recentlyPending = link.payment_pending_at && Date.now() - new Date(link.payment_pending_at).getTime() < 15 * 60 * 1000;
-    if (recentlyPending) {
+    // Vraiment conditionnelle : la mise à jour ne touche la ligne que si
+    // aucun paiement n'a été lancé depuis moins de 15 minutes — vérifié
+    // et posé en une seule opération côté base, pour que deux appels
+    // strictement simultanés ne puissent pas passer tous les deux.
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const { data: locked } = await dbAdmin
+      .from("public_document_links")
+      .update({ payment_pending_at: new Date().toISOString() })
+      .eq("id", link.id)
+      .is("paid_at", null)
+      .or(`payment_pending_at.is.null,payment_pending_at.lt.${cutoff}`)
+      .select("id");
+    if (!locked || locked.length === 0) {
       return new Response(JSON.stringify({ error: "Un paiement est déjà en cours pour cette facture — patiente quelques minutes, ou vérifie l'autre onglet ouvert." }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-    await dbAdmin.from("public_document_links").update({ payment_pending_at: new Date().toISOString() }).eq("id", link.id);
 
     const { data: docsRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", link.organization_id).eq("key", "documents").eq("shared", false).maybeSingle();
     const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];

@@ -1910,6 +1910,13 @@ function DeviFactAppInner() {
     return restored;
   });
   const [documents, setDocuments] = useState([]);
+  // Toujours la liste la plus récente, y compris depuis une fonction
+  // appelée en différé (enregistrement automatique des éditeurs, 400ms
+  // après la frappe) — sans ça, une telle fonction repartait d'une
+  // liste périmée et pouvait écraser un document créé entre-temps
+  // (facture convertie, lignes extraites, "Terminé" cliqué...).
+  const documentsRef = useRef(documents);
+  documentsRef.current = documents;
   const [clients, setClients] = useState([]);
   const [prestations, setPrestations] = useState([]);
   const [companyProfile, setCompanyProfile] = useState(emptyCompanyProfile());
@@ -2314,7 +2321,12 @@ function DeviFactAppInner() {
     // Toujours en LECTURE SEULE : rien de nouveau ne peut être créé ou
     // modifié tant que la vraie connexion n'est pas revenue, pour ne
     // jamais risquer de perdre un changement fait hors ligne.
-    const bothFailed = docsRes.status === "rejected" && clientsRes.status === "rejected";
+    // Une clé simplement absente (compte tout neuf qui n'a encore rien
+    // enregistré) n'est PAS une panne réseau — sans cette distinction,
+    // un compte vide passait en "mode hors ligne" (et se retrouvait
+    // verrouillé) dès son deuxième chargement.
+    const realFailure = (r) => r.status === "rejected" && r.reason?.code !== "KEY_NOT_FOUND";
+    const bothFailed = realFailure(docsRes) && realFailure(clientsRes);
     const orgId = getActiveOrganization();
     if (bothFailed && orgId) {
       try {
@@ -2725,6 +2737,7 @@ function DeviFactAppInner() {
   }
 
   async function persist(next) {
+    documentsRef.current = next;
     setDocuments(next);
     setSaving(true);
     try {
@@ -2864,6 +2877,9 @@ function DeviFactAppInner() {
   }
   function updateDoc(id, patch) {
     if (isLocked) return;
+    // Liste la plus récente (voir documentsRef) — cette fonction est
+    // souvent appelée en différé par les éditeurs.
+    const documents = documentsRef.current;
     // Cas normal : le document existe déjà réellement (a déjà eu du
     // contenu à un moment donné) — mise à jour habituelle.
     if (documents.some((d) => d.id === id)) {
@@ -2934,6 +2950,17 @@ function DeviFactAppInner() {
     const original = documents.find((d) => d.id === id);
     if (!original) return;
     const copy = { ...original, id: nextId("doc"), docNumber: nextNumber(documents, original.type), status: "brouillon", createdAt: Date.now(), updatedAt: Date.now() };
+    // Facture récurrente : la copie garde les mêmes réglages (intervalle,
+    // date de fin), mais sa prochaine échéance repart d'aujourd'hui —
+    // sinon elle héritait de la date de l'original et la tâche
+    // automatique générait aussitôt une facture en double.
+    if (copy.type === "facture" && copy.isRecurring) {
+      const next = new Date();
+      if (copy.recurrenceInterval === "annuel") next.setFullYear(next.getFullYear() + 1);
+      else if (copy.recurrenceInterval === "trimestriel") next.setMonth(next.getMonth() + 3);
+      else next.setMonth(next.getMonth() + 1);
+      copy.nextRecurrenceDate = next.toISOString().slice(0, 10);
+    }
     persist([copy, ...documents]);
   }
   function convertToInvoice(id) {
@@ -5794,6 +5821,8 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
 function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onSaveClient, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
+  // Cumul des modifications en attente d'enregistrement (voir patch).
+  const pendingPatchRef = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
   // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
   // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
@@ -5811,10 +5840,20 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
-    const next = { ...localDoc, ...p };
-    setLocalDoc(next);
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    // Toutes les modifications faites pendant le délai de 400ms sont
+    // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
+    // enregistrée, et celles faites juste avant dans un autre champ
+    // (ex : changer un statut puis taper une note) étaient perdues
+    // silencieusement à l'enregistrement.
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onChange(p), 400);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
+      if (merged) onChange(merged);
+    }, 400);
   }
   function patchDeep(field, p) {
     patch({ [field]: { ...localDoc[field], ...p } });
@@ -6464,6 +6503,8 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
 function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
+  // Cumul des modifications en attente d'enregistrement (voir patch).
+  const pendingPatchRef = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
   // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
   // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
@@ -6481,10 +6522,20 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
-    const next = { ...localDoc, ...p };
-    setLocalDoc(next);
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    // Toutes les modifications faites pendant le délai de 400ms sont
+    // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
+    // enregistrée, et celles faites juste avant dans un autre champ
+    // (ex : changer un statut puis taper une note) étaient perdues
+    // silencieusement à l'enregistrement.
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onChange(p), 400);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
+      if (merged) onChange(merged);
+    }, 400);
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function patchLine(id, p) { patch({ items: localDoc.items.map((l) => (l.id === id ? { ...l, ...p } : l)) }); }
@@ -6815,6 +6866,8 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
 function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
+  // Cumul des modifications en attente d'enregistrement (voir patch).
+  const pendingPatchRef = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
   // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
   // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
@@ -6832,10 +6885,20 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
-    const next = { ...localDoc, ...p };
-    setLocalDoc(next);
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    // Toutes les modifications faites pendant le délai de 400ms sont
+    // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
+    // enregistrée, et celles faites juste avant dans un autre champ
+    // (ex : changer un statut puis taper une note) étaient perdues
+    // silencieusement à l'enregistrement.
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onChange(p), 400);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
+      if (merged) onChange(merged);
+    }, 400);
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addReserve() { patch({ reserves: [...(localDoc.reserves || []), emptyReserve()] }); }
@@ -7155,6 +7218,8 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
 function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
+  // Cumul des modifications en attente d'enregistrement (voir patch).
+  const pendingPatchRef = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
   // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
   // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
@@ -7172,10 +7237,20 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
-    const next = { ...localDoc, ...p };
-    setLocalDoc(next);
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    // Toutes les modifications faites pendant le délai de 400ms sont
+    // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
+    // enregistrée, et celles faites juste avant dans un autre champ
+    // (ex : changer un statut puis taper une note) étaient perdues
+    // silencieusement à l'enregistrement.
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onChange(p), 400);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
+      if (merged) onChange(merged);
+    }, 400);
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addMateriel() { patch({ materielsUtilises: [...(localDoc.materielsUtilises || []), emptyMaterielUtilise()] }); }
@@ -7478,6 +7553,8 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
 function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
+  // Cumul des modifications en attente d'enregistrement (voir patch).
+  const pendingPatchRef = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
   // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
   // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
@@ -7495,10 +7572,20 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
-    const next = { ...localDoc, ...p };
-    setLocalDoc(next);
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    // Toutes les modifications faites pendant le délai de 400ms sont
+    // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
+    // enregistrée, et celles faites juste avant dans un autre champ
+    // (ex : changer un statut puis taper une note) étaient perdues
+    // silencieusement à l'enregistrement.
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onChange(p), 400);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
+      if (merged) onChange(merged);
+    }, 400);
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
 
@@ -7748,6 +7835,8 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
 function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
+  // Cumul des modifications en attente d'enregistrement (voir patch).
+  const pendingPatchRef = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
   // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
   // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
@@ -7765,10 +7854,20 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
-    const next = { ...localDoc, ...p };
-    setLocalDoc(next);
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    // Toutes les modifications faites pendant le délai de 400ms sont
+    // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
+    // enregistrée, et celles faites juste avant dans un autre champ
+    // (ex : changer un statut puis taper une note) étaient perdues
+    // silencieusement à l'enregistrement.
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onChange(p), 400);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
+      if (merged) onChange(merged);
+    }, 400);
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
 
@@ -8052,6 +8151,8 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
 function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
+  // Cumul des modifications en attente d'enregistrement (voir patch).
+  const pendingPatchRef = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
   // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
   // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
@@ -8069,10 +8170,20 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
-    const next = { ...localDoc, ...p };
-    setLocalDoc(next);
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    // Toutes les modifications faites pendant le délai de 400ms sont
+    // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
+    // enregistrée, et celles faites juste avant dans un autre champ
+    // (ex : changer un statut puis taper une note) étaient perdues
+    // silencieusement à l'enregistrement.
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onChange(p), 400);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
+      if (merged) onChange(merged);
+    }, 400);
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addTache() { patch({ taches: [...(localDoc.taches || []), emptyTachePlanning((localDoc.taches || []).length)] }); }
@@ -10672,6 +10783,8 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const saveTimer = useRef(null);
+  // Cumul des modifications en attente d'enregistrement (voir patch).
+  const pendingPatchRef = useRef(null);
   // Avertit avant de fermer/quitter si une sauvegarde est encore en
   // attente (le délai de 400ms n'a pas eu le temps de partir) — sans
   // ça, fermer l'onglet juste après avoir tapé pouvait perdre la
@@ -10703,10 +10816,20 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
   }, [lastAddedDetailId]);
 
   function patch(p) {
-    const next = { ...localDoc, ...p };
-    setLocalDoc(next);
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    // Toutes les modifications faites pendant le délai de 400ms sont
+    // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
+    // enregistrée, et celles faites juste avant dans un autre champ
+    // (ex : changer un statut puis taper une note) étaient perdues
+    // silencieusement à l'enregistrement.
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => onChange(p), 400);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
+      if (merged) onChange(merged);
+    }, 400);
   }
   function patchDeep(key, subPatch) {
     patch({ [key]: { ...localDoc[key], ...subPatch } });

@@ -28,6 +28,15 @@ const dbAdmin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
+// Indispensable : cette fonction est appelée depuis le navigateur, qui
+// envoie d'abord une requête OPTIONS (pré-vérification) — sans ces
+// en-têtes et sans réponse à OPTIONS, le navigateur bloque l'appel avant
+// même qu'il parte ("Failed to send a request to the Edge Function").
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 async function getPayPalAccessToken() {
   const auth = btoa(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`);
   const res = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
@@ -40,7 +49,8 @@ async function getPayPalAccessToken() {
 }
 
 serve(async (req) => {
-  if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
   try {
     // Vérifie que la personne est bien authentifiée — jamais accepter
@@ -49,12 +59,12 @@ serve(async (req) => {
     const token = authHeader.replace("Bearer ", "");
     const { data: userData, error: userError } = await dbAdmin.auth.getUser(token);
     if (userError || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Non authentifié." }), { status: 401, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Non authentifié." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const { organizationId } = await req.json();
     if (!organizationId) {
-      return new Response(JSON.stringify({ error: "organizationId manquant." }), { status: 400, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "organizationId manquant." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Vérifie que la personne appartient bien à cette organisation
@@ -69,7 +79,7 @@ serve(async (req) => {
       .eq("status", "active")
       .maybeSingle();
     if (!membership || !["owner", "editor"].includes(membership.role)) {
-      return new Response(JSON.stringify({ error: "Tu n'as pas les droits pour résilier cet abonnement." }), { status: 403, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Tu n'as pas les droits pour résilier cet abonnement." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const { data: org } = await dbAdmin
@@ -79,10 +89,10 @@ serve(async (req) => {
       .maybeSingle();
 
     if (!org || org.payment_status !== "payé" || org.plan === "gratuit") {
-      return new Response(JSON.stringify({ error: "Aucun abonnement payant actif à résilier." }), { status: 400, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Aucun abonnement payant actif à résilier." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     if (org.subscription_cancelled) {
-      return new Response(JSON.stringify({ error: "Cet abonnement est déjà en cours de résiliation." }), { status: 400, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Cet abonnement est déjà en cours de résiliation." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     let expiresAt = org.expires_at;
@@ -109,10 +119,10 @@ serve(async (req) => {
         // 422 = déjà annulé côté PayPal, pas bloquant pour autant
         const errText = await res.text();
         console.error("Erreur d'annulation PayPal", errText);
-        return new Response(JSON.stringify({ error: "Impossible de contacter PayPal pour résilier. Réessaie dans un instant." }), { status: 502, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: "Impossible de contacter PayPal pour résilier. Réessaie dans un instant." }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     } else {
-      return new Response(JSON.stringify({ error: "Aucun abonnement Stripe ou PayPal associé à ce compte." }), { status: 400, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Aucun abonnement Stripe ou PayPal associé à ce compte." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const { error: updateError } = await dbAdmin.from("organizations").update({
@@ -121,12 +131,12 @@ serve(async (req) => {
     }).eq("id", organizationId);
     if (updateError) {
       console.error("Erreur d'enregistrement de la résiliation", updateError);
-      return new Response(JSON.stringify({ error: "La résiliation a été transmise, mais son enregistrement a échoué. Préviens-nous." }), { status: 500, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "La résiliation a été transmise, mais son enregistrement a échoué. Préviens-nous." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    return new Response(JSON.stringify({ success: true, expiresAt }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ success: true, expiresAt }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("Erreur de résiliation d'abonnement", err);
-    return new Response(JSON.stringify({ error: "Une erreur inattendue est survenue." }), { status: 500, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: "Une erreur inattendue est survenue." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

@@ -41,7 +41,13 @@ if (typeof window !== "undefined") {
 
       const { data, error } = await query.maybeSingle();
       if (error) throw error;
-      if (!data) throw new Error(`Clé introuvable : ${key}`);
+      if (!data) {
+        // Code explicite pour distinguer "clé jamais enregistrée" d'une
+        // vraie erreur réseau (voir loadUserData côté application).
+        const notFound = new Error(`Clé introuvable : ${key}`);
+        notFound.code = "KEY_NOT_FOUND";
+        throw notFound;
+      }
       return { key, value: JSON.stringify(data.value), shared };
     },
 

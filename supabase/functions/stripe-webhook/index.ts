@@ -23,6 +23,25 @@ const dbAdmin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
+// Date de fin de la période payée d'un abonnement, quelle que soit la
+// version de l'API Stripe qui a produit l'objet : jusqu'à la version
+// 2025-02-24, elle est sur l'abonnement lui-même
+// (subscription.current_period_end) ; à partir de la version
+// 2025-03-31 ("basil"), Stripe l'a déplacée sur chaque ligne de
+// l'abonnement (subscription.items.data[i].current_period_end). Les
+// notifications (webhooks) suivent la version configurée dans le
+// dashboard Stripe, d'où la nécessité de gérer les deux formes — sinon
+// new Date(undefined) provoquait une erreur et Stripe rejouait
+// l'événement en boucle. Renvoie null si aucune des deux n'est présente.
+function subscriptionPeriodEnd(subscription: Stripe.Subscription): string | null {
+  const legacy = (subscription as unknown as { current_period_end?: number }).current_period_end;
+  const perItem = subscription.items?.data
+    ?.map((item) => (item as unknown as { current_period_end?: number }).current_period_end)
+    .filter((v): v is number => typeof v === "number");
+  const end = typeof legacy === "number" ? legacy : perItem && perItem.length ? Math.max(...perItem) : null;
+  return end ? new Date(end * 1000).toISOString() : null;
+}
+
 serve(async (req) => {
   const signature = req.headers.get("stripe-signature");
   const body = await req.text();
@@ -65,7 +84,7 @@ serve(async (req) => {
         let expiresAt = null;
         if (session.subscription) {
           const sub = await stripe.subscriptions.retrieve(session.subscription as string);
-          expiresAt = new Date(sub.current_period_end * 1000).toISOString();
+          expiresAt = subscriptionPeriodEnd(sub);
         }
         const { error } = await dbAdmin.from("organizations").update({
           plan: planId,
@@ -88,8 +107,11 @@ serve(async (req) => {
     // continue normalement.
     if (event.type === "customer.subscription.updated") {
       const subscription = event.data.object as Stripe.Subscription;
+      const periodEnd = subscriptionPeriodEnd(subscription);
       const { error } = await dbAdmin.from("organizations").update({
-        expires_at: new Date(subscription.current_period_end * 1000).toISOString(),
+        // Si la date est absente (forme d'objet inattendue), on ne
+        // touche pas à expires_at plutôt que de l'effacer.
+        ...(periodEnd ? { expires_at: periodEnd } : {}),
         subscription_cancelled: subscription.cancel_at_period_end === true,
       }).eq("stripe_subscription_id", subscription.id);
       if (error) console.error("Erreur de mise à jour de la date d'expiration Stripe :", error);
