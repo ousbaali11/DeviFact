@@ -15,7 +15,7 @@ import {
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
   Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Mic, Sun, Moon, Link2,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
-  Maximize2, Minimize2,
+  Maximize2, Minimize2, Camera, ImagePlus,
 } from "lucide-react";
 
 // Chaque couleur pointe vers une variable CSS (définie par le thème
@@ -327,6 +327,181 @@ function readImageFile(file, maxSizeMB = 3) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Photos de chantier — bucket privé "chantier-photos" (règles d'accès :
+// supabase/migrations_audit/2026-09-10_photos-chantier.sql). Le document ne
+// garde que le chemin du fichier ; les adresses signées (1 h) sont
+// régénérées à l'ouverture du document et juste avant chaque PDF.
+// ---------------------------------------------------------------------------
+const PHOTO_BUCKET = "chantier-photos";
+const MAX_PHOTOS_PER_DOC = 20;
+const PHOTO_MAX_PX = 1600;
+const PHOTO_URL_TTL_SECONDS = 3600;
+
+// Redimensionne une image (1600 px de côté maximum) et la convertit en
+// JPEG dans le navigateur — une photo de téléphone de 5 à 15 Mo devient
+// quelques centaines de Ko, sans passer par un service externe.
+async function resizePhotoToJpeg(file) {
+  if (!file || !String(file.type || "").startsWith("image/")) throw new Error("Ce fichier n'est pas une image.");
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    bitmap = await new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Impossible de lire cette image (format non pris en charge par le navigateur).")); };
+      img.src = url;
+    });
+  }
+  const w = bitmap.width, h = bitmap.height;
+  if (!w || !h) throw new Error("Impossible de lire cette image.");
+  const ratio = Math.min(1, PHOTO_MAX_PX / Math.max(w, h));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(w * ratio);
+  canvas.height = Math.round(h * ratio);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  if (typeof bitmap.close === "function") bitmap.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  if (!blob) throw new Error("Impossible de convertir cette image.");
+  return blob;
+}
+
+async function uploadDocumentPhoto(organizationId, documentId, file) {
+  if (!organizationId) throw new Error("Aucune organisation active — reconnecte-toi.");
+  const blob = await resizePhotoToJpeg(file);
+  const id = nextId("ph");
+  const path = `${organizationId}/${documentId}/${id}.jpg`;
+  const { error } = await db.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/jpeg", cacheControl: "3600", upsert: false });
+  if (error) {
+    console.error("Erreur d'envoi de photo", error);
+    throw new Error(/row-level security|not authorized|Unauthorized/i.test(error.message || "") ? "Ton rôle ne permet pas d'ajouter des photos." : "Impossible d'envoyer cette photo pour l'instant.");
+  }
+  return { id, path, name: file.name || `${id}.jpg`, createdAt: Date.now() };
+}
+
+async function deleteDocumentPhoto(path) {
+  const { error } = await db.storage.from(PHOTO_BUCKET).remove([path]);
+  if (error) throw error;
+}
+
+// Supprime du bucket les fichiers de tous les documents passés — appelé
+// quand un document (ou tous, lors d'une réinitialisation) est supprimé,
+// pour ne laisser aucun fichier orphelin. Jamais bloquant : la
+// suppression du document reste acquise même si le nettoyage échoue.
+async function removeDocumentsPhotoFiles(docs) {
+  const paths = (docs || []).flatMap((d) => (Array.isArray(d?.photos) ? d.photos.map((p) => p?.path).filter(Boolean) : []));
+  for (let i = 0; i < paths.length; i += 100) {
+    const chunk = paths.slice(i, i + 100);
+    try {
+      const { error } = await db.storage.from(PHOTO_BUCKET).remove(chunk);
+      if (error) console.error("Erreur de suppression des photos de chantier", error);
+    } catch (err) {
+      console.error("Erreur de suppression des photos de chantier", err);
+    }
+  }
+}
+
+async function signPhotoUrls(photos) {
+  return signPhotoPaths((photos || []).map((p) => p?.path));
+}
+async function signPhotoPaths(pathList) {
+  const paths = (pathList || []).filter(Boolean);
+  if (!paths.length) return {};
+  const { data, error } = await db.storage.from(PHOTO_BUCKET).createSignedUrls(paths, PHOTO_URL_TTL_SECONDS);
+  if (error) throw error;
+  const map = {};
+  for (const item of data || []) if (item.signedUrl && !item.error) map[item.path] = item.signedUrl;
+  return map;
+}
+
+// Adresses signées des photos d'un document : chargées à l'ouverture,
+// rechargées quand la liste change, et rafraîchies à la demande (avant
+// une capture PDF) avec un rendu synchrone.
+function usePhotoUrls(photos) {
+  const [urls, setUrls] = useState({});
+  const pathsKey = (photos || []).map((p) => p?.path).join("|");
+  useEffect(() => {
+    let cancelled = false;
+    if (!pathsKey) { setUrls({}); return; }
+    signPhotoPaths(pathsKey.split("|")).then((map) => { if (!cancelled) setUrls(map); }).catch((err) => console.error("Erreur de chargement des photos", err));
+    return () => { cancelled = true; };
+  }, [pathsKey]);
+  async function refresh() {
+    try {
+      const map = await signPhotoUrls(photos);
+      flushSync(() => setUrls(map));
+      return map;
+    } catch (err) {
+      console.error("Erreur de rafraîchissement des photos", err);
+      return urls;
+    }
+  }
+  return { urls, refresh };
+}
+
+// Bloc "Photos de chantier" des éditeurs Rapport d'intervention, PV de
+// réception et Situation de travaux : prise de vue directe ou galerie,
+// vignettes, retrait (qui supprime aussi le fichier).
+function DocumentPhotosBlock({ photos, urls, canEdit, uploading, onAdd, onRemove }) {
+  const cameraRef = useRef(null);
+  const galleryRef = useRef(null);
+  const full = photos.length >= MAX_PHOTOS_PER_DOC;
+  function handleFiles(e) {
+    const files = e.target.files;
+    const list = files ? Array.from(files) : [];
+    e.target.value = "";
+    if (list.length) onAdd(list);
+  }
+  const btnStyle = { border: `1px solid ${colors.line}`, color: colors.slate, opacity: uploading || full ? 0.6 : 1 };
+  return (
+    <div className="mt-6 border-t pt-6" style={{ borderColor: colors.line }}>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
+          <Camera size={13} /> Photos de chantier <span className="df-mono font-normal normal-case tracking-normal" style={{ color: colors.inkSoft }}>{photos.length}/{MAX_PHOTOS_PER_DOC}</span>
+        </label>
+        {canEdit && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFiles} />
+            <input ref={galleryRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} />
+            <button type="button" onClick={() => cameraRef.current?.click()} disabled={uploading || full} className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium" style={btnStyle}>
+              <Camera size={13} /> Prendre une photo
+            </button>
+            <button type="button" onClick={() => galleryRef.current?.click()} disabled={uploading || full} className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium" style={btnStyle}>
+              <ImagePlus size={13} /> Choisir dans la galerie
+            </button>
+          </div>
+        )}
+      </div>
+      <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Les photos sont réduites avant l'envoi et apparaissent en grille à la fin du PDF.</p>
+      {uploading && (
+        <p className="mb-2 flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={13} className="animate-spin" /> Envoi en cours…</p>
+      )}
+      {photos.length === 0 ? (
+        !uploading && <p className="text-xs" style={{ color: colors.inkSoft }}>Aucune photo pour l'instant.</p>
+      ) : (
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          {photos.map((p) => (
+            <div key={p.id} className="relative overflow-hidden rounded-lg" style={{ aspectRatio: "1 / 1", background: colors.paper, border: `1px solid ${colors.line}` }}>
+              {urls[p.path] ? (
+                <img src={urls[p.path]} alt={p.name || "Photo de chantier"} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full items-center justify-center"><Loader2 size={14} className="animate-spin" style={{ color: colors.inkSoft }} /></div>
+              )}
+              {canEdit && (
+                <button type="button" onClick={() => onRemove(p)} title="Retirer cette photo" className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full text-white" style={{ background: "rgba(27,42,51,0.7)" }}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TVA_RATES = [20, 10, 5.5, 2.1, 0];
 const UNITS = ["forfait", "heure", "jour", "m²", "m³", "ml", "pièce", "kg", "lot"];
 const UNIT_OPTIONS = ["", ...UNITS];
@@ -543,7 +718,7 @@ function emptyClient() {
   return { id: nextId("cli"), type: "entreprise", name: "", address: "", country: "", email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" };
 }
 function emptyCompanyProfile() {
-  return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false };
+  return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "" };
 }
 function emptyPrestation() {
   return { id: nextId("pr"), designation: "", category: "", unit: "forfait", unitPrice: 0, tva: 20 };
@@ -920,6 +1095,7 @@ function newSituationDocument(documents) {
     issueDate: new Date().toISOString().slice(0, 10),
     currency: "EUR",
     numeroSituation: 1,
+    photos: [],
     previousSituationId: null,
     marcheNumero: "",
     objet: "",
@@ -1016,6 +1192,7 @@ function newPvReceptionDocument(documents) {
     dateDebutTravaux: "",
     dateReceptionEffective: today,
     typeReception: "sans_reserves", // sans_reserves | avec_reserves | refusee
+    photos: [],
     reserves: [],
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
@@ -1073,6 +1250,7 @@ function newRapportInterventionDocument(documents) {
     materielsUtilises: [],
     statutResolution: "resolu", // resolu | partiel | nouvelle_intervention
     recommandations: "",
+    photos: [],
     prochaineInterventionDate: "",
     signatureClient: { name: "", date: today },
     notes: "",
@@ -1454,6 +1632,9 @@ function isDocumentEmpty(doc) {
   if (!doc) return true;
   if ((doc.client?.name || "").trim()) return false;
   if (Array.isArray(doc.items) && doc.items.some((it) => (it.designation || "").trim())) return false;
+  // Une photo de chantier ajoutée est un vrai contenu (le fichier existe
+  // déjà dans le stockage) : le document doit être conservé.
+  if (Array.isArray(doc.photos) && doc.photos.length) return false;
 
   // Champs propres à certains types, en plus de client/items déjà
   // vérifiés ci-dessus pour tous les types.
@@ -2000,6 +2181,30 @@ function DeviFactAppInner() {
   // forcée surprise, juste un message clair avec un lien pour l'ouvrir
   // si la personne le souhaite.
   const [autoFactureNotice, setAutoFactureNotice] = useState(null);
+  // Proposition d'envoyer une demande d'avis Google au client, quand
+  // une facture vient de passer à "payée" — uniquement si le lien
+  // d'avis est renseigné dans Mon entreprise et que le client a un
+  // email. Jamais envoyé sans un clic explicite.
+  const [reviewNotice, setReviewNotice] = useState(null);
+  async function sendReviewRequest() {
+    if (!reviewNotice || reviewNotice.sending || reviewNotice.sent) return;
+    setReviewNotice((n) => ({ ...n, sending: true, error: null }));
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const { data, error } = await db.functions.invoke("send-review-request", {
+        body: { organizationId: account?.organizationId, documentId: reviewNotice.docId },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      if (error || data?.error) {
+        let detail = data;
+        if (!detail && error?.context) { try { detail = await error.context.json(); } catch { /* corps illisible */ } }
+        throw new Error(detail?.error || error?.message || "Impossible d'envoyer la demande d'avis pour l'instant.");
+      }
+      setReviewNotice((n) => ({ ...n, sending: false, sent: true }));
+    } catch (err) {
+      setReviewNotice((n) => ({ ...n, sending: false, error: err.message || "Impossible d'envoyer la demande d'avis pour l'instant." }));
+    }
+  }
   // Palette de commandes (Ctrl+K / Cmd+K) — accessible depuis n'importe
   // quelle page une fois connecté.
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -2057,6 +2262,7 @@ function DeviFactAppInner() {
     const cmds = [
       { id: "nav-dashboard", label: "Aller au Tableau de bord", icon: LayoutDashboard, action: () => setView("dashboard") },
       { id: "nav-chantiers", label: "Aller à Chantiers", icon: MapPinned, action: () => setView("chantiers") },
+      { id: "nav-planning-equipe", label: "Aller au Planning d'équipe", icon: Calendar, action: () => setView("planning-equipe") },
       { id: "nav-clients", label: "Aller à Clients", icon: Users, action: () => setView("clients") },
       { id: "nav-prestations", label: "Aller à Bibliothèque", icon: Library, action: () => setView("prestations") },
       { id: "nav-company", label: "Aller à Mon entreprise", icon: Building2, action: () => setView("company") },
@@ -2858,6 +3064,8 @@ function DeviFactAppInner() {
   }
   async function resetTestData() {
     if (isLocked) return;
+    // Fichiers des photos de chantier de tous les documents effacés.
+    removeDocumentsPhotoFiles(documents);
     setDocuments([]);
     setClients([]);
     setPrestations([]);
@@ -2961,6 +3169,16 @@ function DeviFactAppInner() {
         setAutoFactureNotice({ docNumber: invoice.docNumber, id: invoice.id });
         return;
       }
+      // Facture qui vient de passer à "payée" : propose (sans jamais
+      // l'envoyer seul) un email de demande d'avis Google au client.
+      if (original && original.type === "facture" && patch.status === "payée" && original.status !== "payée") {
+        const updated = { ...original, ...patch };
+        const reviewUrl = (companyProfile?.googleReviewUrl || "").trim();
+        const clientEmail = (updated.client?.email || "").trim();
+        if (reviewUrl && clientEmail) {
+          setReviewNotice({ docId: id, docNumber: updated.docNumber, clientName: updated.client?.name || "", clientEmail, sending: false, sent: false, error: null });
+        }
+      }
       persist(documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
       return;
     }
@@ -2997,6 +3215,8 @@ function DeviFactAppInner() {
     const doc = documents.find((d) => d.id === id);
     if (!window.confirm(`Supprimer définitivement "${doc?.docNumber || "ce document"}" ? Cette action est irréversible.`)) return;
     persist(documents.filter((d) => d.id !== id));
+    // Les photos de chantier du document disparaissent avec lui.
+    if (doc) removeDocumentsPhotoFiles([doc]);
     if (activeId === id) backToDashboard();
   }
   function duplicateDoc(id) {
@@ -3004,6 +3224,10 @@ function DeviFactAppInner() {
     const original = documents.find((d) => d.id === id);
     if (!original) return;
     const copy = { ...original, id: nextId("doc"), docNumber: nextNumber(documents, original.type), status: "brouillon", createdAt: Date.now(), updatedAt: Date.now() };
+    // Les photos de chantier restent propres à l'original : les fichiers ne
+    // sont pas dupliqués, la copie repart sans photo (sinon retirer une
+    // photo de l'un supprimerait le fichier de l'autre).
+    if (Array.isArray(copy.photos) && copy.photos.length) copy.photos = [];
     // Facture récurrente : la copie garde les mêmes réglages (intervalle,
     // date de fin), mais sa prochaine échéance repart d'aujourd'hui —
     // sinon elle héritait de la date de l'original et la tâche
@@ -3456,6 +3680,9 @@ function DeviFactAppInner() {
         onOpenSplitDoc={() => { if (splitNotice) { setActiveId(splitNotice.id); setSplitNotice(null); } }}
         onDismissSplitNotice={() => setSplitNotice(null)}
         onGoToPricing={() => setView("pricing")}
+        reviewNotice={reviewNotice?.docId === activeDoc.id ? reviewNotice : null}
+        onSendReview={sendReviewRequest}
+        onDismissReview={() => setReviewNotice(null)}
       />
     );
   }
@@ -3694,6 +3921,16 @@ function DeviFactAppInner() {
     );
   }
 
+  if (view === "planning-equipe") {
+    return (
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
+        <GlobalStyle />
+        <TopNav {...navProps} />
+        <PlanningView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} />
+      </div>
+    );
+  }
+
   if (view === "api") {
     return (
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
@@ -3855,6 +4092,8 @@ function DeviFactAppInner() {
           </div>
         )}
 
+        <RevenueChart documents={documents} isAdvanced={siteSettings?.landingPageVersion === "avancee"} darkMode={darkMode} />
+
         {offlineMode && (
           <div className="mb-6 flex items-start gap-3 rounded-2xl px-4 py-3" style={{ background: `${colors.brick}0D`, border: `1px solid ${colors.brick}40` }}>
             <AlertTriangle size={16} style={{ color: colors.brick, flexShrink: 0, marginTop: "2px" }} />
@@ -3877,6 +4116,7 @@ function DeviFactAppInner() {
             </div>
           </div>
         )}
+        <ReviewRequestNotice notice={reviewNotice} onSend={sendReviewRequest} onDismiss={() => setReviewNotice(null)} />
 
         {reminders.length > 0 && !hasAccess(account, "pro") && (
           <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-3" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
@@ -5239,6 +5479,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "chantiers", label: "Chantiers", icon: MapPinned },
+    { id: "planning-equipe", label: "Planning", icon: Calendar },
     { id: "clients", label: "Clients", icon: Users },
     { id: "prestations", label: "Bibliothèque", icon: Library },
     { id: "company", label: "Mon entreprise", icon: Building2 },
@@ -6486,7 +6727,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   );
 }
 
-const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, watermarkEnabled = true }, ref) {
+const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, watermarkEnabled = true, photoUrls = {} }, ref) {
   const s = computeSituation(doc);
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const inkSoft = "#4A5B63", line = "#DAE1DC";
@@ -6569,6 +6810,19 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
       </div>
 
       {doc.notes && <div style={{ marginTop: "20px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
+      {/* Photos de chantier — grille en fin de document */}
+      {(doc.photos || []).some((p) => photoUrls[p.path]) && (
+        <div style={{ marginTop: "20px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "6px", paddingBottom: "4px", borderBottom: `1px solid ${line}` }}>Photos de chantier</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
+            {(doc.photos || []).filter((p) => photoUrls[p.path]).map((p) => (
+              <div key={p.id} style={{ pageBreakInside: "avoid" }}>
+                <img src={photoUrls[p.path]} alt="" crossOrigin="anonymous" style={{ width: "100%", height: "150px", objectFit: "cover", borderRadius: "4px", border: `1px solid ${line}`, display: "block" }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -6622,10 +6876,50 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const hasNextSituation = (documents || []).some((d) => d.type === "situation" && d.previousSituationId === localDoc.id);
 
+  // Photos de chantier (voir DocumentPhotosBlock) — fichiers dans le
+  // bucket privé, liens signés régénérés à l'ouverture et avant le PDF.
+  const photoState = usePhotoUrls(localDoc.photos);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const photosRef = useRef([]);
+  photosRef.current = localDoc.photos || [];
+  async function addPhotos(files) {
+    if (isLocked || isViewer || !files?.length) return;
+    const room = MAX_PHOTOS_PER_DOC - photosRef.current.length;
+    if (room <= 0) { alert(`Maximum ${MAX_PHOTOS_PER_DOC} photos par document.`); return; }
+    const list = Array.from(files).slice(0, room);
+    if (list.length < files.length) alert(`Seules ${room} photo(s) supplémentaire(s) peuvent être ajoutées (maximum ${MAX_PHOTOS_PER_DOC} par document).`);
+    setPhotoUploading(true);
+    const added = [];
+    for (const file of list) {
+      try {
+        added.push(await uploadDocumentPhoto(account?.organizationId, localDoc.id, file));
+      } catch (err) {
+        console.error("Erreur d'ajout de photo", err);
+        alert(err.message || "Impossible d'ajouter cette photo.");
+      }
+    }
+    if (added.length) patch({ photos: [...photosRef.current, ...added] });
+    setPhotoUploading(false);
+  }
+  async function removePhoto(photo) {
+    if (isLocked || isViewer) return;
+    if (!window.confirm("Retirer cette photo du document ? Le fichier sera supprimé.")) return;
+    try {
+      await deleteDocumentPhoto(photo.path);
+    } catch (err) {
+      console.error("Erreur de suppression de photo", err);
+      alert("Impossible de supprimer le fichier pour l'instant.");
+      return;
+    }
+    patch({ photos: photosRef.current.filter((p) => p.id !== photo.id) });
+  }
+
   async function downloadPdf() {
     const el = printRef.current;
     if (!el || pdfGenerating) return;
     setPdfGenerating(true);
+    // Liens signés à jour avant la capture (ils expirent au bout d'une heure).
+    if ((localDoc.photos || []).length) await photoState.refresh();
     const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
     el.style.display = "block";
     el.style.position = "fixed";
@@ -6819,11 +7113,12 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
           <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+          <DocumentPhotosBlock photos={localDoc.photos || []} urls={photoState.urls} canEdit={!isLocked && !isViewer} uploading={photoUploading} onAdd={addPhotos} onRemove={removePhoto} />
         </div>
       </div>
 
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+      <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
     </div>
   );
 }
@@ -6834,7 +7129,7 @@ const PV_TYPES = {
   refusee: { label: "Réception refusée", color: "#A33B2A" },
 };
 
-const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSettings, watermarkEnabled = true }, ref) {
+const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSettings, watermarkEnabled = true, photoUrls = {} }, ref) {
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
@@ -6932,6 +7227,19 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
           {doc.signatureEntreprise?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureEntreprise.name}</div>}
         </div>
       </div>
+      {/* Photos de chantier — grille en fin de document */}
+      {(doc.photos || []).some((p) => photoUrls[p.path]) && (
+        <div style={{ marginTop: "20px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "6px", paddingBottom: "4px", borderBottom: `1px solid ${line}` }}>Photos de chantier</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
+            {(doc.photos || []).filter((p) => photoUrls[p.path]).map((p) => (
+              <div key={p.id} style={{ pageBreakInside: "avoid" }}>
+                <img src={photoUrls[p.path]} alt="" crossOrigin="anonymous" style={{ width: "100%", height: "150px", objectFit: "cover", borderRadius: "4px", border: `1px solid ${line}`, display: "block" }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -6984,10 +7292,50 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const garanties = computePvGaranties(localDoc);
 
+  // Photos de chantier (voir DocumentPhotosBlock) — fichiers dans le
+  // bucket privé, liens signés régénérés à l'ouverture et avant le PDF.
+  const photoState = usePhotoUrls(localDoc.photos);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const photosRef = useRef([]);
+  photosRef.current = localDoc.photos || [];
+  async function addPhotos(files) {
+    if (isLocked || isViewer || !files?.length) return;
+    const room = MAX_PHOTOS_PER_DOC - photosRef.current.length;
+    if (room <= 0) { alert(`Maximum ${MAX_PHOTOS_PER_DOC} photos par document.`); return; }
+    const list = Array.from(files).slice(0, room);
+    if (list.length < files.length) alert(`Seules ${room} photo(s) supplémentaire(s) peuvent être ajoutées (maximum ${MAX_PHOTOS_PER_DOC} par document).`);
+    setPhotoUploading(true);
+    const added = [];
+    for (const file of list) {
+      try {
+        added.push(await uploadDocumentPhoto(account?.organizationId, localDoc.id, file));
+      } catch (err) {
+        console.error("Erreur d'ajout de photo", err);
+        alert(err.message || "Impossible d'ajouter cette photo.");
+      }
+    }
+    if (added.length) patch({ photos: [...photosRef.current, ...added] });
+    setPhotoUploading(false);
+  }
+  async function removePhoto(photo) {
+    if (isLocked || isViewer) return;
+    if (!window.confirm("Retirer cette photo du document ? Le fichier sera supprimé.")) return;
+    try {
+      await deleteDocumentPhoto(photo.path);
+    } catch (err) {
+      console.error("Erreur de suppression de photo", err);
+      alert("Impossible de supprimer le fichier pour l'instant.");
+      return;
+    }
+    patch({ photos: photosRef.current.filter((p) => p.id !== photo.id) });
+  }
+
   async function downloadPdf() {
     const el = printRef.current;
     if (!el || pdfGenerating) return;
     setPdfGenerating(true);
+    // Liens signés à jour avant la capture (ils expirent au bout d'une heure).
+    if ((localDoc.photos || []).length) await photoState.refresh();
     const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
     el.style.display = "block";
     el.style.position = "fixed";
@@ -7169,11 +7517,12 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
           <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+          <DocumentPhotosBlock photos={localDoc.photos || []} urls={photoState.urls} canEdit={!isLocked && !isViewer} uploading={photoUploading} onAdd={addPhotos} onRemove={removePhoto} />
         </div>
       </div>
 
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+      <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
     </div>
   );
 }
@@ -7181,7 +7530,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
 const TYPES_INTERVENTION = { depannage: "Dépannage urgent", entretien: "Entretien programmé", sav: "Service après-vente", diagnostic: "Diagnostic" };
 const STATUTS_RESOLUTION = { resolu: { label: "Problème résolu", color: "#2F6B4F" }, partiel: { label: "Partiellement résolu", color: "#B8763E" }, nouvelle_intervention: { label: "Nouvelle intervention nécessaire", color: "#A33B2A" } };
 
-const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ doc, siteSettings, watermarkEnabled = true }, ref) {
+const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ doc, siteSettings, watermarkEnabled = true, photoUrls = {} }, ref) {
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
@@ -7284,6 +7633,19 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
           {doc.signatureClient?.name && <div style={{ marginTop: "16px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
         </div>
       </div>
+      {/* Photos de chantier — grille en fin de document */}
+      {(doc.photos || []).some((p) => photoUrls[p.path]) && (
+        <div style={{ marginTop: "20px", position: "relative", zIndex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "6px", paddingBottom: "4px", borderBottom: `1px solid ${line}` }}>Photos de chantier</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
+            {(doc.photos || []).filter((p) => photoUrls[p.path]).map((p) => (
+              <div key={p.id} style={{ pageBreakInside: "avoid" }}>
+                <img src={photoUrls[p.path]} alt="" crossOrigin="anonymous" style={{ width: "100%", height: "150px", objectFit: "cover", borderRadius: "4px", border: `1px solid ${line}`, display: "block" }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -7336,10 +7698,50 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const duree = computeInterventionDuree(localDoc);
 
+  // Photos de chantier (voir DocumentPhotosBlock) — fichiers dans le
+  // bucket privé, liens signés régénérés à l'ouverture et avant le PDF.
+  const photoState = usePhotoUrls(localDoc.photos);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const photosRef = useRef([]);
+  photosRef.current = localDoc.photos || [];
+  async function addPhotos(files) {
+    if (isLocked || isViewer || !files?.length) return;
+    const room = MAX_PHOTOS_PER_DOC - photosRef.current.length;
+    if (room <= 0) { alert(`Maximum ${MAX_PHOTOS_PER_DOC} photos par document.`); return; }
+    const list = Array.from(files).slice(0, room);
+    if (list.length < files.length) alert(`Seules ${room} photo(s) supplémentaire(s) peuvent être ajoutées (maximum ${MAX_PHOTOS_PER_DOC} par document).`);
+    setPhotoUploading(true);
+    const added = [];
+    for (const file of list) {
+      try {
+        added.push(await uploadDocumentPhoto(account?.organizationId, localDoc.id, file));
+      } catch (err) {
+        console.error("Erreur d'ajout de photo", err);
+        alert(err.message || "Impossible d'ajouter cette photo.");
+      }
+    }
+    if (added.length) patch({ photos: [...photosRef.current, ...added] });
+    setPhotoUploading(false);
+  }
+  async function removePhoto(photo) {
+    if (isLocked || isViewer) return;
+    if (!window.confirm("Retirer cette photo du document ? Le fichier sera supprimé.")) return;
+    try {
+      await deleteDocumentPhoto(photo.path);
+    } catch (err) {
+      console.error("Erreur de suppression de photo", err);
+      alert("Impossible de supprimer le fichier pour l'instant.");
+      return;
+    }
+    patch({ photos: photosRef.current.filter((p) => p.id !== photo.id) });
+  }
+
   async function downloadPdf() {
     const el = printRef.current;
     if (!el || pdfGenerating) return;
     setPdfGenerating(true);
+    // Liens signés à jour avant la capture (ils expirent au bout d'une heure).
+    if ((localDoc.photos || []).length) await photoState.refresh();
     const prevStyle = { display: el.style.display, position: el.style.position, left: el.style.left, top: el.style.top, zIndex: el.style.zIndex };
     el.style.display = "block";
     el.style.position = "fixed";
@@ -7524,11 +7926,12 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
           <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.notes} onChange={(e) => patch({ notes: e.target.value })} />
+          <DocumentPhotosBlock photos={localDoc.photos || []} urls={photoState.urls} canEdit={!isLocked && !isViewer} uploading={photoUploading} onAdd={addPhotos} onRemove={removePhoto} />
         </div>
       </div>
 
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+      <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
     </div>
   );
 }
@@ -8523,6 +8926,307 @@ function CountrySelect({ value, onChange, options, placeholder = "— Non préci
 // Regroupe les documents par chantier (champ texte libre, rempli à la
 // main sur chaque document) — permet de comparer, pour un même
 // projet, le budget prévu (devis) au montant réellement facturé.
+// Planning d'équipe interactif — page à part entière, indépendante du
+// document statique "Planning de chantier". Les créneaux sont
+// enregistrés dans le stockage de l'organisation (clé "team-planning"),
+// comme les documents et les clients.
+const PLANNING_COLORS = ["#B8763E", "#5B7B5A", "#4A5B63", "#A54D3A", "#6B5B95", "#2A9D8F", "#B5651D", "#457B9D"];
+function toIsoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function startOfWeek(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+function addDays(d, n) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
+const WEEKDAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+
+function PlanningView({ documents, account, siteSettings, darkMode, isLocked, isViewer }) {
+  const [slots, setSlots] = useState(null); // null tant que le chargement n'est pas terminé
+  const [loadError, setLoadError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [members, setMembers] = useState([]);
+  const [mode, setMode] = useState("month"); // month | week
+  const [cursor, setCursor] = useState(() => new Date());
+  const [editing, setEditing] = useState(null);
+  const canEdit = !isLocked && !isViewer;
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await window.storage.get("team-planning", false);
+        const parsed = JSON.parse(res.value);
+        if (!cancelled) setSlots(Array.isArray(parsed) ? parsed : []);
+      } catch (err) {
+        if (cancelled) return;
+        if (err?.code === "KEY_NOT_FOUND") { setSlots([]); return; }
+        console.error("Erreur de chargement du planning", err);
+        setLoadError("Impossible de charger le planning pour l'instant.");
+        setSlots([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [account?.organizationId]);
+
+  useEffect(() => {
+    if (!account?.organizationId) return;
+    db.rpc("get_organization_members_with_profiles", { org_id: account.organizationId }).then(({ data, error }) => {
+      if (error) { console.error("Erreur de chargement de l'équipe", error); return; }
+      setMembers((data || []).filter((m) => m.status === "active").map((m) => ({ userId: m.user_id, label: m.email || "Membre" })));
+    });
+  }, [account?.organizationId]);
+
+  const chantiers = useMemo(() => {
+    const names = new Set();
+    for (const d of documents) { const n = (d.chantier || "").trim(); if (n) names.add(n); }
+    return [...names].sort((a, b) => a.localeCompare(b, "fr"));
+  }, [documents]);
+
+  const memberColor = useMemo(() => {
+    const map = new Map();
+    members.forEach((m, i) => map.set(m.userId, PLANNING_COLORS[i % PLANNING_COLORS.length]));
+    return map;
+  }, [members]);
+  const colorOf = (slot) => (slot.memberUserId && memberColor.get(slot.memberUserId)) || colors.slate;
+  const memberLabelOf = (slot) => members.find((m) => m.userId === slot.memberUserId)?.label || slot.memberLabel || "";
+
+  async function persistSlots(next) {
+    setSlots(next);
+    setSaving(true);
+    try {
+      await window.storage.set("team-planning", JSON.stringify(next), false);
+    } catch (err) {
+      console.error("Erreur d'enregistrement du planning", err);
+      alert("Impossible d'enregistrer le planning pour l'instant. Réessaie dans un instant.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openNewSlot(date) {
+    if (!canEdit) return;
+    const iso = toIsoDate(date);
+    setEditing({ id: null, title: "", start: iso, end: iso, memberUserId: members[0]?.userId || "", chantier: "" });
+  }
+  function openSlot(slot) {
+    setEditing({ ...slot });
+  }
+  function saveSlot() {
+    if (!editing.title.trim()) { alert("Indique un titre pour ce créneau."); return; }
+    if (!editing.start || !editing.end) { alert("Indique une date de début et une date de fin."); return; }
+    if (editing.end < editing.start) { alert("La date de fin doit être après la date de début."); return; }
+    const member = members.find((m) => m.userId === editing.memberUserId);
+    const now = Date.now();
+    const base = { title: editing.title.trim(), start: editing.start, end: editing.end, memberUserId: member?.userId || "", memberLabel: member?.label || "", chantier: (editing.chantier || "").trim(), updatedAt: now };
+    if (editing.id) {
+      persistSlots((slots || []).map((s) => (s.id === editing.id ? { ...s, ...base } : s)));
+    } else {
+      persistSlots([...(slots || []), { id: nextId("pl"), createdAt: now, ...base }]);
+    }
+    setEditing(null);
+  }
+  function deleteSlot() {
+    if (!editing?.id) return;
+    if (!window.confirm(`Supprimer le créneau « ${editing.title} » ?`)) return;
+    persistSlots((slots || []).filter((s) => s.id !== editing.id));
+    setEditing(null);
+  }
+  useEscapeToClose(!!editing, () => setEditing(null));
+
+  const todayIso = toIsoDate(new Date());
+  const slotsOn = (iso) => (slots || []).filter((s) => s.start <= iso && s.end >= iso).sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
+
+  // Grille du mois : commence le lundi de la semaine du 1er, 6 semaines.
+  const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const gridStart = startOfWeek(monthStart);
+  const monthDays = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  const weekStart = startOfWeek(cursor);
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  function shift(direction) {
+    setCursor((c) => (mode === "month" ? new Date(c.getFullYear(), c.getMonth() + direction, 1) : addDays(c, 7 * direction)));
+  }
+  const periodLabel = mode === "month"
+    ? cursor.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })
+    : `Semaine du ${weekStart.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} au ${addDays(weekStart, 6).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}`;
+
+  const chip = (slot, dense) => (
+    <button
+      key={slot.id}
+      onClick={(e) => { e.stopPropagation(); openSlot(slot); }}
+      className="block w-full truncate rounded px-1.5 text-left"
+      style={{ background: `${colorOf(slot)}22`, color: colorOf(slot), borderLeft: `3px solid ${colorOf(slot)}`, fontSize: dense ? "11px" : "12px", lineHeight: dense ? "18px" : "20px" }}
+      title={`${slot.title}${memberLabelOf(slot) ? " — " + memberLabelOf(slot) : ""}${slot.chantier ? " — " + slot.chantier : ""}`}
+    >
+      {slot.title}{!dense && memberLabelOf(slot) ? <span style={{ opacity: 0.75 }}> · {memberLabelOf(slot)}</span> : null}
+    </button>
+  );
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          {isAdvanced && (
+            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><Calendar size={18} /></div>
+          )}
+          <h1 className="df-display text-2xl font-semibold">Planning d'équipe</h1>
+          <p className="text-sm" style={{ color: colors.inkSoft }}>Place un membre de l'équipe sur un chantier à une date donnée — clique sur un jour pour créer un créneau, sur un créneau pour le modifier.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={12} className="animate-spin" /> Enregistrement</span>}
+          {canEdit && (
+            <button onClick={() => openNewSlot(new Date())} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: isAdvanced ? adv.accent : colors.brassDark }}>
+              <Plus size={15} /> Nouveau créneau
+            </button>
+          )}
+        </div>
+      </div>
+
+      {loadError && <p className="mb-4 text-sm" style={{ color: colors.brick }}>{loadError}</p>}
+      {!canEdit && slots !== null && (
+        <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Consultation seule — la modification du planning n'est pas disponible avec ton rôle ou l'état actuel du compte.</p>
+      )}
+
+      <div className="overflow-hidden rounded-2xl" style={{ background: surface, border: `1px solid ${colors.line}` }}>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3" style={{ borderColor: colors.line }}>
+          <div className="flex items-center gap-1">
+            <button onClick={() => shift(-1)} className="rounded-md p-1.5 hover:bg-black/5" title="Précédent"><ArrowLeft size={16} /></button>
+            <button onClick={() => setCursor(new Date())} className="rounded-md px-2 py-1 text-xs font-medium hover:bg-black/5">Aujourd'hui</button>
+            <button onClick={() => shift(1)} className="rounded-md p-1.5 hover:bg-black/5" title="Suivant"><ArrowRight size={16} /></button>
+            <span className="df-display ml-2 text-sm font-semibold capitalize">{periodLabel}</span>
+          </div>
+          <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ border: `1px solid ${colors.line}` }}>
+            {[["month", "Mois"], ["week", "Semaine"]].map(([id, label]) => (
+              <button key={id} onClick={() => setMode(id)} className="rounded-md px-3 py-1 text-xs font-medium" style={{ background: mode === id ? colors.ink : "transparent", color: mode === id ? "white" : colors.inkSoft }}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        {slots === null ? (
+          <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin" style={{ color: colors.slate }} /></div>
+        ) : mode === "month" ? (
+          <div>
+            <div className="grid grid-cols-7 border-b text-center text-xs font-medium uppercase tracking-wide" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+              {WEEKDAY_LABELS.map((l) => <div key={l} className="py-2">{l}</div>)}
+            </div>
+            <div className="grid grid-cols-7">
+              {monthDays.map((day, i) => {
+                const iso = toIsoDate(day);
+                const inMonth = day.getMonth() === cursor.getMonth();
+                const daySlots = slotsOn(iso);
+                return (
+                  <div
+                    key={iso}
+                    onClick={() => openNewSlot(day)}
+                    className="min-h-[92px] p-1.5"
+                    style={{ borderRight: (i % 7) !== 6 ? `1px solid ${colors.line}` : "none", borderBottom: i < 35 ? `1px solid ${colors.line}` : "none", opacity: inMonth ? 1 : 0.45, cursor: canEdit ? "pointer" : "default", background: iso === todayIso ? `${colors.brass}12` : "transparent" }}
+                  >
+                    <div className="mb-1 text-right text-xs df-mono" style={{ color: iso === todayIso ? colors.brassDark : colors.inkSoft, fontWeight: iso === todayIso ? 700 : 400 }}>{day.getDate()}</div>
+                    <div className="space-y-0.5">
+                      {daySlots.slice(0, 3).map((s) => chip(s, true))}
+                      {daySlots.length > 3 && <div className="px-1 text-[11px]" style={{ color: colors.inkSoft }}>+{daySlots.length - 3} autre(s)</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-7">
+            {weekDays.map((day, i) => {
+              const iso = toIsoDate(day);
+              const daySlots = slotsOn(iso);
+              return (
+                <div
+                  key={iso}
+                  onClick={() => openNewSlot(day)}
+                  className="min-h-[220px] p-2"
+                  style={{ borderRight: i !== 6 ? `1px solid ${colors.line}` : "none", cursor: canEdit ? "pointer" : "default", background: iso === todayIso ? `${colors.brass}12` : "transparent" }}
+                >
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide" style={{ color: iso === todayIso ? colors.brassDark : colors.inkSoft }}>
+                    {WEEKDAY_LABELS[i]} <span className="df-mono">{day.getDate()}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {daySlots.map((s) => (
+                      <div key={s.id}>
+                        {chip(s, false)}
+                        {s.chantier && <div className="truncate px-1.5 text-[11px]" style={{ color: colors.inkSoft }}>{s.chantier}</div>}
+                      </div>
+                    ))}
+                    {daySlots.length === 0 && <div className="text-[11px]" style={{ color: colors.inkSoft, opacity: 0.6 }}>—</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {members.length > 1 && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs" style={{ color: colors.inkSoft }}>
+          {members.map((m) => (
+            <span key={m.userId} className="flex items-center gap-1.5"><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: memberColor.get(m.userId) }} /> {m.label}</span>
+          ))}
+        </div>
+      )}
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(27,42,51,0.45)" }} onClick={() => setEditing(null)}>
+          <div className="w-full max-w-md rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }} onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="df-display text-lg font-semibold">{editing.id ? "Modifier le créneau" : "Nouveau créneau"}</h2>
+              <button onClick={() => setEditing(null)} style={{ color: colors.inkSoft }}><X size={16} /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Titre</label>
+                <input autoFocus className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Ex. Pose carrelage salle de bain" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} disabled={!canEdit} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Début</label>
+                  <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editing.start} onChange={(e) => setEditing({ ...editing, start: e.target.value, end: editing.end < e.target.value ? e.target.value : editing.end })} disabled={!canEdit} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Fin</label>
+                  <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editing.end} min={editing.start} onChange={(e) => setEditing({ ...editing, end: e.target.value })} disabled={!canEdit} />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Membre de l'équipe</label>
+                <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editing.memberUserId || ""} onChange={(e) => setEditing({ ...editing, memberUserId: e.target.value })} disabled={!canEdit}>
+                  <option value="">Non assigné</option>
+                  {members.map((m) => <option key={m.userId} value={m.userId}>{m.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Chantier associé (optionnel)</label>
+                <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editing.chantier || ""} onChange={(e) => setEditing({ ...editing, chantier: e.target.value })} disabled={!canEdit}>
+                  <option value="">Aucun</option>
+                  {chantiers.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {editing.chantier && !chantiers.includes(editing.chantier) && <option value={editing.chantier}>{editing.chantier}</option>}
+                </select>
+                <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Les chantiers proposés sont ceux renseignés sur tes documents (page Chantiers).</p>
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-2">
+              <div>
+                {canEdit && editing.id && (
+                  <button onClick={deleteSlot} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: colors.brick }}><Trash2 size={14} /> Supprimer</button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setEditing(null)} className="rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>{canEdit ? "Annuler" : "Fermer"}</button>
+                {canEdit && (
+                  <button onClick={saveSlot} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: isAdvanced ? adv.accent : colors.brassDark }}>Enregistrer</button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChantiersView({ documents, siteSettings, darkMode, onOpenDoc }) {
   const [openChantier, setOpenChantier] = useState(null);
   const chantiers = useMemo(() => {
@@ -9342,6 +10046,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
             {profile.country && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Pays</dt><dd>{profile.country}</dd></div>}
             {profile.email && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Email</dt><dd>{profile.email}</dd></div>}
             {profile.phone && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Téléphone</dt><dd>{profile.phone}</dd></div>}
+            {profile.googleReviewUrl && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Avis Google</dt><dd className="break-all">{profile.googleReviewUrl}</dd></div>}
             {(profile.postalCode || profile.city) && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>CP / Ville</dt><dd>{[profile.postalCode, profile.city].filter(Boolean).join(" ")}</dd></div>}
             {profile.iban && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>IBAN</dt><dd className="df-mono">{profile.iban}{profile.bic ? ` — BIC ${profile.bic}` : ""}</dd></div>}
             {profile.vatOnDebits && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>TVA</dt><dd>Option pour le paiement d'après les débits</dd></div>}
@@ -9409,6 +10114,11 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
               <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Téléphone</label>
               <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.phone} onChange={(e) => patch({ phone: e.target.value })} />
             </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Lien d'avis Google (optionnel)</label>
+            <input type="url" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="https://g.page/r/.../review" value={local.googleReviewUrl || ""} onChange={(e) => patch({ googleReviewUrl: e.target.value })} />
+            <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Lien « Laisser un avis » de ta fiche Google Business. Quand une facture passe à « payée », il te sera proposé d'envoyer ce lien au client par email — jamais automatiquement.</p>
           </div>
           {local.type !== "particulier" && (
             <div>
@@ -10824,6 +11534,104 @@ function FormattableField({ value, onChange, placeholder, className, style, mult
   );
 }
 
+// Chiffre d'affaires facturé, mois par mois, sur les 12 derniers mois,
+// comparé à la même période un an plus tôt — calculé uniquement à
+// partir des factures existantes (hors brouillons), montants HT, à la
+// date d'émission. Dessiné en SVG, sans bibliothèque.
+function monthKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
+function RevenueChart({ documents, isAdvanced, darkMode }) {
+  const data = useMemo(() => {
+    const now = new Date();
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const prev = new Date(d.getFullYear() - 1, d.getMonth(), 1);
+      months.push({ key: monthKey(d), prevKey: monthKey(prev), label: d.toLocaleDateString("fr-FR", { month: "short" }), year: d.getFullYear(), current: 0, previous: 0 });
+    }
+    const byKey = new Map(months.map((m) => [m.key, m]));
+    const byPrevKey = new Map(months.map((m) => [m.prevKey, m]));
+    let hasPrevious = false;
+    for (const doc of documents) {
+      if (doc.type !== "facture" || doc.status === "brouillon" || !doc.issueDate) continue;
+      const issued = new Date(doc.issueDate);
+      if (isNaN(issued.getTime())) continue;
+      const key = monthKey(issued);
+      const amount = computeTotals(doc).subtotalHT || 0;
+      if (byKey.has(key)) byKey.get(key).current += amount;
+      if (byPrevKey.has(key)) { byPrevKey.get(key).previous += amount; hasPrevious = true; }
+    }
+    const totalCurrent = months.reduce((s, m) => s + m.current, 0);
+    const totalPrevious = months.reduce((s, m) => s + m.previous, 0);
+    const max = Math.max(...months.map((m) => Math.max(m.current, hasPrevious ? m.previous : 0)), 0);
+    const delta = hasPrevious && totalPrevious > 0 ? Math.round(((totalCurrent - totalPrevious) / totalPrevious) * 100) : null;
+    return { months, hasPrevious, totalCurrent, totalPrevious, max, delta };
+  }, [documents]);
+
+  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const ink = isAdvanced && darkMode ? "#E8EAED" : colors.ink;
+  const soft = isAdvanced && darkMode ? "#9AA5B5" : colors.inkSoft;
+  const barColor = isAdvanced ? adv.accent : colors.brass;
+  const prevColor = isAdvanced && darkMode ? "#4A5568" : colors.line;
+  const hasAny = data.totalCurrent > 0 || data.totalPrevious > 0;
+
+  // Géométrie du graphique (en unités SVG, redimensionné en largeur)
+  const W = 720, H = 200, padL = 8, padR = 8, padTop = 16, padBottom = 28;
+  const innerW = W - padL - padR, innerH = H - padTop - padBottom;
+  const slot = innerW / 12;
+  const groupW = slot * 0.66;
+  const barW = data.hasPrevious ? groupW / 2 : groupW;
+  const scaleY = (v) => (data.max > 0 ? (v / data.max) * innerH : 0);
+
+  return (
+    <div className="mb-6 rounded-2xl p-5" style={{ background: surface, border: `1px solid ${isAdvanced && darkMode ? "#3A4353" : colors.line}` }}>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide" style={{ color: soft }}>Chiffre d'affaires facturé — 12 derniers mois (HT)</div>
+          <div className="df-display mt-1 text-2xl font-semibold" style={{ color: ink }}>{eur(data.totalCurrent)}</div>
+        </div>
+        {data.hasPrevious && (
+          <div className="text-right">
+            <div className="text-xs" style={{ color: soft }}>Même période un an plus tôt : <span className="df-mono">{eur(data.totalPrevious)}</span></div>
+            {data.delta !== null && (
+              <div className="df-mono text-sm font-semibold" style={{ color: data.delta >= 0 ? colors.moss : colors.brick }}>{data.delta >= 0 ? "+" : ""}{data.delta} %</div>
+            )}
+          </div>
+        )}
+      </div>
+      {!hasAny ? (
+        <p className="py-6 text-center text-xs" style={{ color: soft }}>Aucune facture émise sur les 12 derniers mois — le graphique apparaîtra dès la première facture envoyée.</p>
+      ) : (
+        <>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Chiffre d'affaires facturé par mois">
+            <line x1={padL} x2={W - padR} y1={padTop + innerH} y2={padTop + innerH} stroke={prevColor} strokeWidth="1" />
+            {data.months.map((m, i) => {
+              const x0 = padL + i * slot + (slot - groupW) / 2;
+              const hCur = scaleY(m.current), hPrev = scaleY(m.previous);
+              return (
+                <g key={m.key}>
+                  {data.hasPrevious && (
+                    <rect x={x0} y={padTop + innerH - hPrev} width={barW - 1} height={hPrev} fill={prevColor} rx="2">
+                      <title>{m.label} {m.year - 1} : {eur(m.previous)}</title>
+                    </rect>
+                  )}
+                  <rect x={data.hasPrevious ? x0 + barW : x0} y={padTop + innerH - hCur} width={barW - 1} height={hCur} fill={barColor} rx="2">
+                    <title>{m.label} {m.year} : {eur(m.current)}</title>
+                  </rect>
+                  <text x={padL + i * slot + slot / 2} y={H - 8} textAnchor="middle" fontSize="11" fill={soft} style={{ fontFamily: "'Inter', sans-serif" }}>{m.label.replace(".", "")}</text>
+                </g>
+              );
+            })}
+          </svg>
+          <div className="mt-2 flex flex-wrap items-center gap-4 text-xs" style={{ color: soft }}>
+            <span className="flex items-center gap-1.5"><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: barColor }} /> 12 derniers mois</span>
+            {data.hasPrevious && <span className="flex items-center gap-1.5"><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: prevColor }} /> Un an plus tôt</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function StatCard({ label, value, sub, color }) {
   return (
     <div className="rounded-2xl p-4" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
@@ -10847,7 +11655,39 @@ function StatCardAvancee({ label, value, sub, color, icon: Icon }) {
   );
 }
 
-function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
+// Bandeau "facture payée → proposer une demande d'avis Google". Rien
+// n'est envoyé sans clic sur le bouton ; "Plus tard" ferme simplement.
+function ReviewRequestNotice({ notice, onSend, onDismiss }) {
+  if (!notice) return null;
+  return (
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3" style={{ background: notice.sent ? `${colors.moss}0D` : `${colors.brass}12`, border: `1px solid ${notice.sent ? colors.moss : colors.brass}40` }}>
+      <div className="flex items-start gap-2">
+        {notice.sent ? <Check size={16} style={{ color: colors.moss, flexShrink: 0, marginTop: "2px" }} /> : <Mail size={16} style={{ color: colors.brassDark, flexShrink: 0, marginTop: "2px" }} />}
+        <div>
+          {notice.sent ? (
+            <p className="text-sm font-medium" style={{ color: colors.moss }}>Demande d'avis envoyée à {notice.clientEmail}.</p>
+          ) : (
+            <>
+              <p className="text-sm font-medium" style={{ color: colors.brassDark }}>Facture {notice.docNumber} payée — demander un avis Google à {notice.clientName || "ce client"} ?</p>
+              <p className="text-xs" style={{ color: colors.inkSoft }}>Un email avec ton lien d'avis Google sera envoyé à {notice.clientEmail}.</p>
+              {notice.error && <p className="mt-1 text-xs" style={{ color: colors.brick }}>{notice.error}</p>}
+            </>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        {!notice.sent && (
+          <button onClick={onSend} disabled={notice.sending} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: colors.brassDark, opacity: notice.sending ? 0.7 : 1 }}>
+            {notice.sending ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />} {notice.sending ? "Envoi…" : "Envoyer la demande d'avis"}
+          </button>
+        )}
+        <button onClick={onDismiss} className="text-xs font-medium" style={{ color: colors.inkSoft }}>{notice.sent ? "Fermer" : "Plus tard"}</button>
+      </div>
+    </div>
+  );
+}
+
+function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
@@ -11475,6 +12315,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
       </div>
 
       <div className="no-print mx-auto max-w-6xl px-4 py-8 sm:px-6">
+        <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
         {splitNotice && (
           <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.moss}15`, border: `1px solid ${colors.moss}40` }}>
             <span className="text-sm" style={{ color: colors.moss }}>
