@@ -33,3 +33,8 @@ verify_jwt = false
 
 [functions.paypal-webhook]
 verify_jwt = false
+
+# Génération Factur-X : les polices (PDF/A exige des polices embarquées)
+# et le profil couleur sRGB doivent être déployés avec la fonction.
+[functions.generate-facturx]
+static_files = ["./supabase/functions/generate-facturx/assets/*"]

@@ -531,11 +531,16 @@ const COUNTRIES = [
   "Autre",
 ];
 
+// Champs ajoutés pour la facturation électronique (Factur-X) — toujours
+// en plus des champs existants, jamais à la place : "address" reste
+// l'adresse en un seul bloc telle qu'elle est saisie et imprimée
+// aujourd'hui, les nouveaux champs portent les informations que la norme
+// EN 16931 exige séparément (code postal, ville, SIRET/SIREN, n° TVA).
 function emptyClient() {
-  return { id: nextId("cli"), type: "entreprise", name: "", address: "", country: "", email: "", phone: "" };
+  return { id: nextId("cli"), type: "entreprise", name: "", address: "", country: "", email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" };
 }
 function emptyCompanyProfile() {
-  return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null };
+  return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false };
 }
 function emptyPrestation() {
   return { id: nextId("pr"), designation: "", category: "", unit: "forfait", unitPrice: 0, tva: 20 };
@@ -1480,10 +1485,22 @@ function newDocument(type, documents) {
     validityDays: 30,
     showValidity: true,
     dueDays: 30,
-    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
-    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
+    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" },
     clientId: null,
     chantier: "",
+    // Facturation électronique (réforme 2026-2027) : catégorie de
+    // l'opération (livraison de biens / prestation de services / mixte)
+    // et adresse de livraison si différente de celle du client — deux
+    // des nouvelles mentions obligatoires. Vides par défaut : à
+    // renseigner avant d'exporter en Factur-X.
+    operationCategory: "",
+    deliveryAddress: "",
+    deliveryPostalCode: "",
+    deliveryCity: "",
+    // Motif d'exonération appliqué aux lignes à 0 % de TVA dans l'export
+    // Factur-X — franchise en base par défaut (cas le plus fréquent).
+    vatExemptionReason: "franchise",
     items: [emptyLine()],
     globalDiscount: 0,
     acompte: 0,
@@ -1674,6 +1691,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
         <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
           <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
           {doc.company.address && <div>{doc.company.address}</div>}
+          {(doc.company.postalCode || doc.company.city) && <div>{[doc.company.postalCode, doc.company.city].filter(Boolean).join(" ")}</div>}
           {doc.company.phone && <div>Téléphone : {doc.company.phone}</div>}
           {doc.company.email && <div>Mail : {doc.company.email}</div>}
           {doc.company.type !== "particulier" && doc.company.siret && <div>SIRET : {doc.company.siret}</div>}
@@ -1682,6 +1700,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
         <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
           {doc.client.name && <div style={{ fontWeight: 600 }}>{doc.client.name}</div>}
           {doc.client.address && <div>{doc.client.address}</div>}
+          {(doc.client.postalCode || doc.client.city) && <div>{[doc.client.postalCode, doc.client.city].filter(Boolean).join(" ")}</div>}
           {doc.client.email && <div>{doc.client.email}</div>}
           {doc.client.phone && <div>{doc.client.phone}</div>}
         </div>
@@ -3388,6 +3407,7 @@ function DeviFactAppInner() {
         account={account}
         plans={plans}
         siteSettings={siteSettings}
+        companyProfile={companyProfile}
         isLocked={isLocked}
         isViewer={isViewer}
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
@@ -8592,6 +8612,10 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={editing.address} onChange={(e) => setEditing({ ...editing, address: e.target.value })} />
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Téléphone" value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
+            <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Code postal (facturation électronique)" value={editing.postalCode || ""} onChange={(e) => setEditing({ ...editing, postalCode: e.target.value })} />
+            <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Ville (facturation électronique)" value={editing.city || ""} onChange={(e) => setEditing({ ...editing, city: e.target.value })} />
+            <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="SIRET (14 chiffres, si professionnel)" value={editing.siret || ""} onChange={(e) => setEditing({ ...editing, siret: e.target.value })} />
+            <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="N° TVA intracommunautaire (si professionnel)" value={editing.tva || ""} onChange={(e) => setEditing({ ...editing, tva: e.target.value })} />
           </div>
           <button onClick={save} className="mt-3 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Enregistrer</button>
         </div>
@@ -9265,6 +9289,9 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
             {profile.country && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Pays</dt><dd>{profile.country}</dd></div>}
             {profile.email && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Email</dt><dd>{profile.email}</dd></div>}
             {profile.phone && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Téléphone</dt><dd>{profile.phone}</dd></div>}
+            {(profile.postalCode || profile.city) && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>CP / Ville</dt><dd>{[profile.postalCode, profile.city].filter(Boolean).join(" ")}</dd></div>}
+            {profile.iban && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>IBAN</dt><dd className="df-mono">{profile.iban}{profile.bic ? ` — BIC ${profile.bic}` : ""}</dd></div>}
+            {profile.vatOnDebits && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>TVA</dt><dd>Option pour le paiement d'après les débits</dd></div>}
             {profile.type !== "particulier" && profile.siret && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>SIRET</dt><dd>{profile.siret}</dd></div>}
             {profile.type !== "particulier" && profile.tva && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>N° TVA</dt><dd>{profile.tva}</dd></div>}
             {!profile.address && !profile.email && !profile.phone && <p className="text-xs" style={{ color: colors.inkSoft }}>Aucune information renseignée pour le moment.</p>}
@@ -9306,6 +9333,16 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
             <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Adresse</label>
             <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.address} onChange={(e) => patch({ address: e.target.value })} />
           </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Code postal</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.postalCode || ""} onChange={(e) => patch({ postalCode: e.target.value })} />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Ville</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.city || ""} onChange={(e) => patch({ city: e.target.value })} />
+            </div>
+          </div>
           <div>
             <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Pays</label>
             <CountrySelect value={local.country || ""} onChange={(v) => patch({ country: v })} />
@@ -9326,6 +9363,24 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
               <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.tva} onChange={(e) => patch({ tva: e.target.value })} />
             </div>
           )}
+          <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Facturation électronique (Factur-X)</div>
+            <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Coordonnées de paiement et option de TVA reprises dans les factures électroniques — sans effet sur le PDF classique.</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>IBAN</label>
+                <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="FR76 ..." value={local.iban || ""} onChange={(e) => patch({ iban: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>BIC</label>
+                <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.bic || ""} onChange={(e) => patch({ bic: e.target.value })} />
+              </div>
+            </div>
+            <label className="mt-3 flex items-start gap-2 text-xs" style={{ color: colors.inkSoft }}>
+              <input type="checkbox" className="mt-0.5" checked={!!local.vatOnDebits} onChange={(e) => patch({ vatOnDebits: e.target.checked })} />
+              <span>J'ai opté pour le paiement de la TVA d'après les débits (mention obligatoire sur les factures dans ce cas — à cocher uniquement si tu as fait cette demande à l'administration fiscale)</span>
+            </label>
+          </div>
           <div className="flex gap-2 pt-2">
             <button onClick={handleSave} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
               <Check size={14} /> Enregistrer
@@ -10739,7 +10794,7 @@ function StatCardAvancee({ label, value, sub, color, icon: Icon }) {
   );
 }
 
-function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
+function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
@@ -10853,7 +10908,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     patch({ items: localDoc.items.map((it) => (it.id === id ? { ...it, ...itemPatch } : it)) });
   }
   function selectClient(c) {
-    patch({ client: { name: c.name, address: c.address, email: c.email, phone: c.phone }, clientId: c.id });
+    patch({ client: { name: c.name, address: c.address, email: c.email, phone: c.phone, siret: c.siret || "", tva: c.tva || "", postalCode: c.postalCode || "", city: c.city || "" }, clientId: c.id });
     setClientQuery("");
     setClientPickerOpen(false);
   }
@@ -11159,6 +11214,42 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
   }
 
+  // Export Factur-X (facture électronique : PDF/A-3 + XML CII EN 16931),
+  // produit par la fonction serveur generate-facturx à partir de la
+  // facture affichée. Indépendant du bouton PDF classique, qui reste
+  // inchangé. Ne transmet rien à une Plateforme Agréée.
+  const [facturxGenerating, setFacturxGenerating] = useState(false);
+  async function downloadFacturX() {
+    if (facturxGenerating) return;
+    setFacturxGenerating(true);
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const { data, error } = await db.functions.invoke("generate-facturx", {
+        body: { document: localDoc, companyProfile: companyProfile || null, siteName: siteSettings?.name || "" },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      if (error || data?.error) {
+        // En cas de statut non-2xx, le vrai message (et la liste des
+        // informations manquantes) est dans le corps de la réponse.
+        let detail = data;
+        if (!detail && error?.context) { try { detail = await error.context.json(); } catch { /* corps illisible */ } }
+        const missing = Array.isArray(detail?.missing) ? detail.missing : [];
+        alert(`${detail?.error || error?.message || "Impossible de générer le fichier Factur-X."}${missing.length ? "\n\nÀ compléter :\n- " + missing.join("\n- ") : ""}`);
+        return;
+      }
+      const bytes = Uint8Array.from(atob(data.pdfBase64), (c) => c.charCodeAt(0));
+      downloadBlob(new Blob([bytes], { type: "application/pdf" }), data.fileName || `Facture-${localDoc.docNumber || "document"}-facturx.pdf`);
+      if (Array.isArray(data.warnings) && data.warnings.length) {
+        alert(`Fichier Factur-X généré. Points d'attention :\n- ${data.warnings.join("\n- ")}`);
+      }
+    } catch (err) {
+      console.error("Erreur de génération Factur-X", err);
+      alert("Impossible de générer le fichier Factur-X. Réessaie dans un instant.");
+    } finally {
+      setFacturxGenerating(false);
+    }
+  }
+
   const inputStyle = { fontFamily: "'Inter', sans-serif", border: `1px solid ${colors.line}`, color: colors.ink };
   const statuses = localDoc.type === "devis" ? DEVIS_STATUSES : localDoc.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
 
@@ -11194,6 +11285,11 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
           <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
+          {localDoc.type === "facture" && (
+            <button onClick={downloadFacturX} disabled={facturxGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: facturxGenerating ? 0.7 : 1 }} title="Facture électronique : PDF/A-3 avec les données structurées (XML EN 16931) intégrées — format de la réforme 2026-2027">
+              {facturxGenerating ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />} {facturxGenerating ? "Génération…" : "Télécharger au format Factur-X"}
+            </button>
+          )}
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
             <FileSpreadsheet size={15} /> Excel
           </button>
@@ -11363,6 +11459,12 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="SIRET" value={localDoc.company.siret} onChange={(e) => patchDeep("company", { siret: e.target.value })} />
               )}
               <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+              {(localDoc.type === "facture" || localDoc.type === "devis") && (
+                <div className="mb-2 flex gap-2">
+                  <input className="df-input w-1/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Code postal" title="Code postal (facturation électronique)" value={localDoc.company.postalCode || ""} onChange={(e) => patchDeep("company", { postalCode: e.target.value })} />
+                  <input className="df-input w-2/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Ville" title="Ville (facturation électronique)" value={localDoc.company.city || ""} onChange={(e) => patchDeep("company", { city: e.target.value })} />
+                </div>
+              )}
               <div className="flex gap-2">
                 <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Email" value={localDoc.company.email} onChange={(e) => patchDeep("company", { email: e.target.value })} />
                 <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Téléphone" value={localDoc.company.phone} onChange={(e) => patchDeep("company", { phone: e.target.value })} />
@@ -11404,6 +11506,20 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
               )}
               <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm font-medium" style={inputStyle} placeholder={localDoc.type === "commande" ? "Nom du fournisseur" : localDoc.client.type === "particulier" ? "Nom et prénom" : "Raison sociale"} value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
               <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+              {(localDoc.type === "facture" || localDoc.type === "devis") && (
+                <>
+                  <div className="mb-2 flex gap-2">
+                    <input className="df-input w-1/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Code postal" title="Code postal (facturation électronique)" value={localDoc.client.postalCode || ""} onChange={(e) => patchDeep("client", { postalCode: e.target.value })} />
+                    <input className="df-input w-2/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Ville" title="Ville (facturation électronique)" value={localDoc.client.city || ""} onChange={(e) => patchDeep("client", { city: e.target.value })} />
+                  </div>
+                  {(localDoc.client.type || "entreprise") !== "particulier" && (
+                    <div className="mb-2 flex gap-2">
+                      <input className="df-input w-1/2 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="SIRET du client (14 chiffres)" title="SIRET du client — son SIREN (9 premiers chiffres) est obligatoire sur les factures électroniques" value={localDoc.client.siret || ""} onChange={(e) => patchDeep("client", { siret: e.target.value })} />
+                      <input className="df-input w-1/2 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="N° TVA intracom. du client" title="Numéro de TVA intracommunautaire du client (ex : FR 12 345678901)" value={localDoc.client.tva || ""} onChange={(e) => patchDeep("client", { tva: e.target.value })} />
+                    </div>
+                  )}
+                </>
+              )}
               <div className="flex gap-2">
                 <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Email" value={localDoc.client.email} onChange={(e) => patchDeep("client", { email: e.target.value })} />
                 <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Téléphone" value={localDoc.client.phone} onChange={(e) => patchDeep("client", { phone: e.target.value })} />
@@ -11415,6 +11531,43 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
             <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Chantier (optionnel — regroupe les documents d'un même projet)</label>
             <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="Ex : Rénovation cuisine Dupont" value={localDoc.chantier || ""} onChange={(e) => patch({ chantier: e.target.value })} />
           </div>
+
+          {(localDoc.type === "facture" || localDoc.type === "devis") && (
+            <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
+              <div className="df-display mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
+                <FileText size={13} /> Facturation électronique (Factur-X)
+              </div>
+              <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Nouvelles mentions obligatoires de la réforme 2026-2027 — nécessaires pour l'export au format Factur-X, sans effet sur le PDF classique.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Catégorie d'opération
+                  <select className="df-select mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.operationCategory || ""} onChange={(e) => patch({ operationCategory: e.target.value })}>
+                    <option value="">— Choisir —</option>
+                    <option value="services">Prestation de services</option>
+                    <option value="biens">Livraison de biens</option>
+                    <option value="mixte">Opération mixte (biens et services)</option>
+                  </select>
+                </label>
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Motif d'exonération (pour les lignes à 0 % de TVA)
+                  <select className="df-select mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.vatExemptionReason || "franchise"} onChange={(e) => patch({ vatExemptionReason: e.target.value })}>
+                    <option value="franchise">Franchise en base (art. 293 B du CGI)</option>
+                    <option value="export">Exportation hors UE (art. 262 I du CGI)</option>
+                    <option value="intracom">Livraison intracommunautaire (art. 262 ter I du CGI)</option>
+                    <option value="autoliquidation">Autoliquidation — TVA due par le client (art. 283 du CGI)</option>
+                  </select>
+                </label>
+              </div>
+              <div className="mt-3">
+                <div className="mb-1 text-xs font-medium" style={{ color: colors.inkSoft }}>Adresse de livraison / du chantier (seulement si différente de l'adresse du client)</div>
+                <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Adresse" value={localDoc.deliveryAddress || ""} onChange={(e) => patch({ deliveryAddress: e.target.value })} />
+                <div className="flex gap-2">
+                  <input className="df-input w-1/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Code postal" value={localDoc.deliveryPostalCode || ""} onChange={(e) => patch({ deliveryPostalCode: e.target.value })} />
+                  <input className="df-input w-2/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Ville" value={localDoc.deliveryCity || ""} onChange={(e) => patch({ deliveryCity: e.target.value })} />
+                </div>
+              </div>
+            </div>
+          )}
 
           {localDoc.type === "proforma" && (() => {
             const pf = localDoc.proforma || emptyProforma();
