@@ -1484,6 +1484,7 @@ function newDocument(type, documents) {
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
     clientId: null,
     chantier: "",
+    items: [emptyLine()],
     globalDiscount: 0,
     acompte: 0,
     notes: "Merci de votre confiance.",
