@@ -49,15 +49,8 @@ serve(async (req) => {
 
     const prompt = `Tu es un assistant pour un artisan du bâtiment français qui rédige un devis. À partir de la description du chantier ci-dessous, propose une liste de lignes de devis structurées et réalistes pour ce métier (6 lignes maximum). Ne propose AUCUN prix : les artisans fixent eux-mêmes leurs prix. Réponds UNIQUEMENT avec un tableau JSON valide et COMPACT (sans retour à la ligne, sans indentation, tout sur une seule ligne), sans texte avant ni après, sans balises markdown, exactement sous cette forme : [{"designation":"...","qty":1,"unit":"forfait"}]. Unités possibles : forfait, heure, jour, m², m³, ml, pièce, kg, lot, ou une chaîne vide.\n\nDescription du chantier : ${description.slice(0, 2000)}`;
 
-    // Gemini (surtout en usage gratuit) peut répondre "503 - surcharge
-    // temporaire" par pics de forte demande, qui se résorbent souvent
-    // en quelques secondes — on retente automatiquement 1 fois avant
-    // d'abandonner, plutôt que de faire échouer la demande tout de suite.
-    let geminiRes;
-    let lastErrText = "";
-    let wasOverloaded = false;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      geminiRes = await fetch(
+    async function callGemini(): Promise<Response> {
+      return await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: "POST",
@@ -74,15 +67,26 @@ serve(async (req) => {
           }),
         }
       );
-      if (geminiRes.ok) break;
-      lastErrText = await geminiRes.text();
-      wasOverloaded = geminiRes.status === 503 || lastErrText.includes("UNAVAILABLE") || lastErrText.includes("high demand");
-      console.error(`Erreur Gemini (appel, tentative ${attempt + 1}) :`, lastErrText);
-      if (wasOverloaded && attempt === 0) {
+    }
+
+    // Gemini (surtout en usage gratuit) peut répondre "503 - surcharge
+    // temporaire" par pics de forte demande, qui se résorbent souvent
+    // en quelques secondes — on retente automatiquement 1 fois avant
+    // d'abandonner, plutôt que de faire échouer la demande tout de suite.
+    let geminiRes = await callGemini();
+    let wasOverloaded = false;
+    if (!geminiRes.ok) {
+      const firstErrText = await geminiRes.text();
+      wasOverloaded = geminiRes.status === 503 || firstErrText.includes("UNAVAILABLE") || firstErrText.includes("high demand");
+      console.error("Erreur Gemini (appel, tentative 1) :", firstErrText);
+      if (wasOverloaded) {
         await new Promise((r) => setTimeout(r, 1500)); // petite pause avant de retenter
-        continue;
+        geminiRes = await callGemini();
+        if (!geminiRes.ok) {
+          const secondErrText = await geminiRes.text();
+          console.error("Erreur Gemini (appel, tentative 2) :", secondErrText);
+        }
       }
-      break;
     }
 
     if (!geminiRes.ok) {
