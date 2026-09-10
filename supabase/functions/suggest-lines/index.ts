@@ -49,28 +49,47 @@ serve(async (req) => {
 
     const prompt = `Tu es un assistant pour un artisan du bâtiment français qui rédige un devis. À partir de la description du chantier ci-dessous, propose une liste de lignes de devis structurées et réalistes pour ce métier (6 lignes maximum). Ne propose AUCUN prix : les artisans fixent eux-mêmes leurs prix. Réponds UNIQUEMENT avec un tableau JSON valide et COMPACT (sans retour à la ligne, sans indentation, tout sur une seule ligne), sans texte avant ni après, sans balises markdown, exactement sous cette forme : [{"designation":"...","qty":1,"unit":"forfait"}]. Unités possibles : forfait, heure, jour, m², m³, ml, pièce, kg, lot, ou une chaîne vide.\n\nDescription du chantier : ${description.slice(0, 2000)}`;
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.4,
-            maxOutputTokens: 4096,
-            // Force Gemini à renvoyer du JSON pur (fonctionnalité native
-            // de l'API), plus fiable que de le demander seulement dans le texte.
-            responseMimeType: "application/json",
-          },
-        }),
+    // Gemini (surtout en usage gratuit) peut répondre "503 - surcharge
+    // temporaire" par pics de forte demande, qui se résorbent souvent
+    // en quelques secondes — on retente automatiquement 1 fois avant
+    // d'abandonner, plutôt que de faire échouer la demande tout de suite.
+    let geminiRes;
+    let lastErrText = "";
+    let wasOverloaded = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.4,
+              maxOutputTokens: 4096,
+              // Force Gemini à renvoyer du JSON pur (fonctionnalité native
+              // de l'API), plus fiable que de le demander seulement dans le texte.
+              responseMimeType: "application/json",
+            },
+          }),
+        }
+      );
+      if (geminiRes.ok) break;
+      lastErrText = await geminiRes.text();
+      wasOverloaded = geminiRes.status === 503 || lastErrText.includes("UNAVAILABLE") || lastErrText.includes("high demand");
+      console.error(`Erreur Gemini (appel, tentative ${attempt + 1}) :`, lastErrText);
+      if (wasOverloaded && attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1500)); // petite pause avant de retenter
+        continue;
       }
-    );
+      break;
+    }
 
     if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error("Erreur Gemini (appel) :", errText);
-      return new Response(JSON.stringify({ error: "Erreur du service IA" }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const message = wasOverloaded
+        ? "Le service IA (Gemini) est temporairement surchargé côté Google — réessaie dans une minute, ça se résorbe généralement vite."
+        : "Erreur du service IA";
+      return new Response(JSON.stringify({ error: message }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const geminiData = await geminiRes.json();

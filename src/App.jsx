@@ -10855,7 +10855,17 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
       setAiDescription("");
     } catch (e) {
       console.error(e);
-      setAiError("Impossible de générer les lignes pour le moment. Vérifie que la fonction \"suggest-lines\" est bien déployée et configurée (clé Gemini) — voir le Guide de déploiement, section IA. Sinon, réessaie dans un instant.");
+      // Si la fonction a renvoyé un message précis (ex : surcharge
+      // temporaire de Gemini), on l'affiche tel quel — plus juste que
+      // le message générique, qui ne s'applique que si on n'a vraiment
+      // aucune information sur la cause réelle.
+      const specificMessage = e?.context?.body?.error || e?.message;
+      const isGenericNetworkError = !specificMessage || specificMessage === "Réponse vide" || /FunctionsHttpError|FunctionsFetchError|Failed to fetch/i.test(specificMessage);
+      setAiError(
+        isGenericNetworkError
+          ? "Impossible de générer les lignes pour le moment. Vérifie que la fonction \"suggest-lines\" est bien déployée et configurée (clé Gemini) — voir le Guide de déploiement, section IA. Sinon, réessaie dans un instant."
+          : specificMessage
+      );
     } finally {
       setAiLoading(false);
     }
