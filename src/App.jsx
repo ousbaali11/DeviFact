@@ -11,7 +11,7 @@ import {
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
-  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Mic,
+  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Mic, Sun, Moon, Link2,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
 } from "lucide-react";
 
@@ -1576,6 +1576,19 @@ const GlobalStyle = () => (
     @media (min-width: 1024px) {
       .df-root:has(> .df-sidebar-nav) { padding-left: 272px; }
     }
+    /* Mode sombre — un réglage personnel (mémorisé sur cet appareil),
+       indépendant du thème de couleurs choisi par l'administrateur du
+       site : remplace juste les tons clairs/sombres, garde les
+       couleurs d'accent (laiton, mousse, brique...) globalement
+       inchangées pour rester cohérent visuellement. */
+    body.df-dark {
+      --df-ink: #F1F5F9;
+      --df-ink-soft: #94A3B8;
+      --df-paper: #0F172A;
+      --df-surface: #1E293B;
+      --df-line: #334155;
+    }
+    body.df-dark img { opacity: 0.92; }
     @keyframes df-marquee {
       0% { transform: translateX(-100vw); opacity: 0; }
       8% { opacity: 1; }
@@ -1905,6 +1918,14 @@ function DeviFactAppInner() {
   // fluctuation) — sert à afficher un bandeau clair et à bloquer toute
   // modification tant que la vraie connexion n'est pas revenue.
   const [offlineMode, setOfflineMode] = useState(false);
+  // Mode sombre — réglage personnel, mémorisé sur cet appareil (pas en
+  // base de données, contrairement au thème choisi par l'Admin).
+  const [darkMode, setDarkMode] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_dark_mode") === "1"));
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.toggle("df-dark", darkMode);
+    localStorage.setItem("devifact_dark_mode", darkMode ? "1" : "0");
+  }, [darkMode]);
   // Notification après qu'une facture a été créée automatiquement à
   // partir d'un devis passé au statut "signé" — jamais de navigation
   // forcée surprise, juste un message clair avec un lien pour l'ouvrir
@@ -3485,7 +3506,7 @@ function DeviFactAppInner() {
     return cmds;
   }, [account, visibleServices]);
 
-  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands };
+  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode };
 
   if (view === "revision-sector") {
     const countryInfo = getRevisionCountryInfo(revisionCountry);
@@ -4056,11 +4077,168 @@ function OfflineBanner() {
 }
 
 export default function DeviFactApp() {
+  // Lien public reçu par un client (signature ou paiement d'un
+  // document, sans avoir de compte) — vérifié ICI, avant même de
+  // toucher à toute la logique de connexion/tableau de bord, pour que
+  // ce soit accessible à n'importe qui, sans exception.
+  const publicToken = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("voir-document") : null;
+  if (publicToken) {
+    return (
+      <ErrorBoundary>
+        <PublicDocumentView token={publicToken} />
+      </ErrorBoundary>
+    );
+  }
   return (
     <ErrorBoundary>
       <OfflineBanner />
       <DeviFactAppInner />
     </ErrorBoundary>
+  );
+}
+
+// Page vue par le client via un lien public envoyé par email — jamais
+// besoin d'un compte. Permet de consulter un devis/facture, de le
+// signer, ou de le payer en ligne selon son type et son statut.
+function PublicDocumentView({ token }) {
+  const [state, setState] = useState({ loading: true, error: null, document: null, siteName: "", signedAt: null, paidAt: null });
+  const [signatureName, setSignatureName] = useState("");
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState(null);
+  const [signed, setSigned] = useState(false);
+  const [payLoading, setPayLoading] = useState(false);
+  const [payError, setPayError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_DB_URL}/functions/v1/get-public-document?token=${encodeURIComponent(token)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || "Erreur");
+        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt });
+      } catch (err) {
+        setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null });
+      }
+    })();
+  }, [token]);
+
+  async function handleSign() {
+    if (!signatureName.trim()) { setSignError("Merci d'indiquer ton nom pour signer."); return; }
+    setSigning(true);
+    setSignError(null);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_DB_URL}/functions/v1/sign-public-document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, signatureName: signatureName.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Erreur");
+      setSigned(true);
+    } catch (err) {
+      setSignError(err.message || "Impossible d'enregistrer la signature pour l'instant.");
+    } finally {
+      setSigning(false);
+    }
+  }
+
+  async function handlePay() {
+    setPayLoading(true);
+    setPayError(null);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_DB_URL}/functions/v1/create-invoice-payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data?.error || "Erreur");
+      window.location.href = data.url;
+    } catch (err) {
+      setPayError(err.message || "Impossible de lancer le paiement pour l'instant.");
+      setPayLoading(false);
+    }
+  }
+
+  return (
+    <div className="df-root min-h-screen w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="mx-auto max-w-xl px-4 py-10 sm:py-16">
+        <div className="mb-8 text-center">
+          <div className="df-display text-lg font-bold">{state.siteName || "Chantiflow"}</div>
+        </div>
+
+        {state.loading && (
+          <div className="flex justify-center py-20"><Loader2 size={24} className="animate-spin" style={{ color: colors.slate }} /></div>
+        )}
+
+        {state.error && (
+          <div className="rounded-2xl p-6 text-center" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <AlertTriangle size={28} style={{ color: colors.brick, margin: "0 auto 12px" }} />
+            <p className="font-medium" style={{ color: colors.brick }}>{state.error}</p>
+          </div>
+        )}
+
+        {state.document && (
+          <div className="rounded-2xl p-6" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+            <div className="mb-4 flex items-center justify-between border-b pb-4" style={{ borderColor: colors.line }}>
+              <div>
+                <div className="df-display text-xl font-bold">{docTypeLabel(state.document.type)} {state.document.docNumber}</div>
+                <div className="text-sm" style={{ color: colors.inkSoft }}>{state.document.client?.name}</div>
+              </div>
+              <div className="df-mono text-xl font-bold">{formatMoney(computeTotals(state.document).totalTTC, state.document.currency)}</div>
+            </div>
+
+            <div className="mb-4 space-y-1">
+              {(state.document.items || []).filter((it) => it.type === "line").map((it) => (
+                <div key={it.id} className="flex justify-between text-sm">
+                  <span>{it.designation}</span>
+                  <span className="df-mono" style={{ color: colors.inkSoft }}>{it.qty} × {formatMoney(it.unitPrice, state.document.currency)}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Signature — uniquement pour un devis pas encore signé */}
+            {state.document.type === "devis" && state.document.status !== "signé" && !state.signedAt && !signed && (
+              <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
+                <p className="mb-3 text-sm font-medium">Pour accepter ce devis, signe-le ci-dessous :</p>
+                <input
+                  className="df-input mb-2 w-full rounded-md px-3 py-2 text-sm"
+                  style={{ border: `1px solid ${colors.line}` }}
+                  placeholder="Ton nom complet, en guise de signature"
+                  value={signatureName}
+                  onChange={(e) => setSignatureName(e.target.value)}
+                />
+                {signError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{signError}</p>}
+                <button onClick={handleSign} disabled={signing} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.brassDark, opacity: signing ? 0.7 : 1 }}>
+                  {signing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {signing ? "Signature en cours..." : "Signer et accepter le devis"}
+                </button>
+              </div>
+            )}
+            {(signed || state.signedAt) && (
+              <div className="mt-6 flex items-center gap-2 rounded-xl p-4" style={{ background: `${colors.moss}0D` }}>
+                <Check size={18} style={{ color: colors.moss }} /> <p className="text-sm font-medium" style={{ color: colors.moss }}>Devis signé — merci !</p>
+              </div>
+            )}
+
+            {/* Paiement — uniquement pour une facture pas encore payée */}
+            {state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && (
+              <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
+                {payError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{payError}</p>}
+                <button onClick={handlePay} disabled={payLoading} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.moss, opacity: payLoading ? 0.7 : 1 }}>
+                  {payLoading ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />} {payLoading ? "Redirection..." : `Payer ${formatMoney(computeTotals(state.document).totalTTC, state.document.currency)} en ligne`}
+                </button>
+              </div>
+            )}
+            {state.paidAt && (
+              <div className="mt-6 flex items-center gap-2 rounded-xl p-4" style={{ background: `${colors.moss}0D` }}>
+                <Check size={18} style={{ color: colors.moss }} /> <p className="text-sm font-medium" style={{ color: colors.moss }}>Facture déjà payée — merci !</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -4940,7 +5118,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
   );
 }
 
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType, commandPaletteOpen, setCommandPaletteOpen, paletteCommands }) {
+function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode }) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -5129,6 +5307,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                   )}
                 </div>
               )}
+              <button onClick={() => setDarkMode((v) => !v)} className="flex items-center gap-1 rounded-lg p-2" style={{ color: adv.inkSoft }} title={darkMode ? "Mode clair" : "Mode sombre"}>{darkMode ? <Sun size={14} /> : <Moon size={14} />}</button>
               <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg p-2" style={tabStyle(view === "contact")} title="Nous contacter"><Mail size={14} /></button>
             </div>
             <button onClick={onLogout} className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ color: adv.inkSoft }}>
@@ -5360,6 +5539,9 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             )}
           </div>
         )}
+        <button onClick={() => setDarkMode((v) => !v)} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title={darkMode ? "Mode clair" : "Mode sombre"}>
+          {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
         <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={tabStyle(view === "contact")} title="Nous contacter">
           <Mail size={15} />
         </button>
@@ -10623,6 +10805,20 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     if (!it.designation.trim()) { alert("Renseigne d'abord une désignation pour cette ligne avant de l'enregistrer."); return; }
     onSavePrestation({ id: nextId("pr"), designation: it.designation, category: "", unit: it.unit, unitPrice: it.unitPrice, tva: it.tva });
   }
+  const [publicLinkState, setPublicLinkState] = useState({ loading: false, url: null, error: null });
+  async function generatePublicLink() {
+    setPublicLinkState({ loading: true, url: null, error: null });
+    try {
+      const { data, error } = await db.from("public_document_links").insert({ organization_id: account.organizationId, document_id: localDoc.id }).select("token").single();
+      if (error) throw error;
+      const url = `${window.location.origin}${window.location.pathname}?voir-document=${data.token}`;
+      await navigator.clipboard.writeText(url).catch(() => {});
+      setPublicLinkState({ loading: false, url, error: null });
+    } catch (err) {
+      console.error("Erreur de génération du lien public", err);
+      setPublicLinkState({ loading: false, url: null, error: "Impossible de générer le lien pour l'instant." });
+    }
+  }
   async function generateFromAI() {
     if (!aiDescription.trim() || aiLoading) return;
     setAiLoading(true);
@@ -10858,6 +11054,17 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
             <FileSpreadsheet size={15} /> Excel
           </button>
+          {(localDoc.type === "devis" || localDoc.type === "facture") && (
+            <button onClick={generatePublicLink} disabled={publicLinkState.loading} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: publicLinkState.loading ? 0.7 : 1 }} title={localDoc.type === "devis" ? "Créer un lien pour que le client signe en ligne, sans compte" : "Créer un lien pour que le client paie en ligne, sans compte"}>
+              {publicLinkState.loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />} {publicLinkState.loading ? "Génération…" : localDoc.type === "devis" ? "Lien de signature" : "Lien de paiement"}
+            </button>
+          )}
+          {publicLinkState.url && (
+            <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.moss }}><Check size={13} /> Lien copié — colle-le dans ton email au client</span>
+          )}
+          {publicLinkState.error && (
+            <span className="text-xs" style={{ color: colors.brick }}>{publicLinkState.error}</span>
+          )}
         </div>
       </div>
 

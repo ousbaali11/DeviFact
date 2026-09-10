@@ -38,6 +38,23 @@ serve(async (req) => {
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
+
+      // Paiement d'une facture précise via le lien public envoyé au
+      // client — complètement séparé de la logique d'abonnement
+      // juste en dessous, jamais mélangé.
+      if (session.metadata?.kind === "invoice_payment") {
+        const { organizationId, documentId, linkId } = session.metadata;
+        const { data: docsRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", "documents").eq("shared", false).maybeSingle();
+        const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
+        const docIndex = documents.findIndex((d: any) => d.id === documentId);
+        if (docIndex !== -1) {
+          documents[docIndex] = { ...documents[docIndex], status: "payée", updatedAt: Date.now() };
+          await dbAdmin.from("kv_store").update({ value: documents, updated_at: new Date().toISOString() }).eq("organization_id", organizationId).eq("key", "documents").eq("shared", false);
+        }
+        if (linkId) await dbAdmin.from("public_document_links").update({ paid_at: new Date().toISOString() }).eq("id", linkId);
+        return new Response(JSON.stringify({ received: true }), { headers: { "Content-Type": "application/json" } });
+      }
+
       const organizationId = session.metadata?.organization_id || session.client_reference_id;
       const planId = session.metadata?.plan_id;
       const billingCycle = session.metadata?.billing_cycle;
