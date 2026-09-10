@@ -1413,6 +1413,13 @@ function newDocument(type, documents) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
+  // Facture récurrente : pour un contrat d'entretien/maintenance, se
+  // reproduit automatiquement à intervalle régulier (voir la tâche
+  // planifiée process-recurring-invoices), jusqu'à une date de fin
+  // optionnelle — jamais activée par défaut, un vrai choix explicite.
+  if (type === "facture") {
+    return { ...base, isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "" };
+  }
   // Facture d'acompte : doit référencer le devis/marché d'origine et
   // savoir combien reste à facturer après cet acompte — sans ça, ce
   // n'est qu'une facture ordinaire mal nommée.
@@ -3109,7 +3116,7 @@ function DeviFactAppInner() {
 
   const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
   const freeLimitReached = (account?.plan || "gratuit") === "gratuit" && documents.length >= freeLimit;
-  const isViewer = account?.role === "viewer";
+  const isViewer = account?.role === "viewer" || account?.role === "comptable";
   const isLocked = freeLimitReached || isViewer;
 
   if (view === "editor" && activeDoc) {
@@ -8124,8 +8131,8 @@ function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings }
   );
 }
 
-const ROLE_LABELS = { owner: "Propriétaire", editor: "Éditeur", viewer: "Lecteur" };
-const ROLE_COLORS = { owner: colors.brassDark, editor: colors.moss, viewer: colors.slate };
+const ROLE_LABELS = { owner: "Propriétaire", editor: "Éditeur", viewer: "Lecteur", comptable: "Expert-comptable" };
+const ROLE_COLORS = { owner: colors.brassDark, editor: colors.moss, viewer: colors.slate, comptable: colors.brick };
 
 function AccountView({ account, siteSettings }) {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -8513,6 +8520,7 @@ function TeamView({ account, siteSettings }) {
               <select className="df-select mt-1 block rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
                 <option value="editor">Éditeur</option>
                 <option value="viewer">Lecteur</option>
+                <option value="comptable">Expert-comptable (lecture seule)</option>
                 <option value="owner">Propriétaire</option>
               </select>
             </label>
@@ -8548,6 +8556,7 @@ function TeamView({ account, siteSettings }) {
                   <option value="owner">Propriétaire</option>
                   <option value="editor">Éditeur</option>
                   <option value="viewer">Lecteur</option>
+                  <option value="comptable">Expert-comptable</option>
                 </select>
               ) : (
                 <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${ROLE_COLORS[m.role]}18`, color: ROLE_COLORS[m.role] }}>{ROLE_LABELS[m.role]}</span>
@@ -10570,6 +10579,67 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 {localDoc.type !== "facture" ? (localDoc.showValidity !== false ? `Valable jusqu'au ${frLong(validityDate)}` : null) : `Paiement attendu avant le ${frLong(dueDate)}`}
               </div>
             </div>
+            {localDoc.type === "facture" && (
+              <div className="mt-3 rounded-lg p-3" style={{ background: colors.paper }}>
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={!!localDoc.isRecurring}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      if (checked && !localDoc.nextRecurrenceDate) {
+                        const next = new Date(localDoc.issueDate || Date.now());
+                        if (localDoc.recurrenceInterval === "annuel") next.setFullYear(next.getFullYear() + 1);
+                        else if (localDoc.recurrenceInterval === "trimestriel") next.setMonth(next.getMonth() + 3);
+                        else next.setMonth(next.getMonth() + 1);
+                        patch({ isRecurring: checked, nextRecurrenceDate: next.toISOString().slice(0, 10) });
+                      } else {
+                        patch({ isRecurring: checked });
+                      }
+                    }}
+                    style={{ accentColor: colors.brass }}
+                  />
+                  Facturation récurrente (contrat d'entretien, maintenance...)
+                </label>
+                {localDoc.isRecurring && (
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <label className="text-xs" style={{ color: colors.inkSoft }}>
+                      Se répète
+                      <select
+                        className="df-select mt-1 block w-full rounded-md px-2 py-1.5 text-sm"
+                        style={inputStyle}
+                        value={localDoc.recurrenceInterval || "mensuel"}
+                        onChange={(e) => patch({ recurrenceInterval: e.target.value })}
+                      >
+                        <option value="mensuel">Chaque mois</option>
+                        <option value="trimestriel">Chaque trimestre</option>
+                        <option value="annuel">Chaque année</option>
+                      </select>
+                    </label>
+                    <label className="text-xs" style={{ color: colors.inkSoft }}>
+                      Prochaine facture le
+                      <input
+                        type="date"
+                        className="df-input df-mono mt-1 block w-full rounded-md px-2 py-1.5 text-sm"
+                        style={inputStyle}
+                        value={localDoc.nextRecurrenceDate || ""}
+                        onChange={(e) => patch({ nextRecurrenceDate: e.target.value })}
+                      />
+                    </label>
+                    <label className="text-xs" style={{ color: colors.inkSoft }}>
+                      Arrêter le (optionnel)
+                      <input
+                        type="date"
+                        className="df-input df-mono mt-1 block w-full rounded-md px-2 py-1.5 text-sm"
+                        style={inputStyle}
+                        value={localDoc.recurrenceEndDate || ""}
+                        onChange={(e) => patch({ recurrenceEndDate: e.target.value })}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2">

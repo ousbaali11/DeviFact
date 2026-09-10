@@ -37,7 +37,7 @@ serve(async (req) => {
 
     const { email, role, organizationId: requestedOrgId } = await req.json();
     const cleanEmail = String(email || "").trim().toLowerCase();
-    const cleanRole = ["owner", "editor", "viewer"].includes(role) ? role : "editor";
+    const cleanRole = ["owner", "editor", "viewer", "comptable"].includes(role) ? role : "editor";
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return new Response(JSON.stringify({ error: "Email invalide" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
