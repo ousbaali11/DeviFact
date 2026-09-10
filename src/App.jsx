@@ -1500,7 +1500,7 @@ function newDocument(type, documents) {
   // planifiée process-recurring-invoices), jusqu'à une date de fin
   // optionnelle — jamais activée par défaut, un vrai choix explicite.
   if (type === "facture") {
-    return { ...base, isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "" };
+    return { ...base, isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "", remindersEnabled: true };
   }
   // Facture d'acompte : doit référencer le devis/marché d'origine et
   // savoir combien reste à facturer après cet acompte — sans ça, ce
@@ -1579,17 +1579,24 @@ const GlobalStyle = () => (
     }
     /* Mode sombre — un réglage personnel (mémorisé sur cet appareil),
        indépendant du thème de couleurs choisi par l'administrateur du
-       site : remplace juste les tons clairs/sombres, garde les
-       couleurs d'accent (laiton, mousse, brique...) globalement
-       inchangées pour rester cohérent visuellement. */
+       site : couleurs douces (jamais noir pur), appliquées le plus
+       largement possible — y compris aux champs de saisie, qui
+       gardent sinon un fond blanc imposé par le navigateur. */
     body.df-dark {
-      --df-ink: #F1F5F9;
-      --df-ink-soft: #94A3B8;
-      --df-paper: #0F172A;
-      --df-surface: #1E293B;
-      --df-line: #334155;
+      --df-ink: #E8EAED;
+      --df-ink-soft: #9AA5B5;
+      --df-paper: #1B212C;
+      --df-surface: #262D3A;
+      --df-line: #3A4353;
     }
     body.df-dark img { opacity: 0.92; }
+    body.df-dark input, body.df-dark select, body.df-dark textarea {
+      background: var(--df-surface) !important;
+      color: var(--df-ink) !important;
+      border-color: var(--df-line) !important;
+    }
+    body.df-dark input::placeholder, body.df-dark textarea::placeholder { color: var(--df-ink-soft); opacity: 1; }
+    body.df-dark input[type="checkbox"], body.df-dark input[type="radio"] { background: transparent !important; }
     @keyframes df-marquee {
       0% { transform: translateX(-100vw); opacity: 0; }
       8% { opacity: 1; }
@@ -3668,6 +3675,7 @@ function DeviFactAppInner() {
         <TopNav {...navProps} />
         <AdminView
           account={account}
+          darkMode={darkMode}
           documents={documents}
           clients={clients}
           companyProfile={companyProfile}
@@ -3725,34 +3733,34 @@ function DeviFactAppInner() {
           </div>
         )}
         {siteSettings?.landingPageVersion === "avancee" ? (
-          <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: "linear-gradient(to bottom, #BFDBFE, #FFFFFF)", borderColor: adv.line }}>
+          <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: darkMode ? "linear-gradient(to bottom, #2A3241, #1B212C)" : "linear-gradient(to bottom, #BFDBFE, #FFFFFF)", borderColor: darkMode ? "#3A4353" : adv.line }}>
             <div className="p-6 sm:p-8">
-              <h1 className="df-display text-xl font-bold sm:text-2xl" style={{ color: adv.ink }}>Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
-              <p className="mt-1 text-xs" style={{ color: adv.inkSoft }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
+              <h1 className="df-display text-xl font-bold sm:text-2xl" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
+              <p className="mt-1 text-xs" style={{ color: darkMode ? "#9AA5B5" : adv.inkSoft }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
               <div className="mt-6 flex flex-wrap gap-3">
                 {["devis", "facture", "commande", "situation"].map((id) => {
                   const svc = getService(id);
                   if (!svc) return null;
                   const SvcIcon = svc.icon;
                   return (
-                    <button key={id} onClick={() => openNewService(id)} className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold" style={{ background: adv.paper, color: adv.ink }}>
+                    <button key={id} onClick={() => openNewService(id)} className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold" style={{ background: darkMode ? "#262D3A" : adv.paper, color: darkMode ? "#E8EAED" : adv.ink }}>
                       <SvcIcon size={15} style={{ color: adv.accent }} /> {svc.label}
                     </button>
                   );
                 })}
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-px sm:grid-cols-3" style={{ background: adv.line }}>
+            <div className="grid grid-cols-1 gap-px sm:grid-cols-3" style={{ background: darkMode ? "#3A4353" : adv.line }}>
               {[
                 { icon: Inbox, label: "Devis en attente de réponse", value: stats.enAttenteCount, sub: eur(stats.montantEnAttente) },
                 { icon: AlertTriangle, label: "Factures impayées", value: stats.impayeesCount, sub: eur(stats.montantImpaye) },
                 { icon: TrendingUp, label: "Taux de signature des devis", value: stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`, sub: "devis envoyés → signés" },
               ].map(({ icon: Icon, label, value, sub }) => (
-                <div key={label} className="p-6" style={{ background: adv.surface }}>
+                <div key={label} className="p-6" style={{ background: darkMode ? "#262D3A" : adv.surface }}>
                   <Icon size={17} style={{ color: adv.accent }} />
-                  <div className="df-display mt-3 text-2xl font-bold" style={{ color: adv.ink }}>{value}</div>
-                  <div className="mt-1 text-xs font-medium" style={{ color: adv.inkSoft }}>{label}</div>
-                  <div className="df-mono mt-1 text-[11px]" style={{ color: adv.inkSoft }}>{sub}</div>
+                  <div className="df-display mt-3 text-2xl font-bold" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{value}</div>
+                  <div className="mt-1 text-xs font-medium" style={{ color: darkMode ? "#9AA5B5" : adv.inkSoft }}>{label}</div>
+                  <div className="df-mono mt-1 text-[11px]" style={{ color: darkMode ? "#9AA5B5" : adv.inkSoft }}>{sub}</div>
                 </div>
               ))}
             </div>
@@ -4121,9 +4129,9 @@ function PublicDocumentView({ token }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_DB_URL}/functions/v1/get-public-document?token=${encodeURIComponent(token)}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || "Erreur");
+        const { data, error } = await db.functions.invoke("get-public-document", { body: { token } });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
         setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt });
       } catch (err) {
         setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null });
@@ -4136,13 +4144,9 @@ function PublicDocumentView({ token }) {
     setSigning(true);
     setSignError(null);
     try {
-      const res = await fetch(`${import.meta.env.VITE_DB_URL}/functions/v1/sign-public-document`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, signatureName: signatureName.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Erreur");
+      const { data, error } = await db.functions.invoke("sign-public-document", { body: { token, signatureName: signatureName.trim() } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
       setSigned(true);
     } catch (err) {
       setSignError(err.message || "Impossible d'enregistrer la signature pour l'instant.");
@@ -4155,13 +4159,9 @@ function PublicDocumentView({ token }) {
     setPayLoading(true);
     setPayError(null);
     try {
-      const res = await fetch(`${import.meta.env.VITE_DB_URL}/functions/v1/create-invoice-payment`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data?.error || "Erreur");
+      const { data, error } = await db.functions.invoke("create-invoice-payment", { body: { token } });
+      if (error) throw error;
+      if (data?.error || !data?.url) throw new Error(data?.error || "Erreur");
       window.location.href = data.url;
     } catch (err) {
       setPayError(err.message || "Impossible de lancer le paiement pour l'instant.");
@@ -5152,15 +5152,16 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   ];
   const tabs = [...mainTabs, ...rightTabs];
   const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const navBg = isAdvanced ? adv.sidebarBg : colors.ink;
+  const navBg = isAdvanced ? (darkMode ? "linear-gradient(to bottom, #2A3241, #1B212C)" : adv.sidebarBg) : colors.ink;
+  const navLine = darkMode ? "#3A4353" : adv.line;
   // Pastille active : fond indigo clair + texte indigo en version
   // avancée (simple, clair, un seul accent) — transparence blanche
   // sur fond sombre sinon (comportement d'origine, inchangé).
   const activeTabStyle = isAdvanced
-    ? { background: adv.accentSoft, color: adv.accent }
+    ? { background: darkMode ? "#38363F" : adv.accentSoft, color: darkMode ? "#C7C4FF" : adv.accent }
     : { background: "rgba(255,255,255,0.12)", color: "white" };
   const inactiveTabStyle = isAdvanced
-    ? { background: "transparent", color: adv.inkSoft }
+    ? { background: "transparent", color: darkMode ? "#9AA5B5" : adv.inkSoft }
     : { background: "transparent", color: "rgba(255,255,255,0.65)" };
   function tabStyle(isActive) { return isActive ? activeTabStyle : inactiveTabStyle; }
   if (isAdvanced) {
@@ -5187,7 +5188,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           {orgMenuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
-              <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${adv.line}` }}>
+              <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: darkMode ? "#262D3A" : "white", border: `1px solid ${darkMode ? "#3A4353" : adv.line}` }}>
                 {memberships.map((m) => (
                   <button key={m.organizationId} onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs" style={{ background: m.organizationId === account.organizationId ? adv.paper : "transparent", color: adv.ink }}>
                     <span className="truncate">{m.name || "Organisation"}</span>
@@ -5215,14 +5216,14 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
     return (
       <>
         {/* ───── Barre latérale — grand écran uniquement ───── */}
-        <div className="df-sidebar-nav hidden lg:flex" style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: "264px", background: adv.sidebarBg, borderRight: `1px solid ${adv.line}`, flexDirection: "column", zIndex: 30 }}>
+        <div className="df-sidebar-nav hidden lg:flex" style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: "264px", background: navBg, borderRight: `1px solid ${navLine}`, flexDirection: "column", zIndex: 30 }}>
           <button onClick={() => setView("dashboard")} className="flex items-center gap-2.5 px-5 py-5" title="Retour à l'accueil">
             {siteSettings?.logo ? (
               <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
             ) : (
               <div className="flex h-8 w-8 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
             )}
-            <span className="df-display truncate text-sm font-semibold" style={{ color: adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
+            <span className="df-display truncate text-sm font-semibold" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
           </button>
 
           <div className="px-4 pb-4">
@@ -5282,12 +5283,12 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                 {servicesMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setServicesMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 z-20 mb-1 max-h-96 w-72 overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${adv.line}` }}>
+                    <div className="absolute bottom-full left-0 z-20 mb-1 max-h-96 w-72 overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: darkMode ? "#262D3A" : "white", border: `1px solid ${darkMode ? "#3A4353" : adv.line}` }}>
                       <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: adv.inkSoft }}>Tous les services</div>
                       {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
                         const SIcon = s.icon;
                         return (
-                          <button key={s.id} onClick={() => { setServicesMenuOpen(false); onNewService(s.id); }} className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: adv.ink }}>
+                          <button key={s.id} onClick={() => { setServicesMenuOpen(false); onNewService(s.id); }} className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>
                             <SIcon size={15} className="mt-0.5 shrink-0" style={{ color: adv.accent }} />
                             <span className="min-w-0">
                               <span className="block font-medium">{s.label}{!s.implemented && <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-normal" style={{ background: adv.line, color: adv.inkSoft }}>bientôt</span>}</span>
@@ -5308,9 +5309,9 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                   {desktopMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setDesktopMenuOpen(false)} />
-                      <div className="absolute bottom-full right-0 z-20 mb-1 w-52 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${adv.line}` }}>
-                        {siteSettings.desktopAppUrlWindows && <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: adv.ink }}><Monitor size={15} /> Version Windows</a>}
-                        {siteSettings.desktopAppUrlMac && <a href={siteSettings.desktopAppUrlMac} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: adv.ink }}><Monitor size={15} /> Version Mac</a>}
+                      <div className="absolute bottom-full right-0 z-20 mb-1 w-52 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: darkMode ? "#262D3A" : "white", border: `1px solid ${darkMode ? "#3A4353" : adv.line}` }}>
+                        {siteSettings.desktopAppUrlWindows && <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: darkMode ? "#E8EAED" : adv.ink }}><Monitor size={15} /> Version Windows</a>}
+                        {siteSettings.desktopAppUrlMac && <a href={siteSettings.desktopAppUrlMac} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: darkMode ? "#E8EAED" : adv.ink }}><Monitor size={15} /> Version Mac</a>}
                       </div>
                     </>
                   )}
@@ -5326,22 +5327,22 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
         </div>
 
         {/* ───── Barre du haut — petit écran uniquement ───── */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden" style={{ background: adv.sidebarBg, borderBottom: `1px solid ${adv.line}` }}>
+        <div className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden" style={{ background: navBg, borderBottom: `1px solid ${navLine}` }}>
           <button onClick={() => setView("dashboard")} className="flex min-w-0 flex-1 items-center gap-2.5" title="Retour à l'accueil">
             {siteSettings?.logo ? (
               <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
             ) : (
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
             )}
-            <span className="df-display truncate text-xs font-semibold" style={{ color: adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
+            <span className="df-display truncate text-xs font-semibold" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
           </button>
           <div className="flex shrink-0 items-center gap-2">
             <button onClick={onNewDevis} className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium" style={{ background: adv.accent, color: "white" }}><Plus size={13} /> Devis</button>
-            <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: adv.ink }}>{mobileNavOpen ? <X size={19} /> : <Menu size={19} />}</button>
+            <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{mobileNavOpen ? <X size={19} /> : <Menu size={19} />}</button>
           </div>
         </div>
         {mobileNavOpen && (
-          <div className="lg:hidden" style={{ background: adv.sidebarBg, borderBottom: `1px solid ${adv.line}` }}>
+          <div className="lg:hidden" style={{ background: navBg, borderBottom: `1px solid ${navLine}` }}>
             <div className="max-h-[70vh] overflow-y-auto px-3 pb-3">
               <div className="grid grid-cols-3 gap-1.5 py-2">
                 <button onClick={() => { setMobileNavOpen(false); onNewFacture(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Facture</button>
@@ -11201,6 +11202,17 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                   </div>
                 )}
               </div>
+            )}
+            {localDoc.type === "facture" && (
+              <label className="mt-3 flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}>
+                <input
+                  type="checkbox"
+                  checked={localDoc.remindersEnabled !== false}
+                  onChange={(e) => patch({ remindersEnabled: e.target.checked })}
+                  style={{ accentColor: colors.brass }}
+                />
+                Envoyer une relance automatique par email si cette facture n'est pas payée à temps
+              </label>
             )}
           </div>
 

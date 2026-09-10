@@ -56,6 +56,9 @@ serve(async (req) => {
     let page = 0;
     const pageSize = 200;
 
+    const { data: settingsRow } = await dbAdmin.from("site_settings").select("name").limit(1).maybeSingle();
+    const siteName = settingsRow?.name || "Chantiflow";
+
     while (true) {
       const { data: rows, error } = await dbAdmin
         .from("kv_store")
@@ -67,15 +70,13 @@ serve(async (req) => {
       if (error) { console.error("Erreur de lecture", error); break; }
       if (!rows || rows.length === 0) break;
 
-      const { data: settingsRow } = await dbAdmin.from("site_settings").select("name").limit(1).maybeSingle();
-      const siteName = settingsRow?.name || "Chantiflow";
-
       for (const row of rows) {
         const documents = Array.isArray(row.value) ? row.value : [];
         let changed = false;
 
         for (const doc of documents) {
           if (doc.type !== "facture" || doc.status === "payée") continue;
+          if (doc.remindersEnabled === false) continue; // désactivé explicitement sur cette facture
           if (!doc.client?.email) continue;
 
           const dueDate = doc.issueDate ? new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 30) * 86400000) : null;
