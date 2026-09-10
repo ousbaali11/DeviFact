@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo, forwardRef, Fragment, Component }
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { db } from "./client.js";
-import { clearStorageCache, setActiveOrganization } from "./storage-adapter.js";
+import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
@@ -839,6 +839,7 @@ function newSituationDocument(documents) {
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
     clientId: null,
+    chantier: "",
     items: [emptySituationLine()],
     retenueGarantiePct: 5,
     acompteVerse: 0,
@@ -1402,7 +1403,7 @@ function newDocument(type, documents) {
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
     clientId: null,
-    items: [emptyLine()],
+    chantier: "",
     globalDiscount: 0,
     acompte: 0,
     notes: "Merci de votre confiance.",
@@ -1819,6 +1820,11 @@ function DeviFactAppInner() {
   // sans ça, un "flash" de la mauvaise version apparaît brièvement à
   // chaque rechargement, avant de basculer sur la bonne.
   const [siteSettingsLoaded, setSiteSettingsLoaded] = useState(false);
+  // Vrai uniquement quand les documents affichés proviennent du cache
+  // local (vraie coupure réseau au chargement, pas juste une brève
+  // fluctuation) — sert à afficher un bandeau clair et à bloquer toute
+  // modification tant que la vraie connexion n'est pas revenue.
+  const [offlineMode, setOfflineMode] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingClients, setSavingClients] = useState(false);
@@ -2146,10 +2152,54 @@ function DeviFactAppInner() {
       window.storage.get("company-profile", false),
       window.storage.get("prestations", false),
     ]);
-    setDocuments(docsRes.status === "fulfilled" && docsRes.value ? JSON.parse(docsRes.value.value) : []);
-    setClients(clientsRes.status === "fulfilled" && clientsRes.value ? JSON.parse(clientsRes.value.value) : []);
-    setCompanyProfile(companyRes.status === "fulfilled" && companyRes.value ? JSON.parse(companyRes.value.value) : emptyCompanyProfile());
-    setPrestations(prestationsRes.status === "fulfilled" && prestationsRes.value ? JSON.parse(prestationsRes.value.value) : []);
+    // Si la connexion a échoué pour TOUT (documents ET clients à la
+    // fois — le signe le plus fiable d'un vrai problème réseau, plutôt
+    // qu'une simple clé absente pour un compte tout neuf), retombe sur
+    // la dernière copie connue, gardée localement — jamais un écran
+    // vide qui donnerait l'impression que les données ont disparu.
+    // Toujours en LECTURE SEULE : rien de nouveau ne peut être créé ou
+    // modifié tant que la vraie connexion n'est pas revenue, pour ne
+    // jamais risquer de perdre un changement fait hors ligne.
+    const bothFailed = docsRes.status === "rejected" && clientsRes.status === "rejected";
+    const orgId = getActiveOrganization();
+    if (bothFailed && orgId) {
+      try {
+        const cached = localStorage.getItem(`devifact_offline_cache_${orgId}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          setDocuments(parsed.documents || []);
+          setClients(parsed.clients || []);
+          setCompanyProfile(parsed.companyProfile || emptyCompanyProfile());
+          setPrestations(parsed.prestations || []);
+          setOfflineMode(true);
+          return;
+        }
+      } catch (err) {
+        console.error("Erreur de lecture du cache hors ligne", err);
+      }
+    }
+    setOfflineMode(false);
+    const docs = docsRes.status === "fulfilled" && docsRes.value ? JSON.parse(docsRes.value.value) : [];
+    const cls = clientsRes.status === "fulfilled" && clientsRes.value ? JSON.parse(clientsRes.value.value) : [];
+    const comp = companyRes.status === "fulfilled" && companyRes.value ? JSON.parse(companyRes.value.value) : emptyCompanyProfile();
+    const prest = prestationsRes.status === "fulfilled" && prestationsRes.value ? JSON.parse(prestationsRes.value.value) : [];
+    setDocuments(docs);
+    setClients(cls);
+    setCompanyProfile(comp);
+    setPrestations(prest);
+    // Garde une copie locale à jour à chaque chargement réussi — c'est
+    // cette copie qui sera utilisée si la connexion vient à manquer la
+    // prochaine fois.
+    if (orgId) {
+      try {
+        localStorage.setItem(`devifact_offline_cache_${orgId}`, JSON.stringify({ documents: docs, clients: cls, companyProfile: comp, prestations: prest, savedAt: Date.now() }));
+      } catch (err) {
+        // Le stockage local peut être plein ou désactivé (navigation
+        // privée) — jamais bloquant, juste pas de filet de secours
+        // disponible dans ce cas précis.
+        console.error("Erreur d'enregistrement du cache hors ligne", err);
+      }
+    }
   }
   function clearUserData() {
     // Vide toutes les données en mémoire — indispensable à la déconnexion
@@ -2159,12 +2209,16 @@ function DeviFactAppInner() {
     setCompanyProfile(emptyCompanyProfile());
     setPrestations([]);
     setActiveId(null);
-    // Efface aussi la position mémorisée (vue + document actif) : sans
-    // ça, un autre compte se connectant dans le même onglet pourrait
-    // se retrouver ramené sur un document qui ne lui appartient pas.
+    setOfflineMode(false);
+    // Efface aussi la position mémorisée (vue + document actif) et la
+    // copie hors ligne : sans ça, un autre compte se connectant dans le
+    // même onglet (appareil partagé) pourrait retrouver les documents
+    // du compte précédent via le cache hors ligne.
     if (typeof window !== "undefined") {
       localStorage.removeItem("devifact_lastView");
       localStorage.removeItem("devifact_lastActiveId");
+      const orgId = getActiveOrganization();
+      if (orgId) localStorage.removeItem(`devifact_offline_cache_${orgId}`);
     }
   }
 
@@ -3117,7 +3171,7 @@ function DeviFactAppInner() {
   const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
   const freeLimitReached = (account?.plan || "gratuit") === "gratuit" && documents.length >= freeLimit;
   const isViewer = account?.role === "viewer" || account?.role === "comptable";
-  const isLocked = freeLimitReached || isViewer;
+  const isLocked = freeLimitReached || isViewer || offlineMode;
 
   if (view === "editor" && activeDoc) {
     return (
@@ -3340,6 +3394,16 @@ function DeviFactAppInner() {
     );
   }
 
+  if (view === "chantiers") {
+    return (
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
+        <GlobalStyle />
+        <TopNav {...navProps} />
+        <ChantiersView documents={documents} siteSettings={siteSettings} onOpenDoc={openDoc} />
+      </div>
+    );
+  }
+
   if (view === "clients") {
     return (
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
@@ -3527,6 +3591,16 @@ function DeviFactAppInner() {
             <StatCard label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
             <StatCard label="Factures impayées" value={stats.impayeesCount} sub={eur(stats.montantImpaye)} color={colors.brick} />
             <StatCard label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
+          </div>
+        )}
+
+        {offlineMode && (
+          <div className="mb-6 flex items-start gap-3 rounded-2xl px-4 py-3" style={{ background: `${colors.brick}0D`, border: `1px solid ${colors.brick}40` }}>
+            <AlertTriangle size={16} style={{ color: colors.brick, flexShrink: 0, marginTop: "2px" }} />
+            <div>
+              <p className="text-sm font-medium" style={{ color: colors.brick }}>Mode hors ligne — dernière copie connue</p>
+              <p className="text-xs" style={{ color: colors.inkSoft }}>Impossible de joindre le serveur. Tu consultes une copie de tes documents enregistrée lors de ta dernière connexion — elle peut ne plus être à jour, et aucune modification n'est possible tant que la connexion n'est pas revenue.</p>
+            </div>
           </div>
         )}
 
@@ -4723,6 +4797,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   useEscapeToClose(desktopMenuOpen, () => setDesktopMenuOpen(false));
   const mainTabs = [
     { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+    { id: "chantiers", label: "Chantiers", icon: MapPinned },
     { id: "clients", label: "Clients", icon: Users },
     { id: "prestations", label: "Bibliothèque", icon: Library },
     { id: "company", label: "Mon entreprise", icon: Building2 },
@@ -7913,6 +7988,93 @@ function CountrySelect({ value, onChange, options, placeholder = "— Non préci
   );
 }
 
+// Regroupe les documents par chantier (champ texte libre, rempli à la
+// main sur chaque document) — permet de comparer, pour un même
+// projet, le budget prévu (devis) au montant réellement facturé.
+function ChantiersView({ documents, siteSettings, onOpenDoc }) {
+  const [openChantier, setOpenChantier] = useState(null);
+  const chantiers = useMemo(() => {
+    const map = new Map();
+    for (const d of documents) {
+      const nom = (d.chantier || "").trim();
+      if (!nom) continue;
+      if (!map.has(nom)) map.set(nom, { nom, devisTotal: 0, factureTotal: 0, docs: [] });
+      const entry = map.get(nom);
+      entry.docs.push(d);
+      if (d.type === "devis") entry.devisTotal += computeTotals(d).totalTTC;
+      if (d.type === "facture") entry.factureTotal += computeTotals(d).totalTTC;
+    }
+    return [...map.values()].sort((a, b) => b.docs.length - a.docs.length);
+  }, [documents]);
+
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <div className="mb-6">
+        {isAdvanced && (
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><MapPinned size={18} /></div>
+        )}
+        <h1 className="df-display text-2xl font-semibold">Chantiers</h1>
+        <p className="text-sm" style={{ color: colors.inkSoft }}>Compare le budget prévu (devis) au montant facturé, pour chaque projet — renseigne le champ "Chantier" sur tes documents pour les regrouper ici.</p>
+      </div>
+
+      {chantiers.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-2xl px-6 py-16 text-center" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
+          <MapPinned size={28} style={{ color: colors.inkSoft }} />
+          <p className="df-display mt-3 text-lg font-semibold">Aucun chantier suivi pour l'instant</p>
+          <p className="mt-1 max-w-sm text-sm" style={{ color: colors.inkSoft }}>Ouvre un devis ou une facture, renseigne le champ "Chantier" (sous les informations client) avec le même nom sur plusieurs documents pour les voir apparaître groupés ici.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {chantiers.map((c) => {
+            const ecart = c.devisTotal - c.factureTotal;
+            const isOpen = openChantier === c.nom;
+            return (
+              <div key={c.nom} className="overflow-hidden rounded-2xl" style={{ background: isAdvanced ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
+                <button onClick={() => setOpenChantier(isOpen ? null : c.nom)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{c.nom}</div>
+                    <div className="text-xs" style={{ color: colors.inkSoft }}>{c.docs.length} document(s)</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-4">
+                    <div className="text-right">
+                      <div className="text-xs" style={{ color: colors.inkSoft }}>Prévu</div>
+                      <div className="df-mono text-sm font-medium">{eur(c.devisTotal)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs" style={{ color: colors.inkSoft }}>Facturé</div>
+                      <div className="df-mono text-sm font-medium">{eur(c.factureTotal)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs" style={{ color: colors.inkSoft }}>Écart</div>
+                      <div className="df-mono text-sm font-semibold" style={{ color: ecart >= 0 ? colors.moss : colors.brick }}>{ecart >= 0 ? "+" : ""}{eur(ecart)}</div>
+                    </div>
+                    <ChevronDown size={16} style={{ color: colors.inkSoft, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="border-t px-4 pb-4 pt-2" style={{ borderColor: colors.line }}>
+                    {c.docs.map((d) => (
+                      <button key={d.id} onClick={() => onOpenDoc(d.id)} className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-black/5">
+                        <span className="flex items-center gap-2">
+                          <span className="df-mono font-medium">{d.docNumber}</span>
+                          <span style={{ color: colors.inkSoft }}>{docTypeLabel(d.type)}</span>
+                        </span>
+                        <span className="df-mono" style={{ color: colors.inkSoft }}>{eur(computeTotals(d).totalTTC)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing, siteSettings }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
@@ -10702,6 +10864,11 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Téléphone" value={localDoc.client.phone} onChange={(e) => patchDeep("client", { phone: e.target.value })} />
               </div>
             </div>
+          </div>
+
+          <div className="mb-6">
+            <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Chantier (optionnel — regroupe les documents d'un même projet)</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="Ex : Rénovation cuisine Dupont" value={localDoc.chantier || ""} onChange={(e) => patch({ chantier: e.target.value })} />
           </div>
 
           {localDoc.type === "proforma" && (() => {
