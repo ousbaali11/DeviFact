@@ -3577,7 +3577,7 @@ function DeviFactAppInner() {
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <ChantiersView documents={documents} siteSettings={siteSettings} onOpenDoc={openDoc} />
+        <ChantiersView documents={documents} siteSettings={siteSettings} darkMode={darkMode} onOpenDoc={openDoc} />
       </div>
     );
   }
@@ -3587,7 +3587,7 @@ function DeviFactAppInner() {
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} siteSettings={siteSettings} />
+        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} siteSettings={siteSettings} darkMode={darkMode} />
       </div>
     );
   }
@@ -3638,7 +3638,7 @@ function DeviFactAppInner() {
         <GlobalStyle />
         <TopNav {...navProps} />
         {hasAccess(account, "pro") ? (
-          <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} siteSettings={siteSettings} />
+          <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} siteSettings={siteSettings} darkMode={darkMode} />
         ) : (
           <LockedFeature onGoToPricing={() => setView("pricing")} />
         )}
@@ -3919,7 +3919,7 @@ function DeviFactAppInner() {
               const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
               const TypeIconComp = docTypeIcon(d.type);
               return (
-                <div key={d.id} className="flex flex-col gap-3 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${selectedIds.includes(d.id) ? colors.brass : colors.line}` }}>
+                <div key={d.id} className="flex flex-col gap-3 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${selectedIds.includes(d.id) ? colors.brass : colors.line}` }}>
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2">
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor(d.type)}18`, color: docTypeColor(d.type) }}><TypeIconComp size={16} /></div>
@@ -5176,7 +5176,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           <button
             onClick={() => setOrgMenuOpen((v) => !v)}
             className="flex w-full items-center justify-between gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium"
-            style={{ background: adv.paper, color: adv.ink }}
+            style={{ background: darkMode ? "#262D3A" : adv.paper, color: darkMode ? "#E8EAED" : adv.ink }}
             title="Changer d'organisation"
           >
             <span className="flex items-center gap-1.5 truncate"><Building2 size={12} /> Organisations</span>
@@ -5190,7 +5190,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
               <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
               <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: darkMode ? "#262D3A" : "white", border: `1px solid ${darkMode ? "#3A4353" : adv.line}` }}>
                 {memberships.map((m) => (
-                  <button key={m.organizationId} onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs" style={{ background: m.organizationId === account.organizationId ? adv.paper : "transparent", color: adv.ink }}>
+                  <button key={m.organizationId} onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs" style={{ background: m.organizationId === account.organizationId ? (darkMode ? "#262D3A" : adv.paper) : "transparent", color: darkMode ? "#E8EAED" : adv.ink }}>
                     <span className="truncate">{m.name || "Organisation"}</span>
                     <span className="shrink-0 text-xs" style={{ color: adv.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
                   </button>
@@ -5354,7 +5354,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                 {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
                   const SIcon = s.icon;
                   return (
-                    <button key={s.id} onClick={() => { setMobileNavOpen(false); onNewService(s.id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-[11px]" style={{ background: adv.paper, color: adv.ink }}>
+                    <button key={s.id} onClick={() => { setMobileNavOpen(false); onNewService(s.id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-[11px]" style={{ background: darkMode ? "#262D3A" : adv.paper, color: darkMode ? "#E8EAED" : adv.ink }}>
                       <SIcon size={13} className="shrink-0" style={{ color: adv.accent }} /> <span className="truncate">{s.label}</span>
                     </button>
                   );
@@ -8339,7 +8339,7 @@ function CountrySelect({ value, onChange, options, placeholder = "— Non préci
 // Regroupe les documents par chantier (champ texte libre, rempli à la
 // main sur chaque document) — permet de comparer, pour un même
 // projet, le budget prévu (devis) au montant réellement facturé.
-function ChantiersView({ documents, siteSettings, onOpenDoc }) {
+function ChantiersView({ documents, siteSettings, darkMode, onOpenDoc }) {
   const [openChantier, setOpenChantier] = useState(null);
   const chantiers = useMemo(() => {
     const map = new Map();
@@ -8379,7 +8379,7 @@ function ChantiersView({ documents, siteSettings, onOpenDoc }) {
             const ecart = c.devisTotal - c.factureTotal;
             const isOpen = openChantier === c.nom;
             return (
-              <div key={c.nom} className="overflow-hidden rounded-2xl" style={{ background: isAdvanced ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
+              <div key={c.nom} className="overflow-hidden rounded-2xl" style={{ background: isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
                 <button onClick={() => setOpenChantier(isOpen ? null : c.nom)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">{c.nom}</div>
@@ -8423,7 +8423,7 @@ function ChantiersView({ documents, siteSettings, onOpenDoc }) {
   );
 }
 
-function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing, siteSettings }) {
+function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing, siteSettings, darkMode }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [nameError, setNameError] = useState(false);
@@ -8501,7 +8501,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
       ) : siteSettings?.landingPageVersion === "avancee" ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((c) => (
-            <div key={c.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
+            <div key={c.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
               <div className="flex items-start justify-between">
                 <div className="flex h-9 w-9 items-center justify-center rounded-full df-display text-sm font-bold" style={{ background: colors.paper, color: colors.ink }}>{initials(c.name) || "?"}</div>
                 <div className="flex gap-2">
@@ -8536,7 +8536,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
   );
 }
 
-function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings }) {
+function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings, darkMode }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [designationError, setDesignationError] = useState(false);
@@ -8604,7 +8604,7 @@ function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings }
       ) : siteSettings?.landingPageVersion === "avancee" ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((p) => (
-            <div key={p.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
+            <div key={p.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 truncate text-sm font-semibold">{p.designation}</div>
                 <div className="flex shrink-0 gap-2">
@@ -9824,7 +9824,7 @@ function DesktopAppSettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
+function AdminView({ account, darkMode, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Chaque carte utilisateur est repliée par défaut (juste l'essentiel
   // visible) — évite une page immense dès qu'il y a beaucoup de
@@ -9878,7 +9878,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
             {/* Petit écran : barre horizontale déroulante (même principe qu'en classique) — la barre latérale verticale prendrait presque toute la largeur d'un téléphone. */}
             <div className="flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1 lg:hidden" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
               {TABS.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? adv.accentSoft : "transparent", color: tab === id ? adv.accent : adv.inkSoft }}>
+                <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? (darkMode ? "#38363F" : adv.accentSoft) : "transparent", color: tab === id ? (darkMode ? "#C7C4FF" : adv.accent) : (darkMode ? "#9AA5B5" : adv.inkSoft) }}>
                   <Icon size={13} /> {label}
                 </button>
               ))}
@@ -9886,7 +9886,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
             {/* Grand écran : vraie barre latérale verticale */}
             <div className="sticky top-6 hidden w-56 shrink-0 flex-col gap-0.5 lg:flex">
               {TABS.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => setTab(id)} className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: tab === id ? adv.accentSoft : "transparent", color: tab === id ? adv.accent : adv.inkSoft }}>
+                <button key={id} onClick={() => setTab(id)} className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: tab === id ? (darkMode ? "#38363F" : adv.accentSoft) : "transparent", color: tab === id ? (darkMode ? "#C7C4FF" : adv.accent) : (darkMode ? "#9AA5B5" : adv.inkSoft) }}>
                   <Icon size={15} /> {label}
                 </button>
               ))}
@@ -10026,7 +10026,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                 const expired = u.expiresAt && new Date(u.expiresAt) < new Date();
                 const isExpanded = expandedUserIds.has(u.id);
                 return (
-                  <div key={u.id} className="overflow-hidden rounded-2xl" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
+                  <div key={u.id} className="overflow-hidden rounded-2xl" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
                     <button onClick={() => toggleUserExpanded(u.id)} className="flex w-full items-start justify-between gap-2 p-4 text-left">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold">{u.email}</div>
@@ -10279,7 +10279,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {plans.map((plan) => (
-              <div key={plan.id} className="rounded-2xl p-4" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.surface : colors.surface, border: `1px solid ${colors.line}` }}>
+              <div key={plan.id} className="rounded-2xl p-4" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
                 <div className="mb-3 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-semibold">{plan.name}</div>
