@@ -16,6 +16,7 @@ import {
   Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Mic, Sun, Moon, Link2,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
   Maximize2, Minimize2, Camera, ImagePlus,
+  Home, HardHat, Files, ChevronRight,
 } from "lucide-react";
 
 // Chaque couleur pointe vers une variable CSS (définie par le thème
@@ -53,6 +54,48 @@ const adv = {
   brick: "#DC2626",
   moss: "#16A34A",
 };
+
+// Palette de la version "Atelier" — fixe, indépendante des thèmes de
+// l'admin (comme la version avancée). Codes couleur du métier : bleu de
+// travail pour l'accent, orange sécurité réservé à l'action « Créer »,
+// gris béton en fond. Tous les couples texte/fond restent au-dessus de
+// 4,5:1 de contraste. Les variables CSS --df-* sont redéfinies sous
+// body.df-atelier (voir GlobalStyle) pour que les pages et éditeurs
+// partagés prennent la même palette sans être modifiés.
+const atelier = {
+  ink: "#1C2733",
+  inkSoft: "#5A6B78",
+  paper: "#F4F6F8",
+  surface: "#FFFFFF",
+  line: "#D8DEE4",
+  accent: "#1F5FA8",
+  accentDark: "#174A85",
+  accentSoft: "#E6EFF9",
+  action: "#E8702A",
+  actionDark: "#C95E1F",
+  success: "#2E7D4F",
+  warning: "#B7791F",
+  danger: "#C0392B",
+  dark: {
+    ink: "#E6EBF0",
+    inkSoft: "#9AA7B4",
+    paper: "#151B22",
+    surface: "#1E262F",
+    line: "#2E3944",
+    accent: "#5B9BE6",
+    accentDark: "#3E7FCB",
+    accentSoft: "#1D2C3D",
+    action: "#E8702A",
+    actionDark: "#C95E1F",
+    success: "#4CAF77",
+    warning: "#D19A3A",
+    danger: "#E06356",
+  },
+};
+// Couleurs Atelier selon le mode clair/sombre de l'appareil.
+function atelierTone(darkMode) {
+  return darkMode ? atelier.dark : atelier;
+}
 
 // Bibliothèque de thèmes — valeurs réelles utilisées par chaque
 // variable CSS ci-dessus. "classique" reprend exactement les couleurs
@@ -1798,6 +1841,38 @@ const GlobalStyle = () => (
     }
     body.df-dark input::placeholder, body.df-dark textarea::placeholder { color: var(--df-ink-soft); opacity: 1; }
     body.df-dark input[type="checkbox"], body.df-dark input[type="radio"] { background: transparent !important; }
+    /* Version "Atelier" : palette fixe appliquée à tout le site connecté
+       (pages partagées et éditeurs compris) en redéfinissant les
+       variables de couleur — priorité sur le thème admin, qui est posé
+       sur <html>. Le bloc sombre est après pour gagner en cascade. */
+    body.df-atelier {
+      --df-ink: #1C2733;
+      --df-ink-soft: #5A6B78;
+      --df-paper: #F4F6F8;
+      --df-surface: #FFFFFF;
+      --df-brass: #1F5FA8;
+      --df-brass-dark: #174A85;
+      --df-slate: #3D5468;
+      --df-moss: #2E7D4F;
+      --df-brick: #C0392B;
+      --df-line: #D8DEE4;
+      --df-bg-pattern: none;
+    }
+    body.df-atelier.df-dark {
+      --df-ink: #E6EBF0;
+      --df-ink-soft: #9AA7B4;
+      --df-paper: #151B22;
+      --df-surface: #1E262F;
+      --df-brass: #5B9BE6;
+      --df-brass-dark: #3E7FCB;
+      --df-slate: #8FA3B8;
+      --df-moss: #4CAF77;
+      --df-brick: #E06356;
+      --df-line: #2E3944;
+    }
+    body.df-atelier .df-at-tap { min-height: 44px; }
+    body.df-atelier .df-at-bottom-pad { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+    @media (min-width: 768px) { body.df-atelier .df-at-bottom-pad { padding-bottom: 0; } }
     @keyframes df-marquee {
       0% { transform: translateX(-100vw); opacity: 0; }
       8% { opacity: 1; }
@@ -2292,6 +2367,15 @@ function DeviFactAppInner() {
   useEffect(() => {
     applyTheme(siteSettings?.theme || "classique");
   }, [siteSettings?.theme]);
+  // Version "Atelier" : classe sur le corps de page qui porte sa palette
+  // fixe (voir GlobalStyle) — sans effet sur les versions classique et
+  // avancée, qui n'ont pas cette classe.
+  const isAtelier = siteSettings?.landingPageVersion === "atelier";
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.toggle("df-atelier", isAtelier);
+  }, [isAtelier]);
+  const [atelierCreateOpen, setAtelierCreateOpen] = useState(false);
 
   const [plans, setPlans] = useState(PLANS);
 
@@ -3832,6 +3916,136 @@ function DeviFactAppInner() {
   }
 
   const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode };
+
+  // ---------------------------------------------------------------------
+  // Version "Atelier" : une seule branche, avant les écrans classique et
+  // avancée, qui rend les pages dans la coque Atelier. Les éditeurs sont
+  // déjà rendus plus haut (identiques pour toutes les versions).
+  // ---------------------------------------------------------------------
+  if (isAtelier) {
+    const goPricing = () => setView("pricing");
+    let page;
+    if (view === "atelier-documents") {
+      page = <AtelierDocumentsView documents={documents} darkMode={darkMode} onOpenDoc={openDoc} />;
+    } else if (view === "revision-sector") {
+      page = <AtelierRevisionSectorPicker revisionCountry={revisionCountry} setRevisionCountry={setRevisionCountry} onPick={openNewRevision} onBack={backToDashboard} darkMode={darkMode} />;
+    } else if (view === "chantiers") {
+      page = <ChantiersView documents={documents} siteSettings={siteSettings} darkMode={darkMode} onOpenDoc={openDoc} />;
+    } else if (view === "clients") {
+      page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} darkMode={darkMode} />;
+    } else if (view === "company") {
+      page = <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} />;
+    } else if (view === "team") {
+      page = <TeamView account={account} siteSettings={siteSettings} />;
+    } else if (view === "planning-equipe") {
+      page = <PlanningView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} />;
+    } else if (view === "api") {
+      page = <ApiView account={account} siteSettings={siteSettings} />;
+    } else if (view === "account") {
+      page = <AccountView account={account} siteSettings={siteSettings} />;
+    } else if (view === "prestations") {
+      page = hasAccess(account, "pro")
+        ? <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} siteSettings={siteSettings} darkMode={darkMode} />
+        : <LockedFeature onGoToPricing={goPricing} />;
+    } else if (view === "pricing") {
+      page = (
+        <PricingView
+          account={account}
+          plans={plans}
+          onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); }}
+          onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) setLimitNotice(false); }}
+          onCancelSubscription={cancelSubscription}
+          onContact={() => setView("contact")}
+          onRefreshAccount={refreshAccount}
+          cancellingSubscription={cancellingSubscription}
+          limitNotice={limitNotice}
+          documentCount={documents.length}
+          siteSettings={siteSettings}
+        />
+      );
+    } else if (view === "admin" && account?.isAdmin) {
+      page = (
+        <AdminView
+          account={account}
+          darkMode={darkMode}
+          documents={documents}
+          clients={clients}
+          companyProfile={companyProfile}
+          plans={plans}
+          savingPlanSettings={savingPlanSettings}
+          onTogglePlan={togglePlanVisibility}
+          onToggleWatermark={toggleWatermark}
+          onUpdatePlanPrice={updatePlanPrice}
+          onUpdatePlanLimit={updatePlanLimit}
+          onUpdatePlanPaypalId={updatePlanPaypalId}
+          onUpdatePlanStripeId={updatePlanStripeId}
+          onToggleCardPayment={toggleCardPayment}
+          onTogglePaypalPayment={togglePaypalPayment}
+          onTogglePayment={togglePaymentStatus}
+          onDeleteAccount={deleteCurrentAccount}
+          deletingAccount={deletingAccount}
+          siteSettings={siteSettings}
+          savingSiteSettings={savingSiteSettings}
+          onUpdateSiteSettings={updateSiteSettings}
+          allUsers={allUsers}
+          allUsersError={allUsersError}
+          onRefreshUsers={loadAllUsers}
+          onSetUserPlan={adminSetUserPlan}
+          onSetUserPaidAt={adminSetUserPaidAt}
+          onSetUserExpiresAt={adminSetUserExpiresAt}
+          savingUserPlanId={savingUserPlanId}
+          onResendConfirmation={resendConfirmation}
+          resendingConfirmationId={resendingConfirmationId}
+        />
+      );
+    } else {
+      page = (
+        <AtelierHome
+          account={account}
+          documents={documents}
+          darkMode={darkMode}
+          isLocked={isLocked}
+          isViewer={isViewer}
+          freeLimit={freeLimit}
+          freeLimitReached={freeLimitReached}
+          offlineMode={offlineMode}
+          visibleServices={visibleServices}
+          onCreate={openNewService}
+          onOpenCreate={() => setAtelierCreateOpen(true)}
+          onOpenDoc={openDoc}
+          onGoToDocuments={() => setView("atelier-documents")}
+          onGoToPricing={goPricing}
+          autoFactureNotice={autoFactureNotice}
+          onOpenAutoFacture={() => { openDoc(autoFactureNotice.id); setAutoFactureNotice(null); }}
+          onDismissAutoFacture={() => setAutoFactureNotice(null)}
+          reviewNotice={reviewNotice}
+          onSendReview={sendReviewRequest}
+          onDismissReview={() => setReviewNotice(null)}
+        />
+      );
+    }
+    return (
+      <AtelierShell
+        view={view}
+        setView={setView}
+        account={account}
+        siteSettings={siteSettings}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        onLogout={logout}
+        onSwitchOrganization={switchOrganization}
+        onCreateOwnOrg={createMyOwnOrganization}
+        creatingOwnOrg={creatingOwnOrg}
+        onOpenCreate={() => setAtelierCreateOpen(true)}
+        commandPaletteOpen={commandPaletteOpen}
+        setCommandPaletteOpen={setCommandPaletteOpen}
+        paletteCommands={[{ id: "nav-atelier-documents", label: "Aller à Documents", icon: Files, action: () => setView("atelier-documents") }, ...paletteCommands]}
+      >
+        {page}
+        <AtelierCreateSheet open={atelierCreateOpen} onClose={() => setAtelierCreateOpen(false)} visibleServices={visibleServices} onCreate={openNewService} darkMode={darkMode} />
+      </AtelierShell>
+    );
+  }
 
   if (view === "revision-sector") {
     const countryInfo = getRevisionCountryInfo(revisionCountry);
@@ -9227,6 +9441,443 @@ function PlanningView({ documents, account, siteSettings, darkMode, isLocked, is
   );
 }
 
+// ===========================================================================
+// Version "Atelier" — coque de navigation, panneau « Créer », pages
+// propres. Tout est additif : rien des versions classique et avancée
+// n'est réutilisé autrement que par composition (pages et éditeurs
+// partagés rendus tels quels dans la coque).
+// ===========================================================================
+
+// Les 15 services regroupés par famille, dans l'ordre du panneau « Créer ».
+const ATELIER_FAMILIES = [
+  { id: "vendre", label: "Vendre", hint: "Avant les travaux", services: ["devis", "contrat", "proforma", "bpu"] },
+  { id: "facturer", label: "Facturer", hint: "Pendant et après", services: ["facture", "acompte", "situation", "avoir", "relance"] },
+  { id: "chantier", label: "Suivre le chantier", hint: "Sur place", services: ["planning", "rapport", "pv_reception"] },
+  { id: "acheter", label: "Acheter et recevoir", hint: "Fournisseurs", services: ["commande", "livraison"] },
+  { id: "marches", label: "Marchés longs", hint: "Indices officiels", services: ["revision"] },
+];
+const ATELIER_TABS = [
+  { id: "dashboard", label: "Accueil", icon: Home },
+  { id: "atelier-documents", label: "Documents", icon: Files },
+  { id: "chantiers", label: "Chantiers", icon: HardHat },
+  { id: "clients", label: "Clients", icon: Users },
+];
+// Vue « active » dans la barre pour les écrans secondaires.
+function atelierTabFor(view) {
+  if (view === "planning-equipe" || view === "atelier-chantier") return "chantiers";
+  if (view === "revision-sector") return "dashboard";
+  return view;
+}
+function atelierServiceLabel(type) {
+  return getService(type)?.label || docTypeLabel(type);
+}
+
+// Panneau « Créer » : les 15 services par famille, recherche, respect
+// du réglage admin « services visibles ». Fenêtre centrée sur grand
+// écran, plein écran sur téléphone.
+function AtelierCreateSheet({ open, onClose, visibleServices, onCreate, darkMode }) {
+  const tone = atelierTone(darkMode);
+  const [query, setQuery] = useState("");
+  const inputRef = useRef(null);
+  useEscapeToClose(open, onClose);
+  useEffect(() => {
+    if (open) { setQuery(""); setTimeout(() => inputRef.current?.focus(), 30); }
+  }, [open]);
+  if (!open) return null;
+  const q = query.trim().toLowerCase();
+  const matches = (s) => !q || s.label.toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q);
+  const families = ATELIER_FAMILIES.map((f) => ({
+    ...f,
+    items: f.services.map((id) => getService(id)).filter((s) => s && s.implemented && visibleServices.includes(s.id) && matches(s)),
+  })).filter((f) => f.items.length);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center md:p-6" style={{ background: "rgba(28,39,51,0.55)" }} onClick={onClose}>
+      <div
+        className="flex h-full w-full flex-col overflow-hidden md:h-auto md:max-h-[85vh] md:max-w-3xl md:rounded-2xl"
+        style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}` }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Créer un document"
+      >
+        <div className="flex items-center justify-between gap-3 border-b px-4 py-3 md:px-6" style={{ borderColor: tone.line }}>
+          <div>
+            <h2 className="df-display text-lg font-semibold">Créer un document</h2>
+            <p className="text-xs" style={{ color: tone.inkSoft }}>Choisis le document dont tu as besoin — tu pourras tout modifier ensuite.</p>
+          </div>
+          <button onClick={onClose} className="df-at-tap flex h-11 w-11 shrink-0 items-center justify-center rounded-lg" style={{ color: tone.inkSoft }} title="Fermer (Échap)"><X size={20} /></button>
+        </div>
+        <div className="border-b px-4 py-3 md:px-6" style={{ borderColor: tone.line }}>
+          <div className="flex items-center gap-2 rounded-lg px-3" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>
+            <Search size={16} style={{ color: tone.inkSoft }} />
+            <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un document (ex. facture, PV, rapport…)" className="df-at-tap w-full bg-transparent py-2 text-[15px] outline-none" style={{ color: tone.ink }} />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6">
+          {families.length === 0 && <p className="py-10 text-center text-sm" style={{ color: tone.inkSoft }}>Aucun document ne correspond à « {query} ».</p>}
+          {families.map((f) => (
+            <div key={f.id} className="mb-5">
+              <div className="mb-2 flex items-baseline gap-2">
+                <h3 className="df-display text-sm font-semibold uppercase tracking-wide" style={{ color: tone.accent }}>{f.label}</h3>
+                <span className="text-xs" style={{ color: tone.inkSoft }}>{f.hint}</span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {f.items.map((s) => {
+                  const SIcon = s.icon;
+                  return (
+                    <button key={s.id} onClick={() => { onClose(); onCreate(s.id); }} className="df-at-tap flex items-center gap-3 rounded-xl px-3 py-3 text-left" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg" style={{ background: tone.accentSoft, color: tone.accent }}><SIcon size={19} /></span>
+                      <span className="min-w-0">
+                        <span className="block text-[15px] font-semibold">{s.label}</span>
+                        <span className="block truncate text-xs" style={{ color: tone.inkSoft }}>{s.description}</span>
+                      </span>
+                      <ChevronRight size={16} className="ml-auto shrink-0" style={{ color: tone.inkSoft }} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Coque Atelier : barre haute (ordinateur et tablette) ou barre
+// d'onglets en bas (téléphone), bouton « Créer » toujours visible,
+// menu « Plus » pour le reste. Aucune barre latérale fixe.
+function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkMode, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, onOpenCreate, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, children }) {
+  const tone = atelierTone(darkMode);
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEscapeToClose(moreOpen, () => setMoreOpen(false));
+  useEffect(() => { setMoreOpen(false); }, [view]);
+  const activeTab = atelierTabFor(view);
+  const memberships = account?.memberships || [];
+  const hasOwnOrg = memberships.some((m) => m.role === "owner");
+  const firstName = account?.firstName || "";
+  const initials = ((account?.firstName || "")[0] || "") + ((account?.lastName || "")[0] || "") || (account?.email || "?")[0].toUpperCase();
+  const moreItems = [
+    { id: "company", label: "Mon entreprise", icon: Building2 },
+    { id: "team", label: "Équipe", icon: UserPlus },
+    { id: "prestations", label: "Bibliothèque de prestations", icon: Library, locked: !hasAccess(account, "pro") },
+    { id: "planning-equipe", label: "Planning d'équipe", icon: Calendar },
+    { id: "pricing", label: "Abonnement", icon: CreditCard },
+    { id: "account", label: "Mon compte", icon: UserCircle },
+    ...(account?.plan === "entreprise" && account?.role === "owner" ? [{ id: "api", label: "API", icon: KeyRound }] : []),
+    ...(account?.isAdmin ? [{ id: "admin", label: "Admin", icon: Shield }] : []),
+    { id: "contact", label: "Nous contacter", icon: Mail },
+  ];
+  const showDesktopApp = !window.chantiflowDesktop && siteSettings?.desktopAppEnabled && (siteSettings?.desktopAppUrlWindows || siteSettings?.desktopAppUrlMac);
+  const tabStyle = (active) => (active ? { background: tone.accentSoft, color: tone.accent } : { color: tone.inkSoft });
+
+  const logo = (
+    <button onClick={() => setView("dashboard")} className="flex items-center gap-2" title="Accueil">
+      {siteSettings?.logo ? (
+        <img src={siteSettings.logo} alt="" style={{ width: siteSettings.logoWidth || 36, height: siteSettings.logoHeight || 36, objectFit: "contain" }} />
+      ) : (
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ background: tone.accent }}><HardHat size={18} /></span>
+      )}
+      <span className="df-display text-base font-bold" style={{ color: tone.ink }}>{siteSettings?.name || "Chantiflow"}</span>
+    </button>
+  );
+
+  const moreMenu = moreOpen && (
+    <>
+      <div className="fixed inset-0 z-40 md:bg-transparent" style={{ background: "rgba(28,39,51,0.35)" }} onClick={() => setMoreOpen(false)} />
+      <div className="fixed inset-x-0 bottom-0 top-0 z-50 flex flex-col overflow-hidden md:absolute md:inset-auto md:right-0 md:top-full md:mt-2 md:w-80 md:rounded-xl md:shadow-xl" style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}` }}>
+        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: tone.line }}>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold">{account?.organizationName || siteSettings?.name || "Mon espace"}</div>
+            <div className="truncate text-xs" style={{ color: tone.inkSoft }}>{account?.email} · {ROLE_LABELS[account?.role] || account?.role}</div>
+          </div>
+          <button onClick={() => setMoreOpen(false)} className="df-at-tap flex h-11 w-11 items-center justify-center rounded-lg md:hidden" style={{ color: tone.inkSoft }}><X size={20} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto py-2">
+          {(memberships.length > 1 || !hasOwnOrg) && (
+            <div className="border-b px-2 pb-2" style={{ borderColor: tone.line }}>
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: tone.inkSoft }}>Organisations</div>
+              {memberships.map((m) => (
+                <button key={m.organizationId} onClick={() => { setMoreOpen(false); onSwitchOrganization(m.organizationId); }} className="df-at-tap flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-sm" style={{ background: m.organizationId === account?.organizationId ? tone.accentSoft : "transparent", color: m.organizationId === account?.organizationId ? tone.accent : tone.ink }}>
+                  <span className="truncate">{m.name || "Organisation"}</span>
+                  <span className="shrink-0 text-xs" style={{ color: tone.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
+                </button>
+              ))}
+              {!hasOwnOrg && (
+                <button onClick={() => { setMoreOpen(false); onCreateOwnOrg(); }} disabled={creatingOwnOrg} className="df-at-tap flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm font-medium" style={{ color: tone.accent }}>
+                  {creatingOwnOrg ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
+                </button>
+              )}
+            </div>
+          )}
+          <div className="px-2 py-1">
+            {moreItems.map(({ id, label, icon: Icon, locked }) => (
+              <button key={id} onClick={() => { setMoreOpen(false); setView(id); }} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={view === id ? tabStyle(true) : { color: tone.ink }}>
+                <Icon size={18} style={{ color: view === id ? tone.accent : tone.inkSoft }} />
+                <span className="flex-1">{label}</span>
+                {locked && <Lock size={14} style={{ color: tone.inkSoft }} />}
+              </button>
+            ))}
+          </div>
+          {showDesktopApp && (
+            <div className="border-t px-2 py-2" style={{ borderColor: tone.line }}>
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: tone.inkSoft }}>Logiciel de bureau</div>
+              {siteSettings.desktopAppUrlWindows && <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setMoreOpen(false)} className="df-at-tap flex items-center gap-3 rounded-lg px-2 py-2 text-[15px]" style={{ color: tone.ink }}><Monitor size={18} style={{ color: tone.inkSoft }} /> Télécharger pour Windows</a>}
+              {siteSettings.desktopAppUrlMac && <a href={siteSettings.desktopAppUrlMac} download onClick={() => setMoreOpen(false)} className="df-at-tap flex items-center gap-3 rounded-lg px-2 py-2 text-[15px]" style={{ color: tone.ink }}><Monitor size={18} style={{ color: tone.inkSoft }} /> Télécharger pour Mac</a>}
+            </div>
+          )}
+        </div>
+        <div className="border-t px-2 py-2" style={{ borderColor: tone.line }}>
+          <button onClick={() => setDarkMode((v) => !v)} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={{ color: tone.ink }}>
+            {darkMode ? <Sun size={18} style={{ color: tone.inkSoft }} /> : <Moon size={18} style={{ color: tone.inkSoft }} />} {darkMode ? "Passer en mode clair" : "Passer en mode sombre"}
+          </button>
+          <button onClick={() => { setMoreOpen(false); onLogout(); }} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={{ color: tone.danger }}>
+            <LogOut size={18} /> Se déconnecter
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="df-root df-at-bottom-pad min-h-full w-full" style={{ backgroundColor: tone.paper, color: tone.ink }}>
+      <GlobalStyle />
+      {/* Barre haute — ordinateur et tablette */}
+      <header className="no-print sticky top-0 z-30 hidden items-center gap-3 border-b px-4 py-2 md:flex lg:px-6" style={{ background: tone.surface, borderColor: tone.line }}>
+        {logo}
+        <nav className="ml-2 flex items-center gap-1">
+          {ATELIER_TABS.map(({ id, label, icon: Icon }) => (
+            <button key={id} onClick={() => setView(id)} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium" style={tabStyle(activeTab === id)}>
+              <Icon size={18} /> <span className="hidden lg:inline">{label}</span><span className="lg:hidden">{label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setCommandPaletteOpen(true)} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-sm" style={{ color: tone.inkSoft, border: `1px solid ${tone.line}` }} title="Rechercher ou aller quelque part (Ctrl+K)">
+            <Search size={16} /> <span className="hidden lg:inline">Rechercher</span> <kbd className="hidden rounded px-1 text-[11px] lg:inline" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>Ctrl K</kbd>
+          </button>
+          <button onClick={onOpenCreate} className="df-at-tap flex items-center gap-2 rounded-lg px-4 py-2 text-[15px] font-bold" style={{ background: tone.action, color: "#1C2733" }}>
+            <Plus size={18} /> Créer
+          </button>
+          <div className="relative">
+            <button onClick={() => setMoreOpen((v) => !v)} className="df-at-tap flex items-center gap-2 rounded-lg px-2 py-1.5" style={{ color: tone.ink, border: `1px solid ${moreOpen ? tone.accent : tone.line}` }} title="Menu">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: tone.accent }}>{initials}</span>
+              <span className="hidden max-w-[120px] truncate text-sm lg:inline">{firstName || "Menu"}</span>
+              <ChevronDown size={14} style={{ color: tone.inkSoft }} />
+            </button>
+            {moreMenu}
+          </div>
+        </div>
+      </header>
+
+      {/* Barre haute compacte — téléphone */}
+      <header className="no-print sticky top-0 z-30 flex items-center justify-between border-b px-4 py-2 md:hidden" style={{ background: tone.surface, borderColor: tone.line }}>
+        {logo}
+        <div className="relative">
+          <button onClick={() => setMoreOpen((v) => !v)} className="df-at-tap flex h-11 w-11 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: tone.accent }} title="Menu">{initials}</button>
+          {moreMenu}
+        </div>
+      </header>
+
+      {children}
+
+      {/* Barre d'onglets en bas — téléphone */}
+      <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t md:hidden" style={{ background: tone.surface, borderColor: tone.line, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        {ATELIER_TABS.slice(0, 2).map(({ id, label, icon: Icon }) => (
+          <button key={id} onClick={() => setView(id)} className="flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium" style={{ color: activeTab === id ? tone.accent : tone.inkSoft, minHeight: 56 }}>
+            <Icon size={22} /> {label}
+          </button>
+        ))}
+        <button onClick={onOpenCreate} className="flex flex-col items-center justify-center gap-0.5 py-1 text-[11px] font-bold" style={{ color: tone.ink, minHeight: 56 }} title="Créer un document">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full" style={{ background: tone.action, color: "#1C2733", boxShadow: "0 2px 8px rgba(232,112,42,0.45)" }}><Plus size={24} /></span>
+          Créer
+        </button>
+        {ATELIER_TABS.slice(2).map(({ id, label, icon: Icon }) => (
+          <button key={id} onClick={() => setView(id)} className="flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium" style={{ color: activeTab === id ? tone.accent : tone.inkSoft, minHeight: 56 }}>
+            <Icon size={22} /> {label}
+          </button>
+        ))}
+      </nav>
+
+      <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} commands={paletteCommands} />
+    </div>
+  );
+}
+
+// Accueil Atelier (première livraison : salutation, bandeaux, création
+// rapide, derniers documents — les indicateurs arrivent ensuite).
+function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, onCreate, onOpenCreate, onOpenDoc, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
+  const tone = atelierTone(darkMode);
+  const firstName = account?.firstName || "";
+  const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const quick = ["devis", "facture", "rapport", "situation"].map((id) => getService(id)).filter((s) => s && visibleServices.includes(s.id));
+  const recent = [...documents].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 5);
+  const card = { background: tone.surface, border: `1px solid ${tone.line}` };
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mb-6">
+        <h1 className="df-display text-2xl font-bold sm:text-3xl">Bonjour{firstName ? ` ${firstName}` : ""}</h1>
+        <p className="text-sm capitalize" style={{ color: tone.inkSoft }}>{today}</p>
+      </div>
+
+      {isViewer && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: tone.accentSoft, color: tone.accent }}>
+          <Eye size={16} className="mt-0.5 shrink-0" /> <span>Accès en lecture seule : tu peux consulter les documents de {account?.organizationName || "cette équipe"}, pas les modifier.</span>
+        </div>
+      )}
+      {offlineMode && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${tone.danger}14`, color: tone.danger }}>
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" /> <span>Mode hors ligne : tu vois la dernière copie enregistrée. Impossible de modifier tant que la connexion n'est pas revenue.</span>
+        </div>
+      )}
+      {(account?.plan || "gratuit") === "gratuit" && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ ...card, borderColor: freeLimitReached ? tone.danger : tone.line }}>
+          <span className="flex items-center gap-2 text-sm" style={{ color: freeLimitReached ? tone.danger : tone.inkSoft }}>
+            {freeLimitReached && <Lock size={15} />}
+            Forfait Gratuit : <strong className="df-mono">{documents.length}/{freeLimit}</strong> documents utilisés{freeLimitReached && ", compte verrouillé jusqu'au passage à un forfait payant"}
+          </span>
+          <button onClick={onGoToPricing} className="df-at-tap rounded-lg px-3 py-2 text-sm font-semibold" style={freeLimitReached ? { background: tone.danger, color: "white" } : { color: tone.accent, border: `1px solid ${tone.line}` }}>Voir les forfaits</button>
+        </div>
+      )}
+      {autoFactureNotice && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3" style={{ background: `${tone.success}14`, border: `1px solid ${tone.success}55` }}>
+          <span className="flex items-center gap-2 text-sm font-medium" style={{ color: tone.success }}><Check size={16} /> Devis signé : la facture {autoFactureNotice.docNumber} a été créée automatiquement.</span>
+          <span className="flex items-center gap-3">
+            <button onClick={onOpenAutoFacture} className="text-sm font-semibold underline" style={{ color: tone.success }}>Ouvrir</button>
+            <button onClick={onDismissAutoFacture} style={{ color: tone.inkSoft }}><X size={16} /></button>
+          </span>
+        </div>
+      )}
+      <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
+
+      <section className="mb-8">
+        <h2 className="df-display mb-3 text-base font-semibold">Créer un document</h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {quick.map((s) => {
+            const SIcon = s.icon;
+            return (
+              <button key={s.id} onClick={() => onCreate(s.id)} disabled={isLocked} className="df-at-tap flex flex-col items-start gap-2 rounded-xl p-4 text-left" style={{ ...card, opacity: isLocked ? 0.5 : 1 }}>
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg" style={{ background: tone.accentSoft, color: tone.accent }}><SIcon size={20} /></span>
+                <span className="text-[15px] font-semibold">{s.label}</span>
+              </button>
+            );
+          })}
+          <button onClick={onOpenCreate} disabled={isLocked} className="df-at-tap flex flex-col items-start gap-2 rounded-xl p-4 text-left" style={{ background: tone.action, color: "#1C2733", opacity: isLocked ? 0.5 : 1 }}>
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg" style={{ background: "rgba(255,255,255,0.35)" }}><Plus size={22} /></span>
+            <span className="text-[15px] font-bold">Tous les services</span>
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="df-display text-base font-semibold">Derniers documents</h2>
+          <button onClick={onGoToDocuments} className="text-sm font-semibold" style={{ color: tone.accent }}>Voir tous les documents</button>
+        </div>
+        {recent.length === 0 ? (
+          <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
+            <p className="text-[15px] font-semibold">Aucun document pour l'instant</p>
+            <p className="mt-1 text-sm" style={{ color: tone.inkSoft }}>Commence par un devis : appuie sur « Créer », puis choisis « Devis ».</p>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-xl" style={card}>
+            {recent.map((d, i) => (
+              <button key={d.id} onClick={() => onOpenDoc(d.id)} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(d.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{d.docNumber}</span></span>
+                  <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>{d.client?.name || "Sans client"}{d.chantier ? ` · ${d.chantier}` : ""}</span>
+                </span>
+                <span className="shrink-0 text-xs" style={{ color: tone.inkSoft }}>{fr(d.updatedAt || d.createdAt || Date.now())}</span>
+                <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// Page Documents Atelier (première livraison : recherche et liste
+// complète, tous types — filtres et statuts par famille à l'étape suivante).
+function AtelierDocumentsView({ documents, darkMode, onOpenDoc }) {
+  const tone = atelierTone(darkMode);
+  const [search, setSearch] = useState("");
+  const list = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    return [...documents]
+      .filter((d) => !s || (d.docNumber || "").toLowerCase().includes(s) || (d.client?.name || "").toLowerCase().includes(s) || (d.chantier || "").toLowerCase().includes(s))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }, [documents, search]);
+  const card = { background: tone.surface, border: `1px solid ${tone.line}` };
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="df-display text-2xl font-bold">Documents</h1>
+          <p className="text-sm" style={{ color: tone.inkSoft }}>{documents.length} document{documents.length > 1 ? "s" : ""} au total</p>
+        </div>
+      </div>
+      <div className="mb-4 flex items-center gap-2 rounded-lg px-3" style={card}>
+        <Search size={16} style={{ color: tone.inkSoft }} />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher par numéro, client ou chantier" className="df-at-tap w-full bg-transparent py-2 text-[15px] outline-none" style={{ color: tone.ink }} />
+      </div>
+      {list.length === 0 ? (
+        <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
+          <p className="text-[15px] font-semibold">Aucun document{search ? " ne correspond à ta recherche" : ""}</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl" style={card}>
+          {list.map((d, i) => (
+            <button key={d.id} onClick={() => onOpenDoc(d.id)} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(d.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{d.docNumber}</span></span>
+                <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>{d.client?.name || "Sans client"}{d.chantier ? ` · ${d.chantier}` : ""}</span>
+              </span>
+              <span className="hidden shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline" style={{ background: tone.paper, color: tone.inkSoft }}>{d.workStage === "termine" ? "Terminé" : d.status || "brouillon"}</span>
+              <span className="shrink-0 text-xs" style={{ color: tone.inkSoft }}>{fr(d.updatedAt || d.createdAt || Date.now())}</span>
+              <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Choix du pays et du secteur pour une nouvelle révision de prix
+// (équivalent Atelier de l'écran existant, même logique).
+function AtelierRevisionSectorPicker({ revisionCountry, setRevisionCountry, onPick, onBack, darkMode }) {
+  const tone = atelierTone(darkMode);
+  const countryInfo = getRevisionCountryInfo(revisionCountry);
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+      <button onClick={onBack} className="df-at-tap mb-3 flex items-center gap-1 text-sm font-medium" style={{ color: tone.inkSoft }}><ArrowLeft size={16} /> Retour</button>
+      <h1 className="df-display mb-1 text-2xl font-bold">Nouvelle révision de prix</h1>
+      <p className="mb-6 text-sm" style={{ color: tone.inkSoft }}>Choisis le pays, puis le secteur concerné.</p>
+      <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: tone.inkSoft }}>Pays</label>
+      <div className="mb-2 max-w-sm">
+        <CountrySelect value={revisionCountry} onChange={setRevisionCountry} options={COUNTRIES.filter((c) => c !== "Autre")} allowOther showEmpty={false} />
+      </div>
+      <div className="mb-6 flex items-start gap-2 rounded-lg p-3 text-sm" style={{ background: tone.surface, border: `1px solid ${tone.line}`, color: tone.inkSoft }}>
+        <Info size={15} className="mt-0.5 shrink-0" />
+        {countryInfo.currency ? (
+          <span>Devise suggérée : <strong>{countryInfo.currency}</strong>. Indice de référence usuel : <strong>{countryInfo.indexHint}</strong>, publié par {countryInfo.authority}. À vérifier avec ton contrat.</span>
+        ) : (
+          <span>Pas de repère spécifique enregistré pour ce pays : renseigne toi-même le nom et les valeurs de l'indice applicable (contrat, ou {countryInfo.authority}). La formule de calcul reste la même.</span>
+        )}
+      </div>
+      <label className="mb-2 block text-xs font-semibold uppercase tracking-widest" style={{ color: tone.inkSoft }}>Secteur</label>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {REVISION_SECTORS.map((sector) => (
+          <button key={sector} onClick={() => onPick(sector, revisionCountry)} className="df-at-tap flex items-center justify-between gap-2 rounded-xl px-4 py-3 text-left text-[15px] font-medium" style={{ background: tone.surface, border: `1px solid ${tone.line}` }}>
+            {sector} <ChevronRight size={16} style={{ color: tone.inkSoft }} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ChantiersView({ documents, siteSettings, darkMode, onOpenDoc }) {
   const [openChantier, setOpenChantier] = useState(null);
   const chantiers = useMemo(() => {
@@ -10870,7 +11521,7 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
 
       {tab === "apparence" && (
         <div className="space-y-3">
-          <CollapsibleSection title="Page d'accueil" subtitle={siteSettings.landingPageVersion === "avancee" ? "Version avancée" : "Version classique"} icon={LayoutDashboard} defaultOpen>
+          <CollapsibleSection title="Page d'accueil" subtitle={siteSettings.landingPageVersion === "atelier" ? "Version Atelier" : siteSettings.landingPageVersion === "avancee" ? "Version avancée" : "Version classique"} icon={LayoutDashboard} defaultOpen>
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
               Choisis la page vue par les visiteurs qui ne sont pas encore connectés — les deux restent disponibles, tu peux revenir en arrière à tout moment sans rien perdre.
             </p>
@@ -10878,9 +11529,9 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
               <button
                 onClick={() => onUpdateSiteSettings({ landingPageVersion: "classique" })}
                 className="rounded-xl p-4 text-left"
-                style={{ border: `2px solid ${siteSettings.landingPageVersion !== "avancee" ? colors.brass : colors.line}`, background: colors.surface }}
+                style={{ border: `2px solid ${siteSettings.landingPageVersion !== "avancee" && siteSettings.landingPageVersion !== "atelier" ? colors.brass : colors.line}`, background: colors.surface }}
               >
-                <div className="flex items-center gap-2 text-sm font-semibold">Classique {siteSettings.landingPageVersion !== "avancee" && <Check size={14} style={{ color: colors.brass }} />}</div>
+                <div className="flex items-center gap-2 text-sm font-semibold">Classique {siteSettings.landingPageVersion !== "avancee" && siteSettings.landingPageVersion !== "atelier" && <Check size={14} style={{ color: colors.brass }} />}</div>
                 <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>La page d'origine du site, simple et directe.</p>
               </button>
               <button
@@ -10890,6 +11541,14 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
               >
                 <div className="flex items-center gap-2 text-sm font-semibold">Avancée {siteSettings.landingPageVersion === "avancee" && <Check size={14} style={{ color: colors.brass }} />}</div>
                 <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Mise en page plus travaillée — aperçu produit, section fonctionnalités détaillée.</p>
+              </button>
+              <button
+                onClick={() => onUpdateSiteSettings({ landingPageVersion: "atelier" })}
+                className="rounded-xl p-4 text-left"
+                style={{ border: `2px solid ${siteSettings.landingPageVersion === "atelier" ? colors.brass : colors.line}`, background: colors.surface }}
+              >
+                <div className="flex items-center gap-2 text-sm font-semibold">Atelier {siteSettings.landingPageVersion === "atelier" && <Check size={14} style={{ color: colors.brass }} />}</div>
+                <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Interface repensée pour tous : 4 rubriques, bouton « Créer » toujours visible, palette fixe bleu de travail. Pages chantier regroupées.</p>
               </button>
             </div>
           </CollapsibleSection>
