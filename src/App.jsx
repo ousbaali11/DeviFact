@@ -2376,6 +2376,8 @@ function DeviFactAppInner() {
     document.body.classList.toggle("df-atelier", isAtelier);
   }, [isAtelier]);
   const [atelierCreateOpen, setAtelierCreateOpen] = useState(false);
+  // Filtre pré-appliqué à la page Documents Atelier (carte « À faire »).
+  const [atelierDocsPreset, setAtelierDocsPreset] = useState(null);
 
   const [plans, setPlans] = useState(PLANS);
 
@@ -3926,7 +3928,28 @@ function DeviFactAppInner() {
     const goPricing = () => setView("pricing");
     let page;
     if (view === "atelier-documents") {
-      page = <AtelierDocumentsView documents={documents} darkMode={darkMode} onOpenDoc={openDoc} />;
+      page = (
+        <AtelierDocumentsView
+          documents={documents}
+          darkMode={darkMode}
+          isLocked={isLocked}
+          isViewer={isViewer}
+          preset={atelierDocsPreset}
+          onPresetConsumed={() => setAtelierDocsPreset(null)}
+          onOpenDoc={openDoc}
+          onChangeStatus={(id, status) => updateDoc(id, { status })}
+          onDuplicate={duplicateDoc}
+          onDelete={deleteDoc}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
+          onClearSelection={() => setSelectedIds([])}
+          onMerge={mergeDocuments}
+          onBatchExcel={exportBatchExcel}
+          onBatchPdf={exportBatchPdf}
+          batchExporting={batchExporting}
+          onExportAccounting={exportAccountingCSV}
+        />
+      );
     } else if (view === "revision-sector") {
       page = <AtelierRevisionSectorPicker revisionCountry={revisionCountry} setRevisionCountry={setRevisionCountry} onPick={openNewRevision} onBack={backToDashboard} darkMode={darkMode} />;
     } else if (view === "chantiers") {
@@ -4010,10 +4033,12 @@ function DeviFactAppInner() {
           freeLimitReached={freeLimitReached}
           offlineMode={offlineMode}
           visibleServices={visibleServices}
+          reminders={reminders}
+          reminderMailto={reminderMailto}
           onCreate={openNewService}
           onOpenCreate={() => setAtelierCreateOpen(true)}
           onOpenDoc={openDoc}
-          onGoToDocuments={() => setView("atelier-documents")}
+          onGoToDocuments={(preset) => { setAtelierDocsPreset(preset || null); setView("atelier-documents"); }}
           onGoToPricing={goPricing}
           autoFactureNotice={autoFactureNotice}
           onOpenAutoFacture={() => { openDoc(autoFactureNotice.id); setAutoFactureNotice(null); }}
@@ -4043,6 +4068,21 @@ function DeviFactAppInner() {
       >
         {page}
         <AtelierCreateSheet open={atelierCreateOpen} onClose={() => setAtelierCreateOpen(false)} visibleServices={visibleServices} onCreate={openNewService} darkMode={darkMode} />
+        {/* Hôte hors écran pour l'export PDF groupé (même mécanisme que
+            le tableau de bord classique, rendu ici pour Atelier). */}
+        <div style={{ position: "fixed", top: 0, left: "-9999px", zIndex: -1 }}>
+          {batchExportDoc && (() => {
+            const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
+            if (batchExportDoc.type === "revision") return <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          })()}
+        </div>
       </AtelierShell>
     );
   }
@@ -9703,15 +9743,89 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   );
 }
 
-// Accueil Atelier (première livraison : salutation, bandeaux, création
-// rapide, derniers documents — les indicateurs arrivent ensuite).
-function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, onCreate, onOpenCreate, onOpenDoc, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
+// --- Règles propres à Atelier : famille, cycle de statut, montant et
+// badge métier de chaque type. Corrige, uniquement ici, les incohérences
+// des listes partagées (statuts de facture appliqués à tout, 0,00 € sur
+// les documents sans prix) sans inventer de nouvelles valeurs en base.
+function atelierFamilyOf(type) {
+  return ATELIER_FAMILIES.find((f) => f.services.includes(type))?.id || "autres";
+}
+// Liste de statuts de vente, ou null quand le type n'a pas de cycle de
+// vente (on affiche alors l'étape brouillon / terminé et le badge métier).
+function atelierStatusesFor(type) {
+  if (type === "devis") return DEVIS_STATUSES;
+  if (type === "proforma") return PROFORMA_STATUSES;
+  if (type === "facture" || type === "acompte" || type === "avoir" || type === "situation") return FACTURE_STATUSES;
+  return null;
+}
+function atelierStatusColor(status, tone) {
+  if (["signé", "payée", "acceptée"].includes(status)) return tone.success;
+  if (["refusé", "expiré", "expirée", "en retard"].includes(status)) return tone.danger;
+  if (["envoyé", "envoyée", "vu"].includes(status)) return tone.warning;
+  return tone.inkSoft;
+}
+function atelierCapitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
+// Montant affiché dans la liste : { value, note } ou null (pas de montant
+// pour un PV, un rapport, un planning, ou un document sans ligne).
+function atelierDocAmount(d) {
+  if (d.type === "pv_reception" || d.type === "rapport" || d.type === "planning") return null;
+  if (d.type === "situation") { const s = computeSituation(d); return { value: s.netAPayer, note: "net" }; }
+  if (d.type === "contrat") { const ht = Number(d.montantTotalHT) || 0; return ht ? { value: ht, note: "HT" } : null; }
+  if (d.type === "relance") { const v = Number(d.montantDu) || 0; return v ? { value: v, note: "dû" } : null; }
+  if (d.type === "revision") { const r = computeRevision(d); return r.valid ? { value: r.montantRevise, note: "révisé" } : null; }
+  const hasLines = (d.items || []).some((it) => it.type === "line" && (it.designation || "").trim());
+  if (!hasLines) return null;
+  return { value: computeTotals(d).totalTTC, note: "TTC" };
+}
+// Badge métier propre au type (état déjà saisi dans l'éditeur).
+function atelierDocBadge(d) {
+  if (d.type === "livraison") return d.etatLivraison === "reserves" ? "Livré avec réserves" : d.etatLivraison === "incomplete" ? "Livraison incomplète" : "Conforme";
+  if (d.type === "rapport") return STATUTS_RESOLUTION[d.statutResolution]?.label || null;
+  if (d.type === "pv_reception") return PV_TYPES[d.typeReception]?.label || null;
+  return null;
+}
+function atelierDocDate(d) {
+  const raw = d.issueDate || d.updatedAt || d.createdAt;
+  const date = new Date(raw);
+  return isNaN(date.getTime()) ? "" : fr(date);
+}
+
+// Accueil Atelier : ce qu'il y a à faire, créer, reprendre, puis le
+// chiffre d'affaires. Chaque carte « À faire » ouvre la page Documents
+// déjà filtrée.
+function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, reminders, reminderMailto, onCreate, onOpenCreate, onOpenDoc, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
   const tone = atelierTone(darkMode);
   const firstName = account?.firstName || "";
   const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const quick = ["devis", "facture", "rapport", "situation"].map((id) => getService(id)).filter((s) => s && visibleServices.includes(s.id));
   const recent = [...documents].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 5);
   const card = { background: tone.surface, border: `1px solid ${tone.line}` };
+  const hasPro = hasAccess(account, "pro");
+
+  const todo = useMemo(() => {
+    const devisAttente = documents.filter((d) => d.type === "devis" && ["envoyé", "vu"].includes(d.status));
+    const facturesEnvoyees = documents.filter((d) => d.type === "facture" && d.status === "envoyée");
+    const facturesRetard = documents.filter((d) => d.type === "facture" && d.status === "en retard");
+    const enCours = documents.filter((d) => d.workStage !== "termine" && (d.status === "brouillon" || !d.status));
+    const sum = (list) => list.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
+    const devisTraites = documents.filter((d) => d.type === "devis" && d.status !== "brouillon");
+    const devisSignes = documents.filter((d) => d.type === "devis" && d.status === "signé");
+    return {
+      devisAttente: { count: devisAttente.length, amount: sum(devisAttente) },
+      aEncaisser: { count: facturesEnvoyees.length, amount: sum(facturesEnvoyees) },
+      enRetard: { count: facturesRetard.length, amount: sum(facturesRetard) },
+      enCours: { count: enCours.length },
+      tauxSignature: devisTraites.length ? Math.round((devisSignes.length / devisTraites.length) * 100) : null,
+    };
+  }, [documents]);
+
+  const todoCards = [
+    { id: "devis", icon: Inbox, label: "Devis en attente de réponse", count: todo.devisAttente.count, sub: eur(todo.devisAttente.amount), color: tone.warning, preset: { type: "devis", status: "attente" } },
+    { id: "encaisser", label: "Factures à encaisser", icon: Wallet, count: todo.aEncaisser.count, sub: eur(todo.aEncaisser.amount), color: tone.accent, preset: { type: "facture", status: "envoyée" } },
+    { id: "retard", label: "Factures en retard", icon: AlertTriangle, count: todo.enRetard.count, sub: eur(todo.enRetard.amount), color: tone.danger, preset: { type: "facture", status: "en retard" } },
+    { id: "encours", label: "Documents en cours", icon: Pencil, count: todo.enCours.count, sub: "brouillons à terminer", color: tone.inkSoft, preset: { stage: "encours" } },
+  ];
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-6">
@@ -9750,6 +9864,22 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
       <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
 
       <section className="mb-8">
+        <h2 className="df-display mb-3 text-base font-semibold">À faire</h2>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {todoCards.map(({ id, icon: Icon, label, count, sub, color, preset }) => (
+            <button key={id} onClick={() => onGoToDocuments(preset)} className="df-at-tap flex flex-col items-start gap-1 rounded-xl p-4 text-left" style={card}>
+              <span className="flex items-center gap-2 text-xs font-medium" style={{ color: tone.inkSoft }}><Icon size={14} style={{ color }} /> {label}</span>
+              <span className="df-display text-2xl font-bold" style={{ color: count ? color : tone.inkSoft }}>{count}</span>
+              <span className="df-mono text-xs" style={{ color: tone.inkSoft }}>{sub}</span>
+            </button>
+          ))}
+        </div>
+        {todo.tauxSignature !== null && (
+          <p className="mt-2 text-xs" style={{ color: tone.inkSoft }}>Taux de signature des devis envoyés : <strong className="df-mono" style={{ color: tone.ink }}>{todo.tauxSignature} %</strong></p>
+        )}
+      </section>
+
+      <section className="mb-8">
         <h2 className="df-display mb-3 text-base font-semibold">Créer un document</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {quick.map((s) => {
@@ -9768,10 +9898,10 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
         </div>
       </section>
 
-      <section>
+      <section className="mb-8">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="df-display text-base font-semibold">Derniers documents</h2>
-          <button onClick={onGoToDocuments} className="text-sm font-semibold" style={{ color: tone.accent }}>Voir tous les documents</button>
+          <button onClick={() => onGoToDocuments(null)} className="text-sm font-semibold" style={{ color: tone.accent }}>Voir tous les documents</button>
         </div>
         {recent.length === 0 ? (
           <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
@@ -9780,64 +9910,209 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl" style={card}>
-            {recent.map((d, i) => (
-              <button key={d.id} onClick={() => onOpenDoc(d.id)} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(d.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{d.docNumber}</span></span>
-                  <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>{d.client?.name || "Sans client"}{d.chantier ? ` · ${d.chantier}` : ""}</span>
-                </span>
-                <span className="shrink-0 text-xs" style={{ color: tone.inkSoft }}>{fr(d.updatedAt || d.createdAt || Date.now())}</span>
-                <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
-              </button>
-            ))}
+            {recent.map((d, i) => {
+              const amount = atelierDocAmount(d);
+              const statuses = atelierStatusesFor(d.type);
+              return (
+                <button key={d.id} onClick={() => onOpenDoc(d.id)} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(d.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{d.docNumber}</span></span>
+                    <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>{d.client?.name || "Sans client"}{d.chantier ? ` · ${d.chantier}` : ""}</span>
+                  </span>
+                  {statuses && <span className="hidden shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline" style={{ background: `${atelierStatusColor(d.status, tone)}1A`, color: atelierStatusColor(d.status, tone) }}>{atelierCapitalize(d.status || "brouillon")}</span>}
+                  {amount && <span className="df-mono hidden shrink-0 text-sm sm:inline">{eur(amount.value)}</span>}
+                  <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+                </button>
+              );
+            })}
           </div>
         )}
       </section>
+
+      <section className="mb-8">
+        <h2 className="df-display mb-3 text-base font-semibold">Relances à faire</h2>
+        {!hasPro ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3" style={{ ...card, borderStyle: "dashed" }}>
+            <span className="flex items-center gap-2 text-sm" style={{ color: tone.inkSoft }}><Lock size={15} /> Les relances automatiques (devis qui expirent, factures en retard) sont réservées aux forfaits Pro et Entreprise.</span>
+            <button onClick={onGoToPricing} className="df-at-tap rounded-lg px-3 py-2 text-sm font-semibold" style={{ color: tone.accent, border: `1px solid ${tone.line}` }}>Voir les forfaits</button>
+          </div>
+        ) : reminders.length === 0 ? (
+          <p className="rounded-xl px-4 py-3 text-sm" style={{ ...card, color: tone.inkSoft }}>Rien à relancer pour l'instant.</p>
+        ) : (
+          <div className="overflow-hidden rounded-xl" style={card}>
+            {reminders.slice(0, 6).map(({ doc, reason, urgent }, i) => (
+              <div key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
+                <button onClick={() => onOpenDoc(doc.id)} className="min-w-0 flex-1 text-left">
+                  <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(doc.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{doc.docNumber}</span> · {doc.client?.name || "Sans client"}</span>
+                  <span className="block text-sm" style={{ color: urgent ? tone.danger : tone.warning }}>{reason}</span>
+                </button>
+                <a href={reminderMailto({ doc })} className="df-at-tap flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: tone.accentSoft, color: tone.accent }}><Mail size={14} /> Relancer par email</a>
+              </div>
+            ))}
+            {reminders.length > 6 && <p className="px-4 py-2 text-xs" style={{ color: tone.inkSoft }}>+{reminders.length - 6} autre(s)</p>}
+          </div>
+        )}
+      </section>
+
+      <RevenueChart documents={documents} isAdvanced={false} darkMode={darkMode} />
     </div>
   );
 }
 
-// Page Documents Atelier (première livraison : recherche et liste
-// complète, tous types — filtres et statuts par famille à l'étape suivante).
-function AtelierDocumentsView({ documents, darkMode, onOpenDoc }) {
+// Page Documents Atelier : les 15 types, filtre par famille puis par
+// type, statuts adaptés, montants justes, sélection multiple avec les
+// actions groupées existantes.
+function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset, onPresetConsumed, onOpenDoc, onChangeStatus, onDuplicate, onDelete, selectedIds, onToggleSelect, onClearSelection, onMerge, onBatchExcel, onBatchPdf, batchExporting, onExportAccounting }) {
   const tone = atelierTone(darkMode);
   const [search, setSearch] = useState("");
+  const [family, setFamily] = useState("tous");
+  const [type, setType] = useState("tous");
+  const [status, setStatus] = useState("tous");
+  const [stage, setStage] = useState("tous");
+
+  // Préréglage venu de l'Accueil (carte « À faire »).
+  useEffect(() => {
+    if (!preset) return;
+    setSearch("");
+    if (preset.type) { setFamily(atelierFamilyOf(preset.type)); setType(preset.type); setStatus(preset.status || "tous"); setStage("tous"); }
+    else { setFamily("tous"); setType("tous"); setStatus("tous"); setStage(preset.stage || "tous"); }
+    onPresetConsumed();
+  }, [preset, onPresetConsumed]);
+
+  const statuses = type !== "tous" ? atelierStatusesFor(type) : null;
+  const typeOptions = family === "tous" ? ATELIER_FAMILIES : ATELIER_FAMILIES.filter((f) => f.id === family);
+
   const list = useMemo(() => {
     const s = search.trim().toLowerCase();
     return [...documents]
+      .filter((d) => family === "tous" || atelierFamilyOf(d.type) === family)
+      .filter((d) => type === "tous" || d.type === type)
+      .filter((d) => {
+        if (status === "tous" || !statuses) return true;
+        if (status === "attente") return ["envoyé", "vu", "envoyée"].includes(d.status);
+        return (d.status || "brouillon") === status;
+      })
+      .filter((d) => stage === "tous" || (stage === "termine" ? d.workStage === "termine" : d.workStage !== "termine"))
       .filter((d) => !s || (d.docNumber || "").toLowerCase().includes(s) || (d.client?.name || "").toLowerCase().includes(s) || (d.chantier || "").toLowerCase().includes(s))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }, [documents, search]);
+  }, [documents, family, type, status, stage, search, statuses]);
+
+  const selectedDocs = documents.filter((d) => selectedIds.includes(d.id));
+  const sameType = selectedDocs.length > 0 && selectedDocs.every((d) => d.type === selectedDocs[0].type);
+  const canMerge = selectedDocs.length >= 2 && sameType && !isLocked && (selectedDocs[0].type === "devis" || selectedDocs[0].type === "facture");
+  const canBatch = selectedDocs.length >= 2 && sameType;
   const card = { background: tone.surface, border: `1px solid ${tone.line}` };
+  const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
+  const canEdit = !isLocked && !isViewer;
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="df-display text-2xl font-bold">Documents</h1>
-          <p className="text-sm" style={{ color: tone.inkSoft }}>{documents.length} document{documents.length > 1 ? "s" : ""} au total</p>
+          <p className="text-sm" style={{ color: tone.inkSoft }}>{list.length} sur {documents.length} document{documents.length > 1 ? "s" : ""}</p>
         </div>
+        <button onClick={onExportAccounting} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold" style={{ color: tone.accent, border: `1px solid ${tone.line}`, background: tone.surface }} title="Toutes les pièces avec montants HT, TVA, TTC, pour ton comptable">
+          <Download size={16} /> Export comptable
+        </button>
       </div>
-      <div className="mb-4 flex items-center gap-2 rounded-lg px-3" style={card}>
+
+      <div className="mb-3 flex items-center gap-2 rounded-lg px-3" style={card}>
         <Search size={16} style={{ color: tone.inkSoft }} />
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher par numéro, client ou chantier" className="df-at-tap w-full bg-transparent py-2 text-[15px] outline-none" style={{ color: tone.ink }} />
+        {search && <button onClick={() => setSearch("")} style={{ color: tone.inkSoft }} title="Effacer"><X size={16} /></button>}
       </div>
+
+      <div className="mb-2 flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
+        {[{ id: "tous", label: "Tous" }, ...ATELIER_FAMILIES].map((f) => (
+          <button key={f.id} onClick={() => { setFamily(f.id); setType("tous"); setStatus("tous"); }} className="df-at-tap shrink-0 rounded-full px-4 py-2 text-sm font-medium" style={chip(family === f.id)}>{f.label}</button>
+        ))}
+      </div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <select value={type} onChange={(e) => { setType(e.target.value); setStatus("tous"); }} className="df-select df-at-tap rounded-lg px-3 py-2 text-sm" style={{ ...card, color: tone.ink }}>
+          <option value="tous">Tous les types</option>
+          {typeOptions.map((f) => (
+            <optgroup key={f.id} label={f.label}>
+              {f.services.map((id) => <option key={id} value={id}>{atelierServiceLabel(id)}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {statuses ? (
+          <div className="flex gap-2 overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" }}>
+            {[["tous", "Tous statuts"], ...statuses.map((s) => [s, atelierCapitalize(s)])].map(([id, label]) => (
+              <button key={id} onClick={() => setStatus(id)} className="df-at-tap shrink-0 rounded-full px-3 py-2 text-xs font-medium" style={chip(status === id || (status === "attente" && (id === "envoyé" || id === "envoyée")))}>{label}</button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            {[["tous", "Tout"], ["encours", "En cours"], ["termine", "Terminés"]].map(([id, label]) => (
+              <button key={id} onClick={() => setStage(id)} className="df-at-tap shrink-0 rounded-full px-3 py-2 text-xs font-medium" style={chip(stage === id)}>{label}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {list.length === 0 ? (
         <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
-          <p className="text-[15px] font-semibold">Aucun document{search ? " ne correspond à ta recherche" : ""}</p>
+          <p className="text-[15px] font-semibold">Aucun document ne correspond</p>
+          <p className="mt-1 text-sm" style={{ color: tone.inkSoft }}>Change de famille ou de statut, ou vide la recherche.</p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl" style={card}>
-          {list.map((d, i) => (
-            <button key={d.id} onClick={() => onOpenDoc(d.id)} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(d.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{d.docNumber}</span></span>
-                <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>{d.client?.name || "Sans client"}{d.chantier ? ` · ${d.chantier}` : ""}</span>
-              </span>
-              <span className="hidden shrink-0 rounded-full px-2 py-0.5 text-xs font-medium sm:inline" style={{ background: tone.paper, color: tone.inkSoft }}>{d.workStage === "termine" ? "Terminé" : d.status || "brouillon"}</span>
-              <span className="shrink-0 text-xs" style={{ color: tone.inkSoft }}>{fr(d.updatedAt || d.createdAt || Date.now())}</span>
-              <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
-            </button>
-          ))}
+          {list.map((d, i) => {
+            const amount = atelierDocAmount(d);
+            const docStatuses = atelierStatusesFor(d.type);
+            const badge = atelierDocBadge(d);
+            const selected = selectedIds.includes(d.id);
+            return (
+              <div key={d.id} className="flex items-center gap-3 px-3 py-2 sm:px-4" style={{ borderTop: i ? `1px solid ${tone.line}` : "none", background: selected ? tone.accentSoft : "transparent" }}>
+                <input type="checkbox" checked={selected} onChange={() => onToggleSelect(d.id)} className="h-5 w-5 shrink-0 cursor-pointer" title="Sélectionner pour une action groupée" />
+                <button onClick={() => onOpenDoc(d.id)} className="df-at-tap min-w-0 flex-1 text-left">
+                  <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(d.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{d.docNumber}</span></span>
+                  <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>
+                    {d.client?.name || "Sans client"}{d.chantier ? ` · ${d.chantier}` : ""} · {atelierDocDate(d)}
+                    {badge && <span> · {badge}</span>}
+                  </span>
+                </button>
+                <span className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
+                  {amount ? <span className="df-mono text-sm font-medium">{eur(amount.value)} <span className="text-xs font-normal" style={{ color: tone.inkSoft }}>{amount.note}</span></span> : <span className="text-xs" style={{ color: tone.inkSoft }}>—</span>}
+                </span>
+                {docStatuses ? (
+                  <select
+                    value={docStatuses.includes(d.status) ? d.status : "brouillon"}
+                    onChange={(e) => onChangeStatus(d.id, e.target.value)}
+                    disabled={!canEdit}
+                    className="df-select df-at-tap shrink-0 rounded-full px-2 py-1 text-xs font-medium"
+                    style={{ background: `${atelierStatusColor(d.status, tone)}1A`, color: atelierStatusColor(d.status, tone), border: `1px solid ${atelierStatusColor(d.status, tone)}55`, maxWidth: 110 }}
+                    title="Changer le statut"
+                  >
+                    {docStatuses.map((s) => <option key={s} value={s} style={{ color: tone.ink }}>{atelierCapitalize(s)}</option>)}
+                  </select>
+                ) : (
+                  <span className="shrink-0 rounded-full px-2 py-1 text-xs font-medium" style={{ background: d.workStage === "termine" ? `${tone.success}1A` : tone.paper, color: d.workStage === "termine" ? tone.success : tone.inkSoft }}>{d.workStage === "termine" ? "Terminé" : "En cours"}</span>
+                )}
+                {canEdit && (
+                  <span className="hidden shrink-0 items-center sm:flex">
+                    <button onClick={() => onDuplicate(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.inkSoft }} title="Dupliquer"><Copy size={16} /></button>
+                    <button onClick={() => onDelete(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.danger }} title="Supprimer"><Trash2 size={16} /></button>
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {selectedIds.length > 0 && (
+        <div className="sticky bottom-[76px] z-20 mt-4 flex flex-wrap items-center gap-2 rounded-xl px-4 py-3 shadow-lg md:bottom-4" style={{ background: tone.ink, color: "white" }}>
+          <span className="text-sm font-medium">{selectedIds.length} sélectionné{selectedIds.length > 1 ? "s" : ""}</span>
+          {!sameType && <span className="text-xs" style={{ color: "rgba(255,255,255,0.7)" }}>Sélectionne des documents du même type pour les actions groupées.</span>}
+          <span className="ml-auto flex flex-wrap items-center gap-2">
+            {canMerge && <button onClick={() => onMerge(selectedIds)} className="df-at-tap flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: tone.accent, color: "white" }}><GitMerge size={14} /> Fusionner</button>}
+            <button onClick={() => canBatch && onBatchExcel(selectedDocs)} disabled={!canBatch} className="df-at-tap flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: "rgba(255,255,255,0.12)", color: "white", opacity: canBatch ? 1 : 0.5 }}><FileSpreadsheet size={14} /> Excel</button>
+            <button onClick={() => canBatch && onBatchPdf(selectedDocs)} disabled={!canBatch || batchExporting} className="df-at-tap flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold" style={{ background: "rgba(255,255,255,0.12)", color: "white", opacity: canBatch ? 1 : 0.5 }}>{batchExporting ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} PDF</button>
+            <button onClick={onClearSelection} className="df-at-tap px-2 py-2 text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>Annuler</button>
+          </span>
         </div>
       )}
     </div>
