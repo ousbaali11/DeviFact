@@ -9642,7 +9642,11 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   const moreMenu = moreOpen && (
     <>
       <div className="fixed inset-0 z-40 md:bg-transparent" style={{ background: "rgba(28,39,51,0.35)" }} onClick={() => setMoreOpen(false)} />
-      <div className="fixed inset-x-0 bottom-0 top-0 z-50 flex flex-col overflow-hidden md:absolute md:inset-auto md:right-0 md:top-full md:mt-2 md:w-80 md:rounded-xl md:shadow-xl" style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}` }}>
+      {/* Plein écran sur téléphone (hauteur = fenêtre visible, barre du
+          navigateur comprise) ; sur grand écran, panneau déroulant limité
+          à la hauteur de la fenêtre pour que la liste défile et que
+          « Se déconnecter » reste toujours visible en bas. */}
+      <div className="fixed inset-x-0 bottom-0 top-0 z-50 flex flex-col overflow-hidden md:absolute md:inset-auto md:right-0 md:top-full md:mt-2 md:max-h-[calc(100vh-88px)] md:w-80 md:rounded-xl md:shadow-xl" style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}`, maxHeight: "100dvh" }}>
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: tone.line }}>
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">{account?.organizationName || siteSettings?.name || "Mon espace"}</div>
@@ -9650,7 +9654,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
           </div>
           <button onClick={() => setMoreOpen(false)} className="df-at-tap flex h-11 w-11 items-center justify-center rounded-lg md:hidden" style={{ color: tone.inkSoft }}><X size={20} /></button>
         </div>
-        <div className="flex-1 overflow-y-auto py-2">
+        <div className="min-h-0 flex-1 overflow-y-auto py-2">
           {(memberships.length > 1 || !hasOwnOrg) && (
             <div className="border-b px-2 pb-2" style={{ borderColor: tone.line }}>
               <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: tone.inkSoft }}>Organisations</div>
@@ -9684,7 +9688,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
             </div>
           )}
         </div>
-        <div className="border-t px-2 py-2" style={{ borderColor: tone.line }}>
+        <div className="shrink-0 border-t px-2 py-2" style={{ borderColor: tone.line, paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}>
           <button onClick={() => setDarkMode((v) => !v)} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={{ color: tone.ink }}>
             {darkMode ? <Sun size={18} style={{ color: tone.inkSoft }} /> : <Moon size={18} style={{ color: tone.inkSoft }} />} {darkMode ? "Passer en mode clair" : "Passer en mode sombre"}
           </button>
@@ -10083,16 +10087,19 @@ function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset,
             const badge = atelierDocBadge(d);
             const selected = selectedIds.includes(d.id);
             return (
-              <div key={d.id} className="flex items-center gap-3 px-3 py-2 sm:px-4" style={{ borderTop: i ? `1px solid ${tone.line}` : "none", background: selected ? tone.accentSoft : "transparent" }}>
+              <div key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 sm:flex-nowrap sm:px-4" style={{ borderTop: i ? `1px solid ${tone.line}` : "none", background: selected ? tone.accentSoft : "transparent" }}>
                 <input type="checkbox" checked={selected} onChange={() => onToggleSelect(d.id)} className="h-5 w-5 shrink-0 cursor-pointer" title="Sélectionner pour une action groupée" />
-                <button onClick={() => onOpenDoc(d.id)} className="df-at-tap min-w-0 flex-1 text-left">
+                {/* Sur téléphone, le texte prend toute la ligne ; montant, statut
+                    et actions passent sur une seconde ligne, sans rien tronquer. */}
+                <button onClick={() => onOpenDoc(d.id)} className="df-at-tap min-w-0 flex-1 basis-[calc(100%-2.5rem)] text-left sm:basis-auto">
                   <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(d.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{d.docNumber}</span></span>
                   <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>
                     {d.client?.name || "Sans client"}{d.chantier ? ` · ${d.chantier}` : ""} · {atelierDocDate(d)}
                     {badge && <span> · {badge}</span>}
                   </span>
                 </button>
-                <span className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
+                <span className="ml-8 flex w-full items-center gap-2 sm:ml-0 sm:w-auto sm:shrink-0">
+                <span className="mr-auto shrink-0 sm:mr-0">
                   {amount ? <span className="df-mono text-sm font-medium">{eur(amount.value)} <span className="text-xs font-normal" style={{ color: tone.inkSoft }}>{amount.note}</span></span> : <span className="text-xs" style={{ color: tone.inkSoft }}>—</span>}
                 </span>
                 {docStatuses ? (
@@ -10110,11 +10117,12 @@ function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset,
                   <span className="shrink-0 rounded-full px-2 py-1 text-xs font-medium" style={{ background: d.workStage === "termine" ? `${tone.success}1A` : tone.paper, color: d.workStage === "termine" ? tone.success : tone.inkSoft }}>{d.workStage === "termine" ? "Terminé" : "En cours"}</span>
                 )}
                 {canEdit && (
-                  <span className="hidden shrink-0 items-center sm:flex">
-                    <button onClick={() => onDuplicate(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.inkSoft }} title="Dupliquer"><Copy size={16} /></button>
-                    <button onClick={() => onDelete(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.danger }} title="Supprimer"><Trash2 size={16} /></button>
+                  <span className="flex shrink-0 items-center">
+                    <button onClick={() => onDuplicate(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.inkSoft }} title="Dupliquer" aria-label="Dupliquer"><Copy size={16} /></button>
+                    <button onClick={() => onDelete(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.danger }} title="Supprimer" aria-label="Supprimer"><Trash2 size={16} /></button>
                   </span>
                 )}
+                </span>
               </div>
             );
           })}
