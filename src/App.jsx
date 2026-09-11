@@ -3705,7 +3705,7 @@ function DeviFactAppInner() {
       return <ContactView siteSettings={siteSettings} onBack={() => setPreAuthView("landing")} />;
     }
     if (preAuthView === "landing") {
-      const LandingComponent = siteSettings?.landingPageVersion === "avancee" ? LandingPageAvancee : LandingPage;
+      const LandingComponent = siteSettings?.landingPageVersion === "atelier" ? LandingPageAtelier : siteSettings?.landingPageVersion === "avancee" ? LandingPageAvancee : LandingPage;
       return (
         <LandingComponent
           plans={plans}
@@ -10500,6 +10500,294 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
           </div>
         )
       )}
+    </div>
+  );
+}
+
+// Page d'accueil publique de la version Atelier (visiteurs non
+// connectés). Tutoiement, comme le reste du site. Sections dans l'ordre
+// qui convainc : promesse, les 15 documents, comment ça marche, ce qui
+// change au quotidien, tarifs complets, questions, appel final.
+const ATELIER_LANDING_FEATURES = [
+  { icon: FileSignature, title: "Signature et paiement en ligne", text: "Tu envoies un lien ou un QR code : ton client signe le devis ou paie la facture depuis son téléphone, sans créer de compte." },
+  { icon: Receipt, title: "Prêt pour la facture électronique", text: "Chaque facture peut être téléchargée au format Factur-X, le format de la réforme 2026-2027. La connexion à une plateforme agréée est prévue." },
+  { icon: Camera, title: "Photos de chantier", text: "Prends des photos directement depuis le rapport d'intervention, le PV de réception ou la situation de travaux : elles sont dans le PDF." },
+  { icon: HardHat, title: "Chaque chantier au même endroit", text: "Devis, factures, planning de l'équipe et photos regroupés par chantier, avec le prévu, le facturé et l'écart." },
+  { icon: Calculator, title: "Calculs sans erreur", text: "TVA à plusieurs taux, remises, acomptes, retenue de garantie : les totaux se recalculent seuls." },
+  { icon: Printer, title: "PDF et Excel en un clic", text: "Un PDF propre à envoyer tel quel, ou un fichier Excel avec tous les calculs pour ton comptable." },
+];
+const ATELIER_LANDING_FAQ = [
+  { q: "Est-ce que je dois donner ma carte bancaire pour essayer ?", a: "Non. Le forfait Gratuit se crée sans carte bancaire et te laisse créer quelques documents pour te faire une idée. Tu passes à un forfait payant seulement si tu en as besoin." },
+  { q: "Je ne suis pas à l'aise avec l'informatique, c'est fait pour moi ?", a: "Oui. Il y a quatre rubriques, un bouton « Créer » toujours visible, et chaque document t'indique quoi remplir. Ça fonctionne aussi bien sur téléphone que sur ordinateur." },
+  { q: "Un devis signé devient-il une facture ?", a: "Oui. Quand ton client signe, en ligne ou sur place, la facture est créée automatiquement avec les mêmes lignes. Tu n'as plus qu'à l'envoyer." },
+  { q: "Est-ce conforme à la réforme de la facturation électronique ?", a: "Tes factures comportent les mentions obligatoires et peuvent être exportées au format Factur-X dès aujourd'hui. La transmission par une plateforme agréée, obligatoire pour les TPE et PME à partir de septembre 2027, est prévue dans les prochaines versions." },
+  { q: "Mes données et celles de mes clients sont-elles protégées ?", a: "Tes documents et tes photos ne sont visibles que par toi et les membres de ton équipe. Rien n'est partagé ni revendu." },
+  { q: "Puis-je changer de forfait ou arrêter quand je veux ?", a: "Oui, depuis ton compte, à tout moment. L'abonnement mensuel est sans engagement." },
+];
+
+function LandingPageAtelier({ plans, siteSettings, onGetStarted, onLogin, onContact }) {
+  const tone = atelier;
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const [openFaq, setOpenFaq] = useState(0);
+  const [annual, setAnnual] = useState(false);
+  const visiblePlans = plans.filter((p) => !p.hidden);
+  const freePlan = plans.find((p) => p.id === "gratuit");
+  const freeLimit = Number.isFinite(freePlan?.limit) ? freePlan.limit : null;
+  const visibleServices = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
+  const families = ATELIER_FAMILIES.map((f) => ({ ...f, items: f.services.map((id) => getService(id)).filter((s) => s && s.implemented && visibleServices.includes(s.id)) })).filter((f) => f.items.length);
+  const serviceCount = families.reduce((n, f) => n + f.items.length, 0);
+  const year = new Date().getFullYear();
+  const card = { background: tone.surface, border: `1px solid ${tone.line}` };
+  const navLinks = [["#services", "Les documents"], ["#fonctionnalites", "Ce qui change"], ["#tarifs", "Tarifs"], ["#faq", "Questions"]];
+  const priceOf = (plan) => (annual ? plan.annual : plan.monthly);
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: tone.paper, color: tone.ink }}>
+      <GlobalStyle />
+
+      {/* Barre de navigation */}
+      <nav className="sticky top-0 z-30 border-b" style={{ background: tone.surface, borderColor: tone.line }}>
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            {siteSettings?.logo ? (
+              <img src={siteSettings.logo} alt="" style={{ width: siteSettings.logoWidth || 34, height: siteSettings.logoHeight || 34, objectFit: "contain" }} />
+            ) : (
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ background: tone.accent }}><HardHat size={18} /></span>
+            )}
+            <span className="df-display text-lg font-bold">{siteSettings?.name || "Chantiflow"}</span>
+          </div>
+          <div className="hidden items-center gap-6 text-sm font-medium lg:flex" style={{ color: tone.inkSoft }}>
+            {navLinks.map(([href, label]) => <a key={href} href={href}>{label}</a>)}
+            <button onClick={onContact}>Contact</button>
+          </div>
+          <div className="hidden items-center gap-3 lg:flex">
+            <button onClick={onLogin} className="df-at-tap px-3 text-sm font-semibold" style={{ color: tone.ink }}>Connexion</button>
+            <button onClick={onGetStarted} className="df-at-tap rounded-lg px-5 py-2.5 text-sm font-bold" style={{ background: tone.action, color: "#1C2733" }}>Essayer gratuitement</button>
+          </div>
+          <button onClick={() => setMobileMenu((v) => !v)} className="df-at-tap flex h-11 w-11 items-center justify-center lg:hidden" title="Menu" aria-label="Ouvrir le menu">{mobileMenu ? <X size={22} /> : <Menu size={22} />}</button>
+        </div>
+        {mobileMenu && (
+          <div className="flex flex-col gap-1 border-t px-4 py-3 lg:hidden" style={{ borderColor: tone.line }}>
+            {navLinks.map(([href, label]) => <a key={href} href={href} onClick={() => setMobileMenu(false)} className="df-at-tap flex items-center px-2 text-[15px] font-medium">{label}</a>)}
+            <button onClick={onContact} className="df-at-tap flex items-center px-2 text-left text-[15px] font-medium">Contact</button>
+            <button onClick={onLogin} className="df-at-tap flex items-center px-2 text-left text-[15px] font-semibold">Connexion</button>
+            <button onClick={onGetStarted} className="df-at-tap mt-2 rounded-lg px-4 py-3 text-center text-[15px] font-bold" style={{ background: tone.action, color: "#1C2733" }}>Essayer gratuitement</button>
+          </div>
+        )}
+      </nav>
+
+      {/* Promesse */}
+      <section className="mx-auto grid max-w-6xl items-center gap-10 px-4 pb-14 pt-12 sm:px-6 lg:grid-cols-2 lg:pt-20">
+        <div>
+          <span className="inline-block rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide" style={{ background: tone.accentSoft, color: tone.accent }}>Pour les artisans et entreprises du bâtiment</span>
+          <h1 className="df-display mt-4 text-4xl font-bold leading-tight tracking-tight sm:text-5xl">Tes devis, tes factures et tes chantiers, <span style={{ color: tone.accent }}>au même endroit</span></h1>
+          <p className="mt-5 max-w-xl text-[17px] leading-relaxed" style={{ color: tone.inkSoft }}>
+            {siteSettings?.name || "Chantiflow"} crée tes documents en quelques minutes, fait signer et payer tes clients en ligne, et suit chaque chantier du devis à l'encaissement. Simple, même si tu n'aimes pas l'informatique.
+          </p>
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+            <button onClick={onGetStarted} className="df-at-tap rounded-xl px-6 py-3.5 text-[16px] font-bold" style={{ background: tone.action, color: "#1C2733" }}>Créer mon compte gratuit</button>
+            <a href="#services" className="df-at-tap flex items-center justify-center rounded-xl px-6 py-3.5 text-[16px] font-semibold" style={{ ...card, color: tone.ink }}>Voir les {serviceCount} documents</a>
+          </div>
+          <p className="mt-4 text-sm" style={{ color: tone.inkSoft }}>
+            Sans carte bancaire{freeLimit ? ` · ${freeLimit} documents offerts pour essayer` : ""} · Factures prêtes pour la réforme électronique
+          </p>
+        </div>
+        {/* Aperçu : ce que l'artisan voit sur son téléphone */}
+        <div className="mx-auto w-full max-w-sm">
+          <div className="overflow-hidden rounded-[28px] p-3" style={{ background: tone.ink, boxShadow: "0 24px 60px rgba(28,39,51,0.25)" }}>
+            <div className="overflow-hidden rounded-[20px]" style={{ background: tone.paper }}>
+              <div className="px-4 pb-3 pt-4">
+                <div className="df-display text-lg font-bold" style={{ color: tone.ink }}>Bonjour Karim</div>
+                <div className="text-xs" style={{ color: tone.inkSoft }}>À faire aujourd'hui</div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {[["Devis en attente", "2", "4 320 €", tone.warning], ["À encaisser", "3", "7 850 €", tone.accent], ["En retard", "1", "1 200 €", tone.danger], ["En cours", "4", "brouillons", tone.inkSoft]].map(([l, n, s, c]) => (
+                    <div key={l} className="rounded-xl p-3" style={card}>
+                      <div className="text-[10px]" style={{ color: tone.inkSoft }}>{l}</div>
+                      <div className="df-display text-xl font-bold" style={{ color: c }}>{n}</div>
+                      <div className="df-mono text-[10px]" style={{ color: tone.inkSoft }}>{s}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 rounded-xl p-3" style={card}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold" style={{ color: tone.ink }}>Devis DEV-2026-014</div>
+                      <div className="text-[10px]" style={{ color: tone.inkSoft }}>Rénovation salle de bain · M. Dupont</div>
+                    </div>
+                    <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: `${tone.success}1A`, color: tone.success }}>Signé en ligne</span>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-5 border-t px-1 py-2 text-[9px]" style={{ background: tone.surface, borderColor: tone.line, color: tone.inkSoft }}>
+                {[["Accueil", Home, true], ["Documents", Files, false], ["Créer", Plus, "action"], ["Chantiers", HardHat, false], ["Clients", Users, false]].map(([l, Icon, state]) => (
+                  <div key={l} className="flex flex-col items-center gap-0.5" style={{ color: state === true ? tone.accent : tone.inkSoft }}>
+                    {state === "action" ? <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: tone.action, color: "#1C2733" }}><Icon size={16} /></span> : <Icon size={16} />}
+                    {l}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Les documents */}
+      <section id="services" className="border-t py-14" style={{ background: tone.surface, borderColor: tone.line }}>
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="mx-auto mb-8 max-w-2xl text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: tone.accent }}>Les documents</span>
+            <h2 className="df-display mt-2 text-2xl font-bold sm:text-3xl">{serviceCount} documents du métier, un seul outil</h2>
+            <p className="mt-2 text-[15px]" style={{ color: tone.inkSoft }}>Du premier devis au PV de réception, chaque étape du chantier a son document, prêt à remplir.</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {families.map((f) => (
+              <div key={f.id} className="rounded-2xl p-5" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>
+                <div className="mb-3 flex items-baseline gap-2">
+                  <h3 className="df-display text-base font-bold" style={{ color: tone.accent }}>{f.label}</h3>
+                  <span className="text-xs" style={{ color: tone.inkSoft }}>{f.hint}</span>
+                </div>
+                <ul className="space-y-2">
+                  {f.items.map((s) => {
+                    const SIcon = s.icon;
+                    return (
+                      <li key={s.id} className="flex items-start gap-2.5 text-sm">
+                        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={{ background: tone.accentSoft, color: tone.accent }}><SIcon size={15} /></span>
+                        <span><span className="font-semibold">{s.label}</span> <span style={{ color: tone.inkSoft }}>— {s.description}</span></span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Comment ça marche */}
+      <section className="py-14">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="mx-auto mb-8 max-w-2xl text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: tone.accent }}>Comment ça marche</span>
+            <h2 className="df-display mt-2 text-2xl font-bold sm:text-3xl">Trois étapes, du devis à l'argent sur ton compte</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {[
+              ["1", "Tu crées", "Appuie sur « Créer », choisis le document, remplis les lignes. Tes clients et tes prestations sont mémorisés pour la prochaine fois."],
+              ["2", "Ton client signe ou paie", "Envoie un lien ou imprime le QR code : il signe le devis ou paie la facture depuis son téléphone. Le devis signé devient une facture tout seul."],
+              ["3", "Tu suis et tu relances", "Sur l'accueil, tu vois ce qui attend une réponse, ce qui est à encaisser et ce qui est en retard. Un clic pour relancer par email."],
+            ].map(([n, title, text]) => (
+              <div key={n} className="rounded-2xl p-6" style={card}>
+                <span className="df-display flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold text-white" style={{ background: tone.accent }}>{n}</span>
+                <h3 className="df-display mt-4 text-lg font-bold">{title}</h3>
+                <p className="mt-2 text-[15px] leading-relaxed" style={{ color: tone.inkSoft }}>{text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Ce qui change au quotidien */}
+      <section id="fonctionnalites" className="border-t py-14" style={{ background: tone.surface, borderColor: tone.line }}>
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="mx-auto mb-8 max-w-2xl text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: tone.accent }}>Ce qui change au quotidien</span>
+            <h2 className="df-display mt-2 text-2xl font-bold sm:text-3xl">Moins de paperasse, plus de chantier</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {ATELIER_LANDING_FEATURES.map(({ icon: Icon, title, text }) => (
+              <div key={title} className="rounded-2xl p-5" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg" style={{ background: tone.accentSoft, color: tone.accent }}><Icon size={20} /></span>
+                <h3 className="df-display mt-3 text-base font-bold">{title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed" style={{ color: tone.inkSoft }}>{text}</p>
+              </div>
+            ))}
+          </div>
+          {siteSettings?.desktopAppEnabled && (
+            <p className="mt-6 text-center text-sm" style={{ color: tone.inkSoft }}><Monitor size={14} className="mr-1 inline" /> Existe aussi en logiciel de bureau pour Windows et Mac, avec les mêmes données que sur ton téléphone.</p>
+          )}
+        </div>
+      </section>
+
+      {/* Tarifs */}
+      <section id="tarifs" className="py-14">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="mx-auto mb-6 max-w-2xl text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: tone.accent }}>Tarifs</span>
+            <h2 className="df-display mt-2 text-2xl font-bold sm:text-3xl">Un forfait pour chaque taille d'entreprise</h2>
+            <p className="mt-2 text-[15px]" style={{ color: tone.inkSoft }}>Tu commences gratuitement, tu changes de forfait quand tu veux.</p>
+          </div>
+          <div className="mb-8 flex justify-center">
+            <div className="flex rounded-full p-1" style={card}>
+              {[[false, "Mensuel"], [true, "Annuel"]].map(([value, label]) => (
+                <button key={label} onClick={() => setAnnual(value)} className="df-at-tap rounded-full px-5 py-2 text-sm font-semibold" style={{ background: annual === value ? tone.accent : "transparent", color: annual === value ? "white" : tone.ink }}>{label}{value && <span className="ml-1 text-xs font-normal" style={{ color: annual === value ? "rgba(255,255,255,0.8)" : tone.inkSoft }}>(2 mois offerts)</span>}</button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {visiblePlans.map((plan) => {
+              const featured = plan.id === "essentiel";
+              const price = priceOf(plan);
+              return (
+                <div key={plan.id} className="flex flex-col rounded-2xl p-5" style={{ ...card, borderColor: featured ? tone.accent : tone.line, boxShadow: featured ? `0 0 0 3px ${tone.accentSoft}` : "none" }}>
+                  {featured && <span className="mb-2 inline-block self-start rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide" style={{ background: tone.accentSoft, color: tone.accent }}>Le plus choisi</span>}
+                  <div className="df-display text-lg font-bold">{plan.name}</div>
+                  <div className="text-sm" style={{ color: tone.inkSoft }}>{plan.tagline}</div>
+                  <div className="df-mono my-4">
+                    {price === null || price === undefined ? <span className="text-2xl font-semibold">Sur devis</span> : (
+                      <><span className="text-3xl font-extrabold">{price} €</span><span className="text-sm" style={{ color: tone.inkSoft }}>{annual ? " / an" : " / mois"}</span>
+                        {annual && price > 0 && <div className="text-xs" style={{ color: tone.inkSoft }}>soit {Math.round(price / 12)} € par mois</div>}</>
+                    )}
+                  </div>
+                  <ul className="mb-5 grow space-y-2 text-sm">
+                    {(plan.features || []).map((f) => {
+                      const soon = f.includes("(bientôt disponible)");
+                      const clean = f.replace(" (bientôt disponible)", "");
+                      return (
+                        <li key={f} className="flex items-start gap-2" style={{ color: soon ? tone.inkSoft : tone.ink }}>
+                          <Check size={15} className="mt-0.5 shrink-0" style={{ color: soon ? tone.inkSoft : tone.success }} />
+                          <span>{clean}{soon && <span className="text-xs"> (bientôt)</span>}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <button onClick={onGetStarted} className="df-at-tap rounded-lg py-2.5 text-sm font-bold" style={featured ? { background: tone.action, color: "#1C2733" } : { background: tone.accentSoft, color: tone.accent }}>{plan.monthly === 0 ? "Commencer gratuitement" : plan.monthly === null ? "Nous contacter" : "Choisir ce forfait"}</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Questions */}
+      <section id="faq" className="border-t py-14" style={{ background: tone.surface, borderColor: tone.line }}>
+        <div className="mx-auto max-w-2xl px-4 sm:px-6">
+          <div className="mb-6 text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: tone.accent }}>Questions fréquentes</span>
+            <h2 className="df-display mt-2 text-2xl font-bold">Ce qu'on nous demande le plus</h2>
+          </div>
+          {ATELIER_LANDING_FAQ.map((f, idx) => (
+            <div key={f.q} className="border-b" style={{ borderColor: tone.line }}>
+              <button onClick={() => setOpenFaq(openFaq === idx ? null : idx)} className="df-at-tap flex w-full items-center justify-between gap-3 py-4 text-left text-[15px] font-semibold">
+                {f.q} <ChevronDown size={18} className="shrink-0" style={{ color: tone.inkSoft, transform: openFaq === idx ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+              </button>
+              {openFaq === idx && <p className="pb-4 text-[15px] leading-relaxed" style={{ color: tone.inkSoft }}>{f.a}</p>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Appel final */}
+      <section className="px-4 py-14 sm:px-6">
+        <div className="mx-auto max-w-4xl rounded-3xl px-6 py-12 text-center" style={{ background: tone.accent, color: "white" }}>
+          <h2 className="df-display text-2xl font-bold sm:text-3xl">Prêt à passer moins de temps sur la paperasse ?</h2>
+          <p className="mt-3 text-[15px]" style={{ color: "rgba(255,255,255,0.8)" }}>Ton compte est créé en une minute, sans carte bancaire.</p>
+          <button onClick={onGetStarted} className="df-at-tap mt-7 rounded-xl px-8 py-3.5 text-[16px] font-bold" style={{ background: tone.action, color: "#1C2733" }}>Créer mon compte gratuit</button>
+        </div>
+      </section>
+
+      <footer className="border-t px-4 py-8 text-center text-sm" style={{ borderColor: tone.line, color: tone.inkSoft }}>
+        © {year} {siteSettings?.name || "Chantiflow"} · Fait pour les artisans du bâtiment · <button onClick={onContact} className="underline" style={{ color: tone.inkSoft }}>Nous contacter</button>
+      </footer>
     </div>
   );
 }
