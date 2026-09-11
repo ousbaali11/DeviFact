@@ -4721,6 +4721,51 @@ function PublicDocumentView({ token }) {
   const [signed, setSigned] = useState(false);
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState(null);
+  // Signature à distance : saisie du nom (par défaut) ou dessin à main
+  // levée — même technique que le dessin dans l'éditeur (canvas 2D,
+  // image PNG envoyée à sign-public-document dans signatureDrawing).
+  const [signMode, setSignMode] = useState("texte"); // texte | dessin
+  const [drawing, setDrawing] = useState(null);
+  const canvasRef = useRef(null);
+  const drawingRef = useRef(false);
+  function getPos(e) {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    // Le canvas peut être affiché plus étroit que sa taille réelle sur
+    // téléphone : on ramène la position dans ses coordonnées internes.
+    const scaleX = canvasRef.current.width / rect.width;
+    const scaleY = canvasRef.current.height / rect.height;
+    return { x: (cx - rect.left) * scaleX, y: (cy - rect.top) * scaleY };
+  }
+  function startDraw(e) {
+    drawingRef.current = true;
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }
+  function draw(e) {
+    if (!drawingRef.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = "#1B2A33";
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+  function endDraw() {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    setDrawing(canvasRef.current.toDataURL("image/png"));
+  }
+  function clearCanvas() {
+    const canvas = canvasRef.current;
+    if (canvas) canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    setDrawing(null);
+  }
 
   useEffect(() => {
     (async () => {
@@ -4736,13 +4781,18 @@ function PublicDocumentView({ token }) {
   }, [token]);
 
   async function handleSign() {
-    if (!signatureName.trim()) { setSignError("Merci d'indiquer ton nom pour signer."); return; }
-    if (secondSigner && !secondSignatureName.trim()) { setSignError("Merci d'indiquer le nom du second signataire."); return; }
+    if (signMode === "dessin") {
+      if (!drawing) { setSignError("Dessine ta signature dans le cadre pour signer."); return; }
+    } else {
+      if (!signatureName.trim()) { setSignError("Merci d'indiquer ton nom pour signer."); return; }
+      if (secondSigner && !secondSignatureName.trim()) { setSignError("Merci d'indiquer le nom du second signataire."); return; }
+    }
     setSigning(true);
     setSignError(null);
     try {
       const body = { token, signatureName: signatureName.trim() };
-      if (secondSigner) body.secondSignatureName = secondSignatureName.trim();
+      if (signMode === "dessin") body.signatureDrawing = drawing;
+      else if (secondSigner) body.secondSignatureName = secondSignatureName.trim();
       const { data, error } = await db.functions.invoke("sign-public-document", { body });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
@@ -4810,25 +4860,60 @@ function PublicDocumentView({ token }) {
             {state.document.type === "devis" && state.document.status !== "signé" && !state.signedAt && !signed && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
                 <p className="mb-3 text-sm font-medium">Pour accepter ce devis, signe-le ci-dessous :</p>
-                <input
-                  className="df-input mb-2 w-full rounded-md px-3 py-2 text-sm"
-                  style={{ border: `1px solid ${colors.line}` }}
-                  placeholder="Ton nom complet, en guise de signature"
-                  value={signatureName}
-                  onChange={(e) => setSignatureName(e.target.value)}
-                />
-                <label className="mb-2 flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}>
-                  <input type="checkbox" checked={secondSigner} onChange={(e) => setSecondSigner(e.target.checked)} />
-                  Ajouter un second signataire
-                </label>
-                {secondSigner && (
-                  <input
-                    className="df-input mb-2 w-full rounded-md px-3 py-2 text-sm"
-                    style={{ border: `1px solid ${colors.line}` }}
-                    placeholder="Nom complet du second signataire"
-                    value={secondSignatureName}
-                    onChange={(e) => setSecondSignatureName(e.target.value)}
-                  />
+                <div className="mb-3 flex gap-2">
+                  {[
+                    { id: "texte", label: "Taper mon nom", icon: TypeIcon },
+                    { id: "dessin", label: "Dessiner ma signature", icon: PenTool },
+                  ].map(({ id, label, icon: Icon }) => (
+                    <button key={id} type="button" onClick={() => { setSignMode(id); setSignError(null); }} className="flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium" style={{ background: signMode === id ? colors.ink : "transparent", color: signMode === id ? "white" : colors.inkSoft, border: `1px solid ${signMode === id ? colors.ink : colors.line}` }}>
+                      <Icon size={13} /> {label}
+                    </button>
+                  ))}
+                </div>
+                {signMode === "texte" ? (
+                  <>
+                    <input
+                      className="df-input mb-2 w-full rounded-md px-3 py-2 text-sm"
+                      style={{ border: `1px solid ${colors.line}` }}
+                      placeholder="Ton nom complet, en guise de signature"
+                      value={signatureName}
+                      onChange={(e) => setSignatureName(e.target.value)}
+                    />
+                    <label className="mb-2 flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}>
+                      <input type="checkbox" checked={secondSigner} onChange={(e) => setSecondSigner(e.target.checked)} />
+                      Ajouter un second signataire
+                    </label>
+                    {secondSigner && (
+                      <input
+                        className="df-input mb-2 w-full rounded-md px-3 py-2 text-sm"
+                        style={{ border: `1px solid ${colors.line}` }}
+                        placeholder="Nom complet du second signataire"
+                        value={secondSignatureName}
+                        onChange={(e) => setSecondSignatureName(e.target.value)}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <canvas
+                      ref={canvasRef} width={360} height={130}
+                      className="w-full rounded-md"
+                      style={{ background: colors.surface, border: `1px solid ${colors.line}`, touchAction: "none", cursor: "crosshair", maxWidth: 360 }}
+                      onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+                      onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+                    />
+                    <div className="mb-2 mt-1 flex items-center justify-between gap-2">
+                      <span className="text-xs" style={{ color: colors.inkSoft }}>Signe avec le doigt ou la souris dans le cadre.</span>
+                      <button type="button" onClick={clearCanvas} className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.inkSoft }}><Eraser size={13} /> Effacer</button>
+                    </div>
+                    <input
+                      className="df-input mb-2 w-full rounded-md px-3 py-2 text-sm"
+                      style={{ border: `1px solid ${colors.line}` }}
+                      placeholder="Ton nom (facultatif)"
+                      value={signatureName}
+                      onChange={(e) => setSignatureName(e.target.value)}
+                    />
+                  </>
                 )}
                 {signError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{signError}</p>}
                 <button onClick={handleSign} disabled={signing} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.brassDark, opacity: signing ? 0.7 : 1 }}>
@@ -10609,7 +10694,7 @@ function LandingPageAtelier({ plans, siteSettings, onGetStarted, onLogin, onCont
           <div className="overflow-hidden rounded-[28px] p-3" style={{ background: tone.ink, boxShadow: "0 24px 60px rgba(28,39,51,0.25)" }}>
             <div className="overflow-hidden rounded-[20px]" style={{ background: tone.paper }}>
               <div className="px-4 pb-3 pt-4">
-                <div className="df-display text-lg font-bold" style={{ color: tone.ink }}>Bonjour Karim</div>
+                <div className="df-display text-lg font-bold" style={{ color: tone.ink }}>Bonjour Thomas</div>
                 <div className="text-xs" style={{ color: tone.inkSoft }}>À faire aujourd'hui</div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   {[["Devis en attente", "2", "4 320 €", tone.warning], ["À encaisser", "3", "7 850 €", tone.accent], ["En retard", "1", "1 200 €", tone.danger], ["En cours", "4", "brouillons", tone.inkSoft]].map(([l, n, s, c]) => (

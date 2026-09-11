@@ -24,6 +24,14 @@ serve(async (req) => {
     if (!token || (!signatureName?.trim() && !signatureDrawing)) {
       return new Response(JSON.stringify({ error: "Signature manquante." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    // Dessin à main levée : une image PNG produite par le canvas de la
+    // page publique, de taille raisonnable — jamais une chaîne arbitraire
+    // stockée telle quelle depuis un point d'entrée public.
+    if (signatureDrawing !== undefined && signatureDrawing !== null) {
+      if (typeof signatureDrawing !== "string" || !signatureDrawing.startsWith("data:image/png;base64,") || signatureDrawing.length > 200_000) {
+        return new Response(JSON.stringify({ error: "Signature dessinée invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
     // Second signataire (optionnel) : un nom en plus, signé en une seule
     // étape avec le premier — stocké tel quel sur le document.
     const secondName = typeof secondSignatureName === "string" ? secondSignatureName.trim() : "";
