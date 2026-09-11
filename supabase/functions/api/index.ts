@@ -52,7 +52,11 @@ serve(async (req) => {
       .maybeSingle();
 
     if (!apiKey || apiKey.revoked_at) return jsonResponse({ error: "Clé API invalide ou révoquée" }, 401);
-    if (apiKey.organizations?.plan !== "entreprise") {
+    // Relation "organizations" : un seul objet à l'exécution (clé étrangère
+    // unique), mais typé comme un tableau par le client — on accepte les deux.
+    const orgRel = apiKey.organizations as unknown as { plan?: string } | { plan?: string }[] | null;
+    const orgPlan = Array.isArray(orgRel) ? orgRel[0]?.plan : orgRel?.plan;
+    if (orgPlan !== "entreprise") {
       return jsonResponse({ error: "Cette organisation n'est plus sur le forfait Entreprise — l'accès API est désactivé" }, 403);
     }
 

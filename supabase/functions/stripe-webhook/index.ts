@@ -36,8 +36,8 @@ const dbAdmin = createClient(
 function subscriptionPeriodEnd(subscription: Stripe.Subscription): string | null {
   const legacy = (subscription as unknown as { current_period_end?: number }).current_period_end;
   const perItem = subscription.items?.data
-    ?.map((item) => (item as unknown as { current_period_end?: number }).current_period_end)
-    .filter((v): v is number => typeof v === "number");
+    ?.map((item: unknown) => (item as { current_period_end?: number }).current_period_end)
+    .filter((v: unknown): v is number => typeof v === "number");
   const end = typeof legacy === "number" ? legacy : perItem && perItem.length ? Math.max(...perItem) : null;
   return end ? new Date(end * 1000).toISOString() : null;
 }
