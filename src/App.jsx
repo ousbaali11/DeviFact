@@ -9646,7 +9646,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
           navigateur comprise) ; sur grand écran, panneau déroulant limité
           à la hauteur de la fenêtre pour que la liste défile et que
           « Se déconnecter » reste toujours visible en bas. */}
-      <div className="fixed inset-x-0 bottom-0 top-0 z-50 flex flex-col overflow-hidden md:absolute md:inset-auto md:right-0 md:top-full md:mt-2 md:max-h-[calc(100vh-88px)] md:w-80 md:rounded-xl md:shadow-xl" style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}`, maxHeight: "100dvh" }}>
+      <div className="fixed inset-x-0 bottom-0 top-0 z-50 flex max-h-[100dvh] flex-col overflow-hidden md:absolute md:inset-auto md:right-0 md:top-full md:mt-2 md:max-h-[calc(100vh-88px)] md:w-80 md:rounded-xl md:shadow-xl" style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}` }}>
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: tone.line }}>
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">{account?.organizationName || siteSettings?.name || "Mon espace"}</div>
@@ -9704,7 +9704,11 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
     <div className="df-root df-at-bottom-pad min-h-full w-full" style={{ backgroundColor: tone.paper, color: tone.ink }}>
       <GlobalStyle />
       {/* Barre haute — ordinateur et tablette */}
-      <header className="no-print sticky top-0 z-30 hidden items-center gap-3 border-b px-4 py-2 md:flex lg:px-6" style={{ background: tone.surface, borderColor: tone.line }}>
+      {/* z-40 (au-dessus de la barre du bas, z-30) : le menu avatar est
+          rendu à l'intérieur de cet en-tête, donc dans son contexte
+          d'empilement — sans ça, la barre du bas recouvrait le pied du
+          menu (« Se déconnecter ») sur téléphone. */}
+      <header className="no-print sticky top-0 z-40 hidden items-center gap-3 border-b px-4 py-2 md:flex lg:px-6" style={{ background: tone.surface, borderColor: tone.line }}>
         {logo}
         <nav className="ml-2 flex items-center gap-1">
           {ATELIER_TABS.map(({ id, label, icon: Icon }) => (
@@ -9732,7 +9736,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
       </header>
 
       {/* Barre haute compacte — téléphone */}
-      <header className="no-print sticky top-0 z-30 flex items-center justify-between border-b px-4 py-2 md:hidden" style={{ background: tone.surface, borderColor: tone.line }}>
+      <header className="no-print sticky top-0 z-40 flex items-center justify-between border-b px-4 py-2 md:hidden" style={{ background: tone.surface, borderColor: tone.line }}>
         {logo}
         <div className="relative">
           <button onClick={() => setMoreOpen((v) => !v)} className="df-at-tap flex h-11 w-11 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: tone.accent }} title="Menu">{initials}</button>
@@ -9743,7 +9747,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
       {children}
 
       {/* Barre d'onglets en bas — téléphone */}
-      <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t md:hidden" style={{ background: tone.surface, borderColor: tone.line, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+      <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t md:hidden" style={{ background: tone.surface, borderColor: tone.line, paddingBottom: "env(safe-area-inset-bottom, 0px)", visibility: moreOpen ? "hidden" : "visible" }}>
         {ATELIER_TABS.slice(0, 2).map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setView(id)} className="flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium" style={{ color: activeTab === id ? tone.accent : tone.inkSoft, minHeight: 56 }}>
             <Icon size={22} /> {label}
