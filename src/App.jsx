@@ -2378,6 +2378,10 @@ function DeviFactAppInner() {
   const [atelierCreateOpen, setAtelierCreateOpen] = useState(false);
   // Filtre pré-appliqué à la page Documents Atelier (carte « À faire »).
   const [atelierDocsPreset, setAtelierDocsPreset] = useState(null);
+  // Fiche chantier ouverte (nom du chantier) et chantier à pré-remplir
+  // sur le prochain document créé depuis le panneau « Créer ».
+  const [atelierChantier, setAtelierChantier] = useState(null);
+  const [atelierCreateChantier, setAtelierCreateChantier] = useState(null);
 
   const [plans, setPlans] = useState(PLANS);
 
@@ -3926,6 +3930,16 @@ function DeviFactAppInner() {
   // ---------------------------------------------------------------------
   if (isAtelier) {
     const goPricing = () => setView("pricing");
+    // Création depuis une fiche chantier : le document naît avec le nom
+    // du chantier déjà rempli (mise à jour du brouillon en attente juste
+    // après sa création, dans le même cycle de rendu).
+    const createWithChantier = (serviceId) => {
+      const chantierName = atelierCreateChantier;
+      setAtelierCreateChantier(null);
+      openNewService(serviceId);
+      if (chantierName && serviceId !== "revision") setPendingDoc((p) => (p ? { ...p, chantier: chantierName } : p));
+    };
+    const openCreateForChantier = (chantierName) => { setAtelierCreateChantier(chantierName); setAtelierCreateOpen(true); };
     let page;
     if (view === "atelier-documents") {
       page = (
@@ -3953,7 +3967,11 @@ function DeviFactAppInner() {
     } else if (view === "revision-sector") {
       page = <AtelierRevisionSectorPicker revisionCountry={revisionCountry} setRevisionCountry={setRevisionCountry} onPick={openNewRevision} onBack={backToDashboard} darkMode={darkMode} />;
     } else if (view === "chantiers") {
-      page = <ChantiersView documents={documents} siteSettings={siteSettings} darkMode={darkMode} onOpenDoc={openDoc} />;
+      page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
+    } else if (view === "atelier-chantier" && atelierChantier) {
+      page = <AtelierChantierView name={atelierChantier} documents={documents} account={account} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onBack={() => setView("chantiers")} onOpenDoc={openDoc} onCreateForChantier={openCreateForChantier} />;
+    } else if (view === "atelier-chantier") {
+      page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
     } else if (view === "clients") {
       page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} darkMode={darkMode} />;
     } else if (view === "company") {
@@ -4067,7 +4085,7 @@ function DeviFactAppInner() {
         paletteCommands={[{ id: "nav-atelier-documents", label: "Aller à Documents", icon: Files, action: () => setView("atelier-documents") }, ...paletteCommands]}
       >
         {page}
-        <AtelierCreateSheet open={atelierCreateOpen} onClose={() => setAtelierCreateOpen(false)} visibleServices={visibleServices} onCreate={openNewService} darkMode={darkMode} />
+        <AtelierCreateSheet open={atelierCreateOpen} onClose={() => { setAtelierCreateOpen(false); setAtelierCreateChantier(null); }} visibleServices={visibleServices} onCreate={createWithChantier} chantierName={atelierCreateChantier} darkMode={darkMode} />
         {/* Hôte hors écran pour l'export PDF groupé (même mécanisme que
             le tableau de bord classique, rendu ici pour Atelier). */}
         <div style={{ position: "fixed", top: 0, left: "-9999px", zIndex: -1 }}>
@@ -9515,7 +9533,7 @@ function atelierServiceLabel(type) {
 // Panneau « Créer » : les 15 services par famille, recherche, respect
 // du réglage admin « services visibles ». Fenêtre centrée sur grand
 // écran, plein écran sur téléphone.
-function AtelierCreateSheet({ open, onClose, visibleServices, onCreate, darkMode }) {
+function AtelierCreateSheet({ open, onClose, visibleServices, onCreate, darkMode, chantierName = null }) {
   const tone = atelierTone(darkMode);
   const [query, setQuery] = useState("");
   const inputRef = useRef(null);
@@ -9542,7 +9560,7 @@ function AtelierCreateSheet({ open, onClose, visibleServices, onCreate, darkMode
         <div className="flex items-center justify-between gap-3 border-b px-4 py-3 md:px-6" style={{ borderColor: tone.line }}>
           <div>
             <h2 className="df-display text-lg font-semibold">Créer un document</h2>
-            <p className="text-xs" style={{ color: tone.inkSoft }}>Choisis le document dont tu as besoin — tu pourras tout modifier ensuite.</p>
+            <p className="text-xs" style={{ color: tone.inkSoft }}>{chantierName ? <>Pour le chantier <strong style={{ color: tone.accent }}>{chantierName}</strong> — le nom sera déjà rempli.</> : "Choisis le document dont tu as besoin — tu pourras tout modifier ensuite."}</p>
           </div>
           <button onClick={onClose} className="df-at-tap flex h-11 w-11 shrink-0 items-center justify-center rounded-lg" style={{ color: tone.inkSoft }} title="Fermer (Échap)"><X size={20} /></button>
         </div>
@@ -10114,6 +10132,373 @@ function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset,
             <button onClick={onClearSelection} className="df-at-tap px-2 py-2 text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>Annuler</button>
           </span>
         </div>
+      )}
+    </div>
+  );
+}
+
+// --- Chantiers Atelier : liste, fiche chantier (documents, planning,
+// photos). Un chantier existe dès qu'un document porte son nom dans le
+// champ « Chantier » (même règle que la page Chantiers existante). Les
+// créneaux viennent du même stockage que le Planning d'équipe.
+
+// Créneaux et membres de l'équipe, partagés avec la page Planning
+// d'équipe (clé « team-planning »). Lecture à l'ouverture, enregistrement
+// complet à chaque changement, comme la page existante.
+function useAtelierPlanning(organizationId) {
+  const [slots, setSlots] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setSlots(null);
+    if (!organizationId) { setSlots([]); return; }
+    (async () => {
+      try {
+        const res = await window.storage.get("team-planning", false);
+        const parsed = JSON.parse(res.value);
+        if (!cancelled) setSlots(Array.isArray(parsed) ? parsed : []);
+      } catch (err) {
+        if (cancelled) return;
+        if (err?.code !== "KEY_NOT_FOUND") console.error("Erreur de chargement du planning", err);
+        setSlots([]);
+      }
+    })();
+    db.rpc("get_organization_members_with_profiles", { org_id: organizationId }).then(({ data, error }) => {
+      if (error || cancelled) return;
+      setMembers((data || []).filter((m) => m.status === "active").map((m) => ({ userId: m.user_id, label: m.email || "Membre" })));
+    });
+    return () => { cancelled = true; };
+  }, [organizationId]);
+  async function persist(next) {
+    setSlots(next);
+    setSaving(true);
+    try {
+      await window.storage.set("team-planning", JSON.stringify(next), false);
+    } catch (err) {
+      console.error("Erreur d'enregistrement du planning", err);
+      alert("Impossible d'enregistrer le planning pour l'instant. Réessaie dans un instant.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return { slots, members, saving, persist };
+}
+
+// Regroupe les documents par chantier, avec les montants, le client, les
+// photos et le prochain créneau planifié.
+function atelierChantierStats(documents, slots) {
+  const map = new Map();
+  for (const d of documents) {
+    const nom = (d.chantier || "").trim();
+    if (!nom) continue;
+    if (!map.has(nom)) map.set(nom, { nom, docs: [], devisTotal: 0, factureTotal: 0, photos: 0, clients: new Map(), lastUpdate: 0 });
+    const c = map.get(nom);
+    c.docs.push(d);
+    if (d.type === "devis") c.devisTotal += computeTotals(d).totalTTC;
+    if (d.type === "facture") c.factureTotal += computeTotals(d).totalTTC;
+    if (Array.isArray(d.photos)) c.photos += d.photos.length;
+    const clientName = (d.client?.name || "").trim();
+    if (clientName) c.clients.set(clientName, (c.clients.get(clientName) || 0) + 1);
+    c.lastUpdate = Math.max(c.lastUpdate, d.updatedAt || d.createdAt || 0);
+  }
+  const todayIso = toIsoDate(new Date());
+  return [...map.values()].map((c) => {
+    const client = [...c.clients.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+    const mine = (slots || []).filter((s) => (s.chantier || "").trim() === c.nom).sort((a, b) => a.start.localeCompare(b.start));
+    const next = mine.find((s) => s.end >= todayIso) || null;
+    return { ...c, client, slots: mine, nextSlot: next, ecart: c.devisTotal - c.factureTotal };
+  }).sort((a, b) => b.lastUpdate - a.lastUpdate);
+}
+
+// Fenêtre de création / modification d'un créneau (même contenu que sur
+// la page Planning d'équipe, avec le chantier déjà rempli).
+function AtelierSlotModal({ editing, setEditing, members, canEdit, onSave, onDelete, darkMode }) {
+  const tone = atelierTone(darkMode);
+  useEscapeToClose(!!editing, () => setEditing(null));
+  if (!editing) return null;
+  const field = { background: tone.surface, border: `1px solid ${tone.line}`, color: tone.ink };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" style={{ background: "rgba(28,39,51,0.55)" }} onClick={() => setEditing(null)}>
+      <div className="w-full max-w-md rounded-t-2xl p-5 sm:rounded-2xl" style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="df-display text-lg font-semibold">{editing.id ? "Modifier le créneau" : "Nouveau créneau"}</h2>
+          <button onClick={() => setEditing(null)} className="df-at-tap flex h-11 w-11 items-center justify-center" style={{ color: tone.inkSoft }}><X size={18} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: tone.inkSoft }}>Titre</label>
+            <input autoFocus className="df-input df-at-tap w-full rounded-md px-3 py-2 text-[15px]" style={field} placeholder="Ex. Pose carrelage salle de bain" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} disabled={!canEdit} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium" style={{ color: tone.inkSoft }}>Début</label>
+              <input type="date" className="df-input df-mono df-at-tap w-full rounded-md px-3 py-2 text-sm" style={field} value={editing.start} onChange={(e) => setEditing({ ...editing, start: e.target.value, end: editing.end < e.target.value ? e.target.value : editing.end })} disabled={!canEdit} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium" style={{ color: tone.inkSoft }}>Fin</label>
+              <input type="date" className="df-input df-mono df-at-tap w-full rounded-md px-3 py-2 text-sm" style={field} value={editing.end} min={editing.start} onChange={(e) => setEditing({ ...editing, end: e.target.value })} disabled={!canEdit} />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: tone.inkSoft }}>Membre de l'équipe</label>
+            <select className="df-select df-at-tap w-full rounded-md px-3 py-2 text-[15px]" style={field} value={editing.memberUserId || ""} onChange={(e) => setEditing({ ...editing, memberUserId: e.target.value })} disabled={!canEdit}>
+              <option value="">Non assigné</option>
+              {members.map((m) => <option key={m.userId} value={m.userId}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: tone.inkSoft }}>Chantier</label>
+            <input className="df-input df-at-tap w-full rounded-md px-3 py-2 text-[15px]" style={{ ...field, background: tone.paper }} value={editing.chantier || ""} readOnly />
+          </div>
+        </div>
+        <div className="mt-5 flex items-center justify-between gap-2">
+          <div>{canEdit && editing.id && <button onClick={onDelete} className="df-at-tap flex items-center gap-1.5 text-sm font-medium" style={{ color: tone.danger }}><Trash2 size={15} /> Supprimer</button>}</div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setEditing(null)} className="df-at-tap rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${tone.line}`, color: tone.inkSoft }}>{canEdit ? "Annuler" : "Fermer"}</button>
+            {canEdit && <button onClick={onSave} className="df-at-tap rounded-lg px-4 py-2 text-sm font-bold" style={{ background: tone.accent, color: "white" }}>Enregistrer</button>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Liste des chantiers + onglet Planning d'équipe.
+function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLocked, isViewer, onOpenChantier, onNewChantier }) {
+  const tone = atelierTone(darkMode);
+  const [tab, setTab] = useState("chantiers");
+  const [newName, setNewName] = useState("");
+  const [asking, setAsking] = useState(false);
+  const { slots } = useAtelierPlanning(account?.organizationId);
+  const chantiers = useMemo(() => atelierChantierStats(documents, slots), [documents, slots]);
+  const card = { background: tone.surface, border: `1px solid ${tone.line}` };
+  const canEdit = !isLocked && !isViewer;
+  const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="df-display text-2xl font-bold">Chantiers</h1>
+          <p className="text-sm" style={{ color: tone.inkSoft }}>Tout ce qui concerne un chantier au même endroit : documents, planning, photos.</p>
+        </div>
+        <div className="flex gap-2 rounded-full p-1" style={{ background: tone.surface, border: `1px solid ${tone.line}` }}>
+          {[["chantiers", "Chantiers"], ["planning", "Planning d'équipe"]].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)} className="df-at-tap rounded-full px-4 py-2 text-sm font-medium" style={chip(tab === id)}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {tab === "planning" ? (
+        <div className="-mx-4 sm:-mx-6"><PlanningView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} /></div>
+      ) : (
+        <>
+          {canEdit && (
+            <div className="mb-4">
+              {!asking ? (
+                <button onClick={() => setAsking(true)} className="df-at-tap flex items-center gap-2 rounded-lg px-4 py-2 text-[15px] font-bold" style={{ background: tone.action, color: "#1C2733" }}><Plus size={18} /> Nouveau chantier</button>
+              ) : (
+                <form onSubmit={(e) => { e.preventDefault(); const n = newName.trim(); if (!n) return; setAsking(false); setNewName(""); onNewChantier(n); }} className="flex flex-wrap items-end gap-2 rounded-xl p-4" style={card}>
+                  <div className="min-w-[220px] flex-1">
+                    <label className="mb-1 block text-xs font-medium" style={{ color: tone.inkSoft }}>Nom du chantier</label>
+                    <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Ex. Rénovation cuisine Dupont" className="df-input df-at-tap w-full rounded-md px-3 py-2 text-[15px]" style={{ background: tone.surface, border: `1px solid ${tone.line}`, color: tone.ink }} />
+                  </div>
+                  <button type="submit" className="df-at-tap rounded-lg px-4 py-2 text-sm font-bold" style={{ background: tone.accent, color: "white" }}>Créer le premier document</button>
+                  <button type="button" onClick={() => { setAsking(false); setNewName(""); }} className="df-at-tap rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${tone.line}`, color: tone.inkSoft }}>Annuler</button>
+                  <p className="w-full text-xs" style={{ color: tone.inkSoft }}>Un chantier apparaît ici dès qu'un document porte son nom. Choisis le premier document à créer, le nom du chantier sera déjà rempli.</p>
+                </form>
+              )}
+            </div>
+          )}
+          {chantiers.length === 0 ? (
+            <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
+              <HardHat size={28} style={{ color: tone.inkSoft, margin: "0 auto 8px" }} />
+              <p className="text-[15px] font-semibold">Aucun chantier pour l'instant</p>
+              <p className="mt-1 text-sm" style={{ color: tone.inkSoft }}>Renseigne le champ « Chantier » sur un devis ou une facture, ou appuie sur « Nouveau chantier ».</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {chantiers.map((c) => (
+                <button key={c.nom} onClick={() => onOpenChantier(c.nom)} className="df-at-tap flex flex-col gap-2 rounded-xl p-4 text-left" style={card}>
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block truncate text-[15px] font-semibold">{c.nom}</span>
+                      <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>{c.client || "Client non renseigné"} · {c.docs.length} document{c.docs.length > 1 ? "s" : ""}{c.photos ? ` · ${c.photos} photo${c.photos > 1 ? "s" : ""}` : ""}</span>
+                    </span>
+                    <ChevronRight size={18} className="shrink-0" style={{ color: tone.inkSoft }} />
+                  </span>
+                  <span className="grid grid-cols-3 gap-2 text-xs">
+                    <span><span className="block" style={{ color: tone.inkSoft }}>Prévu</span><span className="df-mono font-medium">{eur(c.devisTotal)}</span></span>
+                    <span><span className="block" style={{ color: tone.inkSoft }}>Facturé</span><span className="df-mono font-medium">{eur(c.factureTotal)}</span></span>
+                    <span><span className="block" style={{ color: tone.inkSoft }}>Écart</span><span className="df-mono font-semibold" style={{ color: c.ecart >= 0 ? tone.success : tone.danger }}>{c.ecart >= 0 ? "+" : ""}{eur(c.ecart)}</span></span>
+                  </span>
+                  {c.nextSlot && <span className="flex items-center gap-1.5 text-xs" style={{ color: tone.accent }}><Calendar size={13} /> {fr(c.nextSlot.start)} : {c.nextSlot.title}{c.nextSlot.memberLabel ? ` (${c.nextSlot.memberLabel})` : ""}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Fiche d'un chantier : documents groupés par famille, créneaux du
+// planning, photos de tous ses rapports, PV et situations.
+function AtelierChantierView({ name, documents, account, darkMode, isLocked, isViewer, onBack, onOpenDoc, onCreateForChantier }) {
+  const tone = atelierTone(darkMode);
+  const [tab, setTab] = useState("documents");
+  const [editing, setEditing] = useState(null);
+  const [photoUrls, setPhotoUrls] = useState({});
+  const { slots, members, saving, persist } = useAtelierPlanning(account?.organizationId);
+  const canEdit = !isLocked && !isViewer;
+  const card = { background: tone.surface, border: `1px solid ${tone.line}` };
+  const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
+
+  const stats = useMemo(() => atelierChantierStats(documents, slots).find((c) => c.nom === name) || { nom: name, docs: [], devisTotal: 0, factureTotal: 0, ecart: 0, client: "", photos: 0, slots: [], nextSlot: null }, [documents, slots, name]);
+  const families = ATELIER_FAMILIES.map((f) => ({ ...f, docs: stats.docs.filter((d) => f.services.includes(d.type)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)) })).filter((f) => f.docs.length);
+  const photoDocs = stats.docs.filter((d) => Array.isArray(d.photos) && d.photos.length);
+  const allPhotos = photoDocs.flatMap((d) => d.photos.map((p) => ({ ...p, doc: d })));
+  const pathsKey = allPhotos.map((p) => p.path).join("|");
+  useEffect(() => {
+    let cancelled = false;
+    if (!pathsKey || tab !== "photos") return;
+    signPhotoPaths(pathsKey.split("|")).then((map) => { if (!cancelled) setPhotoUrls(map); }).catch((err) => console.error("Erreur de chargement des photos", err));
+    return () => { cancelled = true; };
+  }, [pathsKey, tab]);
+
+  const todayIso = toIsoDate(new Date());
+  const upcoming = stats.slots.filter((s) => s.end >= todayIso);
+  const past = stats.slots.filter((s) => s.end < todayIso).reverse();
+  function newSlot() {
+    if (!canEdit) return;
+    setEditing({ id: null, title: "", start: todayIso, end: todayIso, memberUserId: members[0]?.userId || "", chantier: name });
+  }
+  function saveSlot() {
+    if (!editing.title.trim()) { alert("Indique un titre pour ce créneau."); return; }
+    if (editing.end < editing.start) { alert("La date de fin doit être après la date de début."); return; }
+    const member = members.find((m) => m.userId === editing.memberUserId);
+    const now = Date.now();
+    const base = { title: editing.title.trim(), start: editing.start, end: editing.end, memberUserId: member?.userId || "", memberLabel: member?.label || "", chantier: name, updatedAt: now };
+    if (editing.id) persist((slots || []).map((s) => (s.id === editing.id ? { ...s, ...base } : s)));
+    else persist([...(slots || []), { id: nextId("pl"), createdAt: now, ...base }]);
+    setEditing(null);
+  }
+  function deleteSlot() {
+    if (!editing?.id || !window.confirm(`Supprimer le créneau « ${editing.title} » ?`)) return;
+    persist((slots || []).filter((s) => s.id !== editing.id));
+    setEditing(null);
+  }
+  const slotRow = (s) => (
+    <button key={s.id} onClick={() => setEditing({ ...s })} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: `1px solid ${tone.line}` }}>
+      <span className="df-mono shrink-0 text-sm" style={{ color: tone.inkSoft }}>{fr(s.start)}{s.end !== s.start ? ` → ${fr(s.end)}` : ""}</span>
+      <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{s.title}</span>
+      {(members.find((m) => m.userId === s.memberUserId)?.label || s.memberLabel) && <span className="hidden shrink-0 rounded-full px-2 py-0.5 text-xs sm:inline" style={{ background: tone.accentSoft, color: tone.accent }}>{members.find((m) => m.userId === s.memberUserId)?.label || s.memberLabel}</span>}
+      <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+    </button>
+  );
+
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      <button onClick={onBack} className="df-at-tap mb-3 flex items-center gap-1 text-sm font-medium" style={{ color: tone.inkSoft }}><ArrowLeft size={16} /> Tous les chantiers</button>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="df-display truncate text-2xl font-bold">{name}</h1>
+          <p className="text-sm" style={{ color: tone.inkSoft }}>{stats.client || "Client non renseigné"} · {stats.docs.length} document{stats.docs.length > 1 ? "s" : ""}</p>
+        </div>
+        {canEdit && (
+          <button onClick={() => onCreateForChantier(name)} className="df-at-tap flex items-center gap-2 rounded-lg px-4 py-2 text-[15px] font-bold" style={{ background: tone.action, color: "#1C2733" }}><Plus size={18} /> Créer pour ce chantier</button>
+        )}
+      </div>
+
+      <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3">
+        {[["Prévu (devis)", eur(stats.devisTotal), tone.ink], ["Facturé", eur(stats.factureTotal), tone.ink], ["Écart", `${stats.ecart >= 0 ? "+" : ""}${eur(stats.ecart)}`, stats.ecart >= 0 ? tone.success : tone.danger]].map(([label, value, color]) => (
+          <div key={label} className="rounded-xl p-3 sm:p-4" style={card}>
+            <div className="text-xs" style={{ color: tone.inkSoft }}>{label}</div>
+            <div className="df-mono truncate text-sm font-semibold sm:text-lg" style={{ color }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mb-4 flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
+        {[["documents", `Documents (${stats.docs.length})`], ["planning", `Planning (${stats.slots.length})`], ["photos", `Photos (${allPhotos.length})`]].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} className="df-at-tap shrink-0 rounded-full px-4 py-2 text-sm font-medium" style={chip(tab === id)}>{label}</button>
+        ))}
+      </div>
+
+      {tab === "documents" && (
+        families.length === 0 ? (
+          <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
+            <p className="text-[15px] font-semibold">Aucun document sur ce chantier</p>
+            <p className="mt-1 text-sm" style={{ color: tone.inkSoft }}>Appuie sur « Créer pour ce chantier » : le nom sera déjà rempli.</p>
+          </div>
+        ) : families.map((f) => (
+          <div key={f.id} className="mb-4">
+            <h2 className="df-display mb-2 text-sm font-semibold uppercase tracking-wide" style={{ color: tone.accent }}>{f.label}</h2>
+            <div className="overflow-hidden rounded-xl" style={card}>
+              {f.docs.map((d, i) => {
+                const amount = atelierDocAmount(d);
+                const statuses = atelierStatusesFor(d.type);
+                const badge = atelierDocBadge(d);
+                return (
+                  <button key={d.id} onClick={() => onOpenDoc(d.id)} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] font-semibold">{atelierServiceLabel(d.type)} <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{d.docNumber}</span></span>
+                      <span className="block truncate text-sm" style={{ color: tone.inkSoft }}>{atelierDocDate(d)}{badge ? ` · ${badge}` : ""}{Array.isArray(d.photos) && d.photos.length ? ` · ${d.photos.length} photo${d.photos.length > 1 ? "s" : ""}` : ""}</span>
+                    </span>
+                    {statuses ? (
+                      <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${atelierStatusColor(d.status, tone)}1A`, color: atelierStatusColor(d.status, tone) }}>{atelierCapitalize(d.status || "brouillon")}</span>
+                    ) : (
+                      <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: d.workStage === "termine" ? `${tone.success}1A` : tone.paper, color: d.workStage === "termine" ? tone.success : tone.inkSoft }}>{d.workStage === "termine" ? "Terminé" : "En cours"}</span>
+                    )}
+                    {amount && <span className="df-mono hidden shrink-0 text-sm sm:inline">{eur(amount.value)}</span>}
+                    <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))
+      )}
+
+      {tab === "planning" && (
+        <div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm" style={{ color: tone.inkSoft }}>{slots === null ? "Chargement…" : upcoming.length ? `${upcoming.length} créneau${upcoming.length > 1 ? "x" : ""} à venir` : "Aucun créneau à venir"}{saving ? " · enregistrement…" : ""}</p>
+            {canEdit && <button onClick={newSlot} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold" style={{ background: tone.accent, color: "white" }}><Plus size={16} /> Ajouter un créneau</button>}
+          </div>
+          {stats.slots.length === 0 && slots !== null ? (
+            <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
+              <p className="text-[15px] font-semibold">Rien de planifié sur ce chantier</p>
+              <p className="mt-1 text-sm" style={{ color: tone.inkSoft }}>Ajoute un créneau pour placer un membre de l'équipe à une date donnée. Il apparaîtra aussi dans le Planning d'équipe.</p>
+            </div>
+          ) : (
+            <>
+              {upcoming.length > 0 && <div className="mb-3 overflow-hidden rounded-xl" style={card}><div className="px-4 py-2 text-xs font-semibold uppercase tracking-wide" style={{ color: tone.inkSoft }}>À venir</div>{upcoming.map(slotRow)}</div>}
+              {past.length > 0 && <div className="overflow-hidden rounded-xl" style={card}><div className="px-4 py-2 text-xs font-semibold uppercase tracking-wide" style={{ color: tone.inkSoft }}>Passés</div>{past.map(slotRow)}</div>}
+            </>
+          )}
+          <AtelierSlotModal editing={editing} setEditing={setEditing} members={members} canEdit={canEdit} onSave={saveSlot} onDelete={deleteSlot} darkMode={darkMode} />
+        </div>
+      )}
+
+      {tab === "photos" && (
+        allPhotos.length === 0 ? (
+          <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
+            <Camera size={26} style={{ color: tone.inkSoft, margin: "0 auto 8px" }} />
+            <p className="text-[15px] font-semibold">Aucune photo sur ce chantier</p>
+            <p className="mt-1 text-sm" style={{ color: tone.inkSoft }}>Les photos ajoutées aux rapports d'intervention, PV de réception et situations de travaux de ce chantier apparaissent ici.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+            {allPhotos.map((p) => (
+              <button key={p.id} onClick={() => onOpenDoc(p.doc.id)} className="relative overflow-hidden rounded-xl text-left" style={{ aspectRatio: "1 / 1", ...card }} title={`${atelierServiceLabel(p.doc.type)} ${p.doc.docNumber}`}>
+                {photoUrls[p.path] ? <img src={photoUrls[p.path]} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center"><Loader2 size={16} className="animate-spin" style={{ color: tone.inkSoft }} /></span>}
+                <span className="absolute inset-x-0 bottom-0 truncate px-2 py-1 text-[11px] font-medium text-white" style={{ background: "linear-gradient(to top, rgba(28,39,51,0.75), transparent)" }}>{atelierServiceLabel(p.doc.type)} {p.doc.docNumber}</span>
+              </button>
+            ))}
+          </div>
+        )
       )}
     </div>
   );
