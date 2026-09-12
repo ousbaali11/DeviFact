@@ -17,7 +17,7 @@ import {
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
   Maximize2, Minimize2, Camera, ImagePlus,
   Home, HardHat, Files, ChevronRight,
-  Filter, MoreHorizontal, Paperclip,
+  Filter, MoreHorizontal, Paperclip, Warehouse, Archive, ArrowDownToLine, ArrowUpFromLine,
 } from "lucide-react";
 
 // Chaque couleur pointe vers une variable CSS (définie par le thème
@@ -3222,14 +3222,21 @@ function DeviFactAppInner() {
   const [productsLoading, setProductsLoading] = useState(false);
   const [productsError, setProductsError] = useState("");
   const [legacyImportInfo, setLegacyImportInfo] = useState(null);
-  const [warehouses] = useState([]); // étape 2
+  const [warehouses, setWarehouses] = useState([]);
+  const [stockDetail, setStockDetail] = useState({});
+  const [warehousePrices, setWarehousePrices] = useState({});
+  const [movements, setMovements] = useState([]);
+  const [movementsLoading, setMovementsLoading] = useState(false);
   async function loadProducts(orgId = account?.organizationId) {
     if (!orgId) return;
     setProductsLoading(true);
     try {
-      const res = await fetchProducts(orgId);
+      const [res, wh, detail, prices] = await Promise.all([fetchProducts(orgId), fetchWarehouses(orgId), fetchStockDetail(orgId), fetchWarehousePrices(orgId)]);
       setProducts(res.products);
       setStockByProduct(res.stockByProduct);
+      setWarehouses(wh);
+      setStockDetail(detail);
+      setWarehousePrices(prices);
       setProductsError("");
     } catch (err) {
       console.error("Erreur de chargement des produits", err);
@@ -3267,8 +3274,20 @@ function DeviFactAppInner() {
     const current = Number(stockByProduct[saved.id] ?? 0);
     const target = Number(options.stockTarget);
     if (Number.isFinite(target) && Math.abs(target - current) > 0.0005) {
-      const { error: mvError } = await db.from("stock_movements").insert({ organization_id: orgId, product_id: saved.id, warehouse_id: null, kind: "ajustement", quantity: Math.round((target - current) * 1000) / 1000, reason: row.id ? "Ajustement depuis la fiche produit" : "Stock de départ", created_by: account?.id || null });
+      const defaultWarehouse = warehouses.find((w) => w.is_default) || warehouses[0] || null;
+      const { error: mvError } = await db.from("stock_movements").insert({ organization_id: orgId, product_id: saved.id, warehouse_id: defaultWarehouse?.id || null, kind: "ajustement", quantity: Math.round((target - current) * 1000) / 1000, reason: row.id ? "Ajustement depuis la fiche produit" : "Stock de départ", created_by: account?.id || null });
       if (mvError) { console.error("Erreur d'ajustement du stock", mvError); alert("Produit enregistré, mais la quantité en stock n'a pas pu être mise à jour."); }
+    }
+    // Prix de vente par entrepôt (table facultative de l'étape 2).
+    if (options.warehousePrices) {
+      const entries = Object.entries(options.warehousePrices).filter(([wid]) => warehouses.some((w) => w.id === wid));
+      const rows = entries.map(([wid, v]) => ({ organization_id: orgId, product_id: saved.id, warehouse_id: wid, sale_price_ht: round2(v.ht), sale_price_ttc: round2(v.ttc) }));
+      const { error: delError } = await db.from("product_warehouse_prices").delete().eq("product_id", saved.id);
+      if (delError) console.warn("Prix par entrepôt non enregistrés (table absente ?)", delError.message);
+      else if (rows.length) {
+        const { error: upError } = await db.from("product_warehouse_prices").insert(rows);
+        if (upError) { console.error("Erreur d'enregistrement des prix par entrepôt", upError); alert("Produit enregistré, mais les prix par entrepôt n'ont pas pu être enregistrés."); }
+      }
     }
     // Pièce jointe : envoi après l'enregistrement (il faut l'identifiant).
     try {
@@ -3309,6 +3328,48 @@ function DeviFactAppInner() {
     const { error } = await db.from("products").update({ is_active: !!active }).eq("id", id);
     if (error) { console.error("Erreur de mise à jour du produit", error); alert("Impossible de modifier ce produit pour l'instant."); return; }
     await loadProducts();
+  }
+  async function loadMovements(orgId = account?.organizationId) {
+    if (!orgId) return;
+    setMovementsLoading(true);
+    try { setMovements(await fetchMovements(orgId)); }
+    catch (err) { console.error("Erreur de chargement des mouvements de stock", err); }
+    finally { setMovementsLoading(false); }
+  }
+  // Entrepôts : création / modification (un seul « par défaut » par organisation).
+  async function saveWarehouse(row) {
+    if (isLocked) return;
+    const orgId = account?.organizationId;
+    if (row.is_default) {
+      const { error: resetError } = await db.from("warehouses").update({ is_default: false }).eq("organization_id", orgId).eq("is_default", true);
+      if (resetError) throw new Error("Impossible de modifier l'entrepôt par défaut pour l'instant.");
+    }
+    const payload = { organization_id: orgId, name: row.name, address: row.address || "", is_default: !!row.is_default };
+    if (row.id) payload.id = row.id; else payload.created_by = account?.id || null;
+    const { error } = await db.from("warehouses").upsert(payload);
+    if (error) { console.error("Erreur d'enregistrement de l'entrepôt", error); throw new Error("Impossible d'enregistrer cet entrepôt pour l'instant."); }
+    await loadProducts(orgId);
+  }
+  async function deleteWarehouse(id) {
+    if (isLocked) return;
+    const w = warehouses.find((x) => x.id === id);
+    const qty = Object.values(stockDetail).reduce((s, d) => s + Math.abs(d.byWarehouse?.[id] || 0), 0);
+    if (!window.confirm(`Supprimer l'entrepôt « ${w?.name || ""} » ?${qty > 0.0005 ? " Les quantités qui s'y trouvent resteront dans l'historique, rattachées à « sans entrepôt »." : ""}`)) return;
+    const { error } = await db.from("warehouses").delete().eq("id", id);
+    if (error) { console.error("Erreur de suppression de l'entrepôt", error); alert("Impossible de supprimer cet entrepôt pour l'instant."); return; }
+    await loadProducts();
+  }
+  // Entrée ou sortie de stock : un document numéroté, une ligne de
+  // mouvement par produit (quantité signée). Renvoie le numéro créé.
+  async function submitStockMovement({ kind, warehouseId, movedAt, reason, lines }) {
+    if (isLocked) throw new Error("Compte en lecture seule.");
+    const orgId = account?.organizationId;
+    const ref = await nextStockDocumentRef(orgId, kind);
+    const rows = lines.map((l) => ({ organization_id: orgId, product_id: l.productId, warehouse_id: warehouseId || null, kind, quantity: Math.round(STOCK_KINDS[kind].sign * l.quantity * 1000) / 1000, moved_at: movedAt, reason: reason || "", document_ref: ref, created_by: account?.id || null }));
+    const { error } = await db.from("stock_movements").insert(rows);
+    if (error) { console.error("Erreur d'enregistrement du mouvement de stock", error); throw new Error("Impossible d'enregistrer ce mouvement pour l'instant."); }
+    await Promise.all([loadProducts(orgId), loadMovements(orgId)]);
+    return ref;
   }
   // Depuis l'éditeur : « Enregistrer comme produit » (ex-prestation).
   async function saveLineAsProduct(line) {
@@ -4104,6 +4165,25 @@ function DeviFactAppInner() {
 
   const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode };
 
+  // Pages de la Gestion de stock (mêmes composants dans les trois
+  // versions) — réservées aux forfaits Pro et Entreprise.
+  function renderStockPage(which, goPricing) {
+    if (!hasAccess(account, "pro")) {
+      return <LockedFeature onGoToPricing={goPricing} title="Gestion de stock réservée aux forfaits Pro et Entreprise" text="Produits, entrepôts et mouvements de stock font partie des forfaits Pro et Entreprise." />;
+    }
+    const canEdit = !isLocked && !isViewer;
+    if (which === "stock-entrepots") {
+      return <WarehousesView warehouses={warehouses} products={products} stockDetail={stockDetail} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onSave={saveWarehouse} onDelete={deleteWarehouse} />;
+    }
+    if (which === "stock-entree" || which === "stock-sortie") {
+      return <StockMovementView key={which} kind={which === "stock-entree" ? "entree" : "sortie"} products={products} warehouses={warehouses} stockDetail={stockDetail} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onSubmit={submitStockMovement} onGoToProducts={() => setView("stock-produits")} onGoToWarehouses={() => setView("stock-entrepots")} />;
+    }
+    if (which === "stock-documents") {
+      return <StockDocumentsView movements={movements} loading={movementsLoading} products={products} warehouses={warehouses} account={account} siteSettings={siteSettings} darkMode={darkMode} onRefresh={loadMovements} onGoToEntry={() => setView("stock-entree")} onGoToExit={() => setView("stock-sortie")} />;
+    }
+    return <ProductsView products={products} stockByProduct={stockByProduct} stockDetail={stockDetail} warehouses={warehouses} warehousePrices={warehousePrices} loading={productsLoading} error={productsError} importInfo={legacyImportInfo} isLocked={isLocked} isViewer={isViewer} account={account} siteSettings={siteSettings} darkMode={darkMode} onSave={saveProduct} onDelete={deleteProduct} onDuplicate={duplicateProduct} onToggleActive={toggleProductActive} onGoToPricing={goPricing} />;
+  }
+
   // ---------------------------------------------------------------------
   // Version "Atelier" : une seule branche, avant les écrans classique et
   // avancée, qui rend les pages dans la coque Atelier. Les éditeurs sont
@@ -4165,10 +4245,8 @@ function DeviFactAppInner() {
       page = <ApiView account={account} siteSettings={siteSettings} />;
     } else if (view === "account") {
       page = <AccountView account={account} siteSettings={siteSettings} />;
-    } else if (view === "stock-produits" || view === "prestations") {
-      page = hasAccess(account, "pro")
-        ? <ProductsView products={products} stockByProduct={stockByProduct} warehouses={warehouses} loading={productsLoading} error={productsError} importInfo={legacyImportInfo} isLocked={isLocked} isViewer={isViewer} account={account} siteSettings={siteSettings} darkMode={darkMode} onSave={saveProduct} onDelete={deleteProduct} onDuplicate={duplicateProduct} onToggleActive={toggleProductActive} onGoToPricing={goPricing} />
-        : <LockedFeature onGoToPricing={goPricing} title="Gestion de stock réservée aux forfaits Pro et Entreprise" text="Produits, entrepôts et mouvements de stock font partie des forfaits Pro et Entreprise." />;
+    } else if (isStockView(view) || view === "prestations") {
+      page = renderStockPage(view, goPricing);
     } else if (view === "pricing") {
       page = (
         <PricingView
@@ -4404,16 +4482,12 @@ function DeviFactAppInner() {
     );
   }
 
-  if (view === "stock-produits" || view === "prestations") {
+  if (isStockView(view) || view === "prestations") {
     return (
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        {hasAccess(account, "pro") ? (
-          <ProductsView products={products} stockByProduct={stockByProduct} warehouses={warehouses} loading={productsLoading} error={productsError} importInfo={legacyImportInfo} isLocked={isLocked} isViewer={isViewer} account={account} siteSettings={siteSettings} darkMode={darkMode} onSave={saveProduct} onDelete={deleteProduct} onDuplicate={duplicateProduct} onToggleActive={toggleProductActive} onGoToPricing={() => setView("pricing")} />
-        ) : (
-          <LockedFeature onGoToPricing={() => setView("pricing")} title="Gestion de stock réservée aux forfaits Pro et Entreprise" text="Produits, entrepôts et mouvements de stock font partie des forfaits Pro et Entreprise." />
-        )}
+        {renderStockPage(view, () => setView("pricing"))}
       </div>
     );
   }
@@ -11697,7 +11771,10 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
 // ===========================================================================
 const STOCK_MENU = [
   { id: "stock-produits", label: "Produits", icon: Package },
-  // Étapes suivantes : documents de stock, entrepôts, entrée, sortie.
+  { id: "stock-documents", label: "Documents de stock", icon: Archive },
+  { id: "stock-entrepots", label: "Entrepôts", icon: Warehouse },
+  { id: "stock-entree", label: "Entrée", icon: ArrowDownToLine },
+  { id: "stock-sortie", label: "Sortie", icon: ArrowUpFromLine },
 ];
 const isStockView = (view) => typeof view === "string" && view.startsWith("stock-");
 const PRODUCT_KINDS = [["produit", "Produit"], ["service", "Prestation de service"]];
@@ -11848,8 +11925,389 @@ function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconCo
   );
 }
 
+// ---------------------------------------------------------------------------
+// Gestion de stock — étape 2 : entrepôts, entrées, sorties, documents de
+// stock. Un « document de stock » = l'ensemble des mouvements créés en une
+// fois (même document_ref : ENT-2026-001, SOR-2026-002…). Le stock reste
+// toujours la somme des mouvements (vue product_stock).
+// ---------------------------------------------------------------------------
+const STOCK_KINDS = {
+  entree: { label: "Entrée", prefix: "ENT", sign: 1, verb: "Entrée de stock" },
+  sortie: { label: "Sortie", prefix: "SOR", sign: -1, verb: "Sortie de stock" },
+  ajustement: { label: "Ajustement", prefix: "AJU", sign: 1, verb: "Ajustement" },
+};
+async function fetchWarehouses(organizationId) {
+  const { data, error } = await db.from("warehouses").select("*").eq("organization_id", organizationId).order("is_default", { ascending: false }).order("name", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+// Stock par produit : total et détail par entrepôt (clé "none" = sans entrepôt).
+async function fetchStockDetail(organizationId) {
+  const { data, error } = await db.from("product_stock").select("product_id, warehouse_id, quantity").eq("organization_id", organizationId);
+  if (error) throw error;
+  const detail = {};
+  (data || []).forEach((r) => {
+    const q = Number(r.quantity || 0);
+    const d = detail[r.product_id] || (detail[r.product_id] = { total: 0, byWarehouse: {} });
+    d.total += q;
+    const key = r.warehouse_id || "none";
+    d.byWarehouse[key] = (d.byWarehouse[key] || 0) + q;
+  });
+  return detail;
+}
+async function fetchMovements(organizationId) {
+  const { data, error } = await db.from("stock_movements").select("*").eq("organization_id", organizationId).order("moved_at", { ascending: false }).limit(3000);
+  if (error) throw error;
+  return data || [];
+}
+// Prix par entrepôt : { productId: { warehouseId: { ht, ttc } } } — table
+// facultative (étape 2), absence tolérée.
+async function fetchWarehousePrices(organizationId) {
+  const { data, error } = await db.from("product_warehouse_prices").select("product_id, warehouse_id, sale_price_ht, sale_price_ttc").eq("organization_id", organizationId);
+  if (error) { console.warn("Prix par entrepôt indisponibles (table product_warehouse_prices absente ?)", error.message); return {}; }
+  const map = {};
+  (data || []).forEach((r) => { (map[r.product_id] || (map[r.product_id] = {}))[r.warehouse_id] = { ht: Number(r.sale_price_ht) || 0, ttc: Number(r.sale_price_ttc) || 0 }; });
+  return map;
+}
+// Numéro du prochain document de stock : PREFIX-ANNÉE-NNN.
+async function nextStockDocumentRef(organizationId, kind) {
+  const year = new Date().getFullYear();
+  const prefix = `${STOCK_KINDS[kind].prefix}-${year}-`;
+  const { data } = await db.from("stock_movements").select("document_ref").eq("organization_id", organizationId).like("document_ref", `${prefix}%`);
+  const max = (data || []).reduce((m, r) => Math.max(m, parseInt(String(r.document_ref).slice(prefix.length), 10) || 0), 0);
+  return `${prefix}${String(max + 1).padStart(3, "0")}`;
+}
+const stockQty = (n) => Number(n || 0).toLocaleString("fr-FR", { maximumFractionDigits: 3 });
+const warehouseName = (warehouses, id) => (id ? warehouses.find((w) => w.id === id)?.name || "Entrepôt supprimé" : "Sans entrepôt");
+
+// Membres de l'organisation (email par identifiant) pour l'affichage de
+// l'auteur d'un mouvement.
+function useOrgMemberLabels(organizationId) {
+  const [labels, setLabels] = useState({});
+  useEffect(() => {
+    if (!organizationId) return;
+    let cancelled = false;
+    db.rpc("get_organization_members_with_profiles", { org_id: organizationId }).then(({ data, error }) => {
+      if (error || cancelled) return;
+      const map = {};
+      (data || []).forEach((m) => { map[m.user_id] = m.email || "Membre"; });
+      setLabels(map);
+    });
+    return () => { cancelled = true; };
+  }, [organizationId]);
+  return labels;
+}
+
+// Page Entrepôts : liste, création / modification, stock par entrepôt.
+function WarehousesView({ warehouses, products, stockDetail, canEdit, siteSettings, darkMode, onSave, onDelete }) {
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  const isAtelier = siteSettings?.landingPageVersion === "atelier";
+  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const card = { background: surface, border: `1px solid ${colors.line}` };
+  const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [openId, setOpenId] = useState(null);
+  useEscapeToClose(!!editing, () => setEditing(null));
+  const stockRows = (wid) => products
+    .map((p) => ({ p, qty: stockDetail?.[p.id]?.byWarehouse?.[wid || "none"] || 0 }))
+    .filter((r) => Math.abs(r.qty) > 0.0005)
+    .sort((a, b) => a.p.name.localeCompare(b.p.name, "fr"));
+  const unassigned = stockRows(null);
+  async function handleSave() {
+    if (!String(editing.name || "").trim()) { setError("Le nom de l'entrepôt est obligatoire."); return; }
+    setSaving(true); setError("");
+    try { await onSave({ ...editing, name: editing.name.trim(), address: String(editing.address || "").trim() }); setEditing(null); }
+    catch (err) { setError(err.message || "Impossible d'enregistrer cet entrepôt pour l'instant."); }
+    finally { setSaving(false); }
+  }
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Warehouse size={18} /></div>}
+          <h1 className="df-display text-2xl font-semibold">Entrepôts</h1>
+          <p className="text-sm" style={{ color: colors.inkSoft }}>Tes lieux de stockage (dépôt, camion, chantier…). Chaque entrée ou sortie de stock est rattachée à un entrepôt ; l'entrepôt par défaut est proposé en premier.</p>
+        </div>
+        {canEdit && <button onClick={() => setEditing({ name: "", address: "", is_default: warehouses.length === 0 })} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.brassDark }}><Plus size={15} /> Nouvel entrepôt</button>}
+      </div>
+      {warehouses.length === 0 ? (
+        <div className="rounded-2xl px-6 py-16 text-center" style={{ ...card, borderStyle: "dashed" }}>
+          <Warehouse size={28} style={{ color: colors.inkSoft, margin: "0 auto 8px" }} />
+          <p className="df-display text-lg font-semibold">Aucun entrepôt pour l'instant</p>
+          <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Crée au moins un entrepôt (par exemple « Dépôt ») pour rattacher tes entrées et sorties de stock.</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {warehouses.map((w) => {
+            const rows = stockRows(w.id);
+            const isOpen = openId === w.id;
+            return (
+              <div key={w.id} className="overflow-hidden rounded-2xl" style={card}>
+                <div className="flex flex-wrap items-center gap-3 p-4">
+                  <button onClick={() => setOpenId(isOpen ? null : w.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg" style={{ background: colors.paper, color: colors.slate }}><Warehouse size={18} /></span>
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">{w.name} {w.is_default && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase" style={{ background: `${colors.moss}18`, color: colors.moss }}>Par défaut</span>}</span>
+                      <span className="block truncate text-xs" style={{ color: colors.inkSoft }}>{w.address || "Adresse non renseignée"} · {rows.length} produit{rows.length > 1 ? "s" : ""} en stock</span>
+                    </span>
+                    <ChevronDown size={16} className="shrink-0" style={{ color: colors.inkSoft, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                  </button>
+                  {canEdit && (
+                    <span className="flex items-center gap-1">
+                      <button onClick={() => setEditing({ ...w })} className="rounded-md p-2" style={{ color: colors.inkSoft }} title="Modifier"><Pencil size={15} /></button>
+                      <button onClick={() => onDelete(w.id)} className="rounded-md p-2" style={{ color: colors.brick }} title="Supprimer"><Trash2 size={15} /></button>
+                    </span>
+                  )}
+                </div>
+                {isOpen && (
+                  <div className="border-t px-4 pb-4 pt-2" style={{ borderColor: colors.line }}>
+                    {rows.length === 0 ? <p className="py-2 text-xs" style={{ color: colors.inkSoft }}>Aucun produit en stock dans cet entrepôt.</p> : rows.map(({ p, qty }) => (
+                      <div key={p.id} className="flex items-center justify-between gap-2 py-1.5 text-sm" style={{ borderTop: `1px solid ${colors.line}` }}>
+                        <span className="truncate">{p.name}{p.reference ? <span className="df-mono text-xs" style={{ color: colors.inkSoft }}> · {p.reference}</span> : null}</span>
+                        <span className="df-mono shrink-0" style={{ color: qty < 0 ? colors.brick : colors.ink }}>{stockQty(qty)} {p.unit || ""}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {unassigned.length > 0 && (
+            <div className="rounded-2xl p-4" style={{ ...card, borderStyle: "dashed" }}>
+              <div className="mb-1 text-sm font-semibold">Stock sans entrepôt</div>
+              <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Quantités saisies avant la création d'un entrepôt, ou dont l'entrepôt a été supprimé. Une entrée ou une sortie permet de les rattacher.</p>
+              {unassigned.map(({ p, qty }) => (
+                <div key={p.id} className="flex items-center justify-between gap-2 py-1 text-sm"><span className="truncate">{p.name}</span><span className="df-mono">{stockQty(qty)} {p.unit || ""}</span></div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" style={{ background: "rgba(27,42,51,0.5)" }} onClick={() => setEditing(null)}>
+          <div className="w-full max-w-md rounded-t-2xl p-5 sm:rounded-2xl" style={{ background: colors.surface, color: colors.ink, border: `1px solid ${colors.line}` }} onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between"><h2 className="df-display text-lg font-semibold">{editing.id ? "Modifier l'entrepôt" : "Nouvel entrepôt"}</h2><button onClick={() => setEditing(null)} style={{ color: colors.inkSoft }}><X size={18} /></button></div>
+            <div className="space-y-3">
+              <div><label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Nom *</label><input autoFocus className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="Ex. Dépôt principal, Camion 1" /></div>
+              <div><label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Adresse</label><textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, minHeight: "3.5rem" }} value={editing.address || ""} onChange={(e) => setEditing({ ...editing, address: e.target.value })} /></div>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!editing.is_default} onChange={(e) => setEditing({ ...editing, is_default: e.target.checked })} /> Entrepôt par défaut (proposé en premier dans les entrées et sorties)</label>
+              {error && <p className="text-sm" style={{ color: colors.brick }}>{error}</p>}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setEditing(null)} className="rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Annuler</button>
+              <button onClick={handleSave} disabled={saving} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: colors.brassDark, opacity: saving ? 0.7 : 1 }}>Enregistrer</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Formulaire d'entrée ou de sortie de stock : plusieurs produits, un
+// entrepôt, une date, un motif / référence.
+function StockMovementView({ kind, products, warehouses, stockDetail, canEdit, siteSettings, darkMode, onSubmit, onGoToProducts, onGoToWarehouses }) {
+  const meta = STOCK_KINDS[kind];
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  const isAtelier = siteSettings?.landingPageVersion === "atelier";
+  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const card = { background: surface, border: `1px solid ${colors.line}` };
+  const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
+  const activeProducts = useMemo(() => products.filter((p) => p.is_active).sort((a, b) => a.name.localeCompare(b.name, "fr")), [products]);
+  const defaultWarehouse = warehouses.find((w) => w.is_default) || warehouses[0] || null;
+  const defaultWarehouseId = defaultWarehouse?.id || "";
+  const todayLocal = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+  const [warehouseId, setWarehouseId] = useState(defaultWarehouseId);
+  const [movedAt, setMovedAt] = useState(todayLocal);
+  const [reason, setReason] = useState("");
+  const [lines, setLines] = useState([{ key: 1, productId: "", quantity: "", search: "" }]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(null);
+  // Entrepôts chargés après l'ouverture de la page : pré-sélection du défaut.
+  useEffect(() => { setWarehouseId((cur) => cur || defaultWarehouseId); }, [defaultWarehouseId]);
+  const stockIn = (productId) => stockDetail?.[productId]?.byWarehouse?.[warehouseId || "none"] || 0;
+  const updateLine = (key, p) => setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...p } : l)));
+  const addLine = () => setLines((prev) => [...prev, { key: Date.now(), productId: "", quantity: "", search: "" }]);
+  const removeLine = (key) => setLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== key) : prev));
+  function reset() { setLines([{ key: Date.now(), productId: "", quantity: "", search: "" }]); setReason(""); setMovedAt(todayLocal()); setError(""); }
+  async function handleSubmit() {
+    const valid = lines.filter((l) => l.productId && Number(l.quantity) > 0);
+    if (valid.length === 0) { setError("Ajoute au moins un produit avec une quantité supérieure à zéro."); return; }
+    const badQty = lines.find((l) => l.productId && !(Number(l.quantity) > 0));
+    if (badQty) { setError("Chaque ligne doit avoir une quantité supérieure à zéro."); return; }
+    if (kind === "sortie") {
+      const short = valid.filter((l) => Number(l.quantity) > stockIn(l.productId));
+      if (short.length && !window.confirm(`${short.length} produit(s) n'ont pas assez de stock dans cet entrepôt (le stock deviendra négatif). Continuer quand même ?`)) return;
+    }
+    setSubmitting(true); setError("");
+    try {
+      const ref = await onSubmit({ kind, warehouseId: warehouseId || null, movedAt: movedAt ? new Date(movedAt).toISOString() : new Date().toISOString(), reason: reason.trim(), lines: valid.map((l) => ({ productId: l.productId, quantity: Number(l.quantity) })) });
+      setDone({ ref, count: valid.length });
+      reset();
+    } catch (err) {
+      setError(err.message || "Impossible d'enregistrer ce mouvement pour l'instant.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+  const Icon = kind === "entree" ? ArrowDownToLine : ArrowUpFromLine;
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <div className="mb-6">
+        {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Icon size={18} /></div>}
+        <h1 className="df-display text-2xl font-semibold">{meta.verb}</h1>
+        <p className="text-sm" style={{ color: colors.inkSoft }}>{kind === "entree" ? "Réapprovisionnement : les quantités saisies s'ajoutent au stock de l'entrepôt choisi." : "Vente, utilisation sur chantier, casse… : les quantités saisies sont retirées du stock de l'entrepôt choisi."} Un document de stock numéroté est créé et conservé dans l'historique.</p>
+      </div>
+      {!canEdit && <p className="mb-4 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brick}12`, color: colors.brick }}>Ton rôle ou l'état du compte ne permet pas d'enregistrer des mouvements de stock.</p>}
+      {done && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}40`, color: colors.moss }}>
+          <span className="flex items-center gap-2"><Check size={16} /> {meta.label} <strong className="df-mono">{done.ref}</strong> enregistrée ({done.count} ligne{done.count > 1 ? "s" : ""}). Le stock est à jour.</span>
+          <button onClick={() => setDone(null)} style={{ color: colors.inkSoft }}><X size={14} /></button>
+        </div>
+      )}
+      {activeProducts.length === 0 && <p className="mb-4 rounded-xl px-4 py-3 text-sm" style={{ ...card, color: colors.inkSoft }}>Aucun produit actif. <button onClick={onGoToProducts} className="underline" style={{ color: colors.brassDark }}>Crée d'abord un produit</button>.</p>}
+      {warehouses.length === 0 && <p className="mb-4 rounded-xl px-4 py-3 text-sm" style={{ ...card, color: colors.inkSoft }}>Aucun entrepôt : le mouvement sera enregistré « sans entrepôt ». <button onClick={onGoToWarehouses} className="underline" style={{ color: colors.brassDark }}>Créer un entrepôt</button>.</p>}
+      <div className="rounded-2xl p-4 sm:p-5" style={card}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div><label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Entrepôt</label><select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} disabled={!canEdit || warehouses.length === 0}>{warehouses.length === 0 && <option value="">Sans entrepôt</option>}{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}{w.is_default ? " (par défaut)" : ""}</option>)}</select></div>
+          <div><label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Date</label><input type="datetime-local" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={movedAt} onChange={(e) => setMovedAt(e.target.value)} disabled={!canEdit} /></div>
+          <div><label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Motif / référence (optionnel)</label><input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={kind === "entree" ? "Ex. BL fournisseur n° 1234" : "Ex. Chantier Dupont, casse"} disabled={!canEdit} /></div>
+        </div>
+        <div className="mt-4 space-y-2">
+          <div className="hidden grid-cols-12 gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide sm:grid" style={{ color: colors.inkSoft }}><span className="col-span-7">Produit</span><span className="col-span-2 text-right">Stock actuel</span><span className="col-span-2 text-right">Quantité</span><span className="col-span-1"></span></div>
+          {lines.map((l) => {
+            const product = activeProducts.find((p) => p.id === l.productId);
+            const current = l.productId ? stockIn(l.productId) : null;
+            const after = product ? current + meta.sign * (Number(l.quantity) || 0) : null;
+            const filtered = l.search ? activeProducts.filter((p) => (p.name || "").toLowerCase().includes(l.search.toLowerCase()) || (p.reference || "").toLowerCase().includes(l.search.toLowerCase())) : activeProducts;
+            return (
+              <div key={l.key} className="grid grid-cols-12 items-center gap-2 rounded-lg p-2" style={{ background: colors.paper }}>
+                <div className="col-span-12 sm:col-span-7">
+                  {activeProducts.length > 12 && <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-xs" style={inputStyle} placeholder="Filtrer la liste…" value={l.search} onChange={(e) => updateLine(l.key, { search: e.target.value })} disabled={!canEdit} />}
+                  <select className="df-select w-full rounded-md px-2 py-2 text-sm" style={inputStyle} value={l.productId} onChange={(e) => updateLine(l.key, { productId: e.target.value })} disabled={!canEdit}>
+                    <option value="">— Choisir un produit —</option>
+                    {filtered.map((p) => <option key={p.id} value={p.id}>{p.name}{p.reference ? ` (${p.reference})` : ""}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-5 text-right text-sm sm:col-span-2"><span className="sm:hidden text-xs" style={{ color: colors.inkSoft }}>Stock : </span><span className="df-mono">{product ? `${stockQty(current)} ${product.unit || ""}` : "—"}</span>{product && l.quantity && <span className="block text-[11px]" style={{ color: after < 0 ? colors.brick : colors.inkSoft }}>→ {stockQty(after)}</span>}</div>
+                <div className="col-span-5 sm:col-span-2"><input type="number" step="0.001" min="0" className="df-input df-mono w-full rounded-md px-2 py-2 text-right text-sm" style={inputStyle} value={l.quantity} onChange={(e) => updateLine(l.key, { quantity: e.target.value })} placeholder="0" disabled={!canEdit} /></div>
+                <div className="col-span-2 text-right sm:col-span-1"><button onClick={() => removeLine(l.key)} className="rounded-md p-2" style={{ color: colors.inkSoft }} title="Retirer la ligne" disabled={!canEdit}><X size={15} /></button></div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <button onClick={addLine} className="flex items-center gap-1 text-sm font-medium" style={{ color: colors.brassDark }} disabled={!canEdit}><Plus size={14} /> Ajouter un produit</button>
+          <div className="flex items-center gap-3">
+            {error && <span className="text-xs" style={{ color: colors.brick }}>{error}</span>}
+            <button onClick={handleSubmit} disabled={!canEdit || submitting || activeProducts.length === 0} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: kind === "entree" ? colors.moss : colors.brick, opacity: !canEdit || submitting ? 0.6 : 1 }}>{submitting ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />} Enregistrer l'{kind === "entree" ? "entrée" : "sortie"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Historique : documents de stock (mouvements groupés par numéro).
+function StockDocumentsView({ movements, loading, products, warehouses, account, siteSettings, darkMode, onRefresh, onGoToEntry, onGoToExit }) {
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  const isAtelier = siteSettings?.landingPageVersion === "atelier";
+  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const card = { background: surface, border: `1px solid ${colors.line}` };
+  const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
+  const members = useOrgMemberLabels(account?.organizationId);
+  const [kind, setKind] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
+  const [search, setSearch] = useState("");
+  const [openRef, setOpenRef] = useState(null);
+  // Chargement à l'ouverture de la page (fonction lue via une référence
+  // pour ne pas relancer le chargement à chaque rendu du parent).
+  const refreshRef = useRef(onRefresh);
+  refreshRef.current = onRefresh;
+  useEffect(() => { refreshRef.current(); }, []);
+  const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const productName = (id) => productById.get(id)?.name || "Produit supprimé";
+  const productUnit = (id) => productById.get(id)?.unit || "";
+  const docs = useMemo(() => {
+    const nameOf = (id) => productById.get(id)?.name || "Produit supprimé";
+    const groups = new Map();
+    for (const m of movements) {
+      const key = m.document_ref || `mvt:${m.id}`;
+      if (!groups.has(key)) groups.set(key, { key, ref: m.document_ref || "—", kind: m.kind, movedAt: m.moved_at, warehouseId: m.warehouse_id, createdBy: m.created_by, reason: m.reason, lines: [] });
+      groups.get(key).lines.push(m);
+    }
+    const s = search.trim().toLowerCase();
+    return [...groups.values()]
+      .filter((d) => !kind || d.kind === kind)
+      .filter((d) => !warehouseId || (warehouseId === "none" ? !d.warehouseId : d.warehouseId === warehouseId))
+      .filter((d) => !s || d.ref.toLowerCase().includes(s) || (d.reason || "").toLowerCase().includes(s) || d.lines.some((l) => nameOf(l.product_id).toLowerCase().includes(s)))
+      .sort((a, b) => new Date(b.movedAt) - new Date(a.movedAt));
+  }, [movements, kind, warehouseId, search, productById]);
+  function exportCsv() {
+    const rows = [["Document", "Type", "Date", "Entrepôt", "Produit", "Quantité", "Motif / référence", "Auteur"]];
+    docs.forEach((d) => d.lines.forEach((l) => rows.push([d.ref, STOCK_KINDS[d.kind]?.label || d.kind, new Date(l.moved_at).toLocaleString("fr-FR"), warehouseName(warehouses, l.warehouse_id), productName(l.product_id), Number(l.quantity), l.reason || "", members[l.created_by] || ""])));
+    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\n");
+    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `documents-de-stock-${new Date().toISOString().slice(0, 10)}.csv`);
+  }
+  const kindColor = (k) => (k === "entree" ? colors.moss : k === "sortie" ? colors.brick : colors.slate);
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Archive size={18} /></div>}
+          <h1 className="df-display text-2xl font-semibold">Documents de stock</h1>
+          <p className="text-sm" style={{ color: colors.inkSoft }}>Historique de toutes les entrées, sorties et ajustements, avec la date, l'entrepôt, l'auteur et le motif.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={onGoToEntry} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}><ArrowDownToLine size={15} /> Entrée</button>
+          <button onClick={onGoToExit} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.brick }}><ArrowUpFromLine size={15} /> Sortie</button>
+          <button onClick={exportCsv} disabled={docs.length === 0} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: docs.length ? 1 : 0.5 }}><Download size={15} /> CSV</button>
+        </div>
+      </div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <input className="df-input min-w-[200px] flex-1 rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="Rechercher (numéro, motif, produit)" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={kind} onChange={(e) => setKind(e.target.value)}><option value="">Tous les types</option>{Object.entries(STOCK_KINDS).map(([id, k]) => <option key={id} value={id}>{k.label}</option>)}</select>
+        <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}><option value="">Tous les entrepôts</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}<option value="none">Sans entrepôt</option></select>
+      </div>
+      <div className="overflow-hidden rounded-2xl" style={card}>
+        {loading ? (
+          <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin" style={{ color: colors.slate }} /></div>
+        ) : docs.length === 0 ? (
+          <div className="px-6 py-16 text-center"><Archive size={28} style={{ color: colors.inkSoft, margin: "0 auto 8px" }} /><p className="df-display text-lg font-semibold">Aucun document de stock</p><p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Enregistre une entrée ou une sortie pour commencer l'historique.</p></div>
+        ) : docs.map((d, i) => {
+          const isOpen = openRef === d.key;
+          const total = d.lines.reduce((s, l) => s + Number(l.quantity), 0);
+          return (
+            <div key={d.key} style={{ borderTop: i ? `1px solid ${colors.line}` : "none" }}>
+              <button onClick={() => setOpenRef(isOpen ? null : d.key)} className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left">
+                <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase" style={{ background: `${kindColor(d.kind)}18`, color: kindColor(d.kind) }}>{STOCK_KINDS[d.kind]?.label || d.kind}</span>
+                <span className="df-mono text-sm font-semibold">{d.ref}</span>
+                <span className="text-xs" style={{ color: colors.inkSoft }}>{new Date(d.movedAt).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })} · {warehouseName(warehouses, d.warehouseId)} · {members[d.createdBy] || "—"}</span>
+                <span className="ml-auto df-mono text-sm" style={{ color: total < 0 ? colors.brick : colors.moss }}>{total > 0 ? "+" : ""}{stockQty(total)}</span>
+                <span className="text-xs" style={{ color: colors.inkSoft }}>{d.lines.length} ligne{d.lines.length > 1 ? "s" : ""}</span>
+                <ChevronDown size={15} style={{ color: colors.inkSoft, transform: isOpen ? "rotate(180deg)" : "none" }} />
+              </button>
+              {isOpen && (
+                <div className="border-t px-4 pb-3 pt-2" style={{ borderColor: colors.line, background: colors.paper }}>
+                  {d.reason && <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Motif / référence : {d.reason}</p>}
+                  {d.lines.map((l) => (
+                    <div key={l.id} className="flex items-center justify-between gap-2 py-1 text-sm"><span className="truncate">{productName(l.product_id)}</span><span className="df-mono shrink-0" style={{ color: Number(l.quantity) < 0 ? colors.brick : colors.moss }}>{Number(l.quantity) > 0 ? "+" : ""}{stockQty(l.quantity)} {productUnit(l.product_id)}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Page Produits : filtres, table triable, sélection multiple, actions.
-function ProductsView({ products, stockByProduct, warehouses, loading, error, importInfo, isLocked, isViewer, account, siteSettings, darkMode, onSave, onDelete, onDuplicate, onToggleActive, onGoToPricing }) {
+function ProductsView({ products, stockByProduct, stockDetail = {}, warehouses, warehousePrices = {}, loading, error, importInfo, isLocked, isViewer, account, siteSettings, darkMode, onSave, onDelete, onDuplicate, onToggleActive, onGoToPricing }) {
   const isAdvanced = siteSettings?.landingPageVersion === "avancee";
   const isAtelier = siteSettings?.landingPageVersion === "atelier";
   const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
@@ -11871,6 +12329,7 @@ function ProductsView({ products, stockByProduct, warehouses, loading, error, im
     const q = filters.q.trim().toLowerCase();
     return products
       .filter((p) => filters.includeInactive || p.is_active)
+      .filter((p) => !filters.warehouse || Math.abs(stockDetail?.[p.id]?.byWarehouse?.[filters.warehouse] || 0) > 0.0005)
       .filter((p) => !q || (p.name || "").toLowerCase().includes(q) || (p.reference || "").toLowerCase().includes(q) || (p.supplier_reference || "").toLowerCase().includes(q) || (p.tags || []).some((t) => t.toLowerCase().includes(q)))
       .filter((p) => !filters.kind || p.kind === filters.kind)
       .filter((p) => !filters.nature || p.nature === filters.nature)
@@ -11879,7 +12338,7 @@ function ProductsView({ products, stockByProduct, warehouses, loading, error, im
       .filter((p) => !filters.tag || (p.tags || []).some((t) => t.toLowerCase() === filters.tag.toLowerCase()))
       .filter((p) => !filters.vat || Number(p.sale_vat_rate) === Number(filters.vat))
       .sort((a, b) => (sortDir === "asc" ? 1 : -1) * (a.name || "").localeCompare(b.name || "", "fr"));
-  }, [products, filters, sortDir]);
+  }, [products, filters, sortDir, stockDetail]);
   const allSelected = list.length > 0 && list.every((p) => selected.includes(p.id));
   const toggleAll = () => setSelected(allSelected ? [] : list.map((p) => p.id));
   const toggleOne = (id) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -11992,7 +12451,7 @@ function ProductsView({ products, stockByProduct, warehouses, loading, error, im
                           </td>
                           <td className="df-mono px-3 py-2 text-right">{money(p.sale_price_ht, p.currency)}</td>
                           <td className="df-mono px-3 py-2 text-right">{money(p.sale_price_ttc, p.currency)}</td>
-                          <td className="df-mono px-3 py-2 text-right" style={{ color: availability.ok ? colors.ink : colors.brick }}>{availability.label}{p.quantity_restricted ? ` ${p.unit || ""}` : ""}</td>
+                          <td className="df-mono px-3 py-2 text-right" style={{ color: availability.ok ? colors.ink : colors.brick }} title={Object.entries(stockDetail?.[p.id]?.byWarehouse || {}).map(([wid, q]) => `${warehouseName(warehouses, wid === "none" ? null : wid)} : ${stockQty(q)}`).join("\n") || "Aucun mouvement de stock"}>{availability.label}{p.quantity_restricted ? ` ${p.unit || ""}` : ""}</td>
                           <td className="df-mono px-3 py-2 text-xs">{p.account_sales || "—"}</td>
                           <td className="df-mono px-3 py-2 text-xs">{p.account_purchases || "—"}</td>
                           <td className="px-2 py-2 text-right">
@@ -12027,6 +12486,8 @@ function ProductsView({ products, stockByProduct, warehouses, loading, error, im
         <ProductForm
           product={editing}
           stock={stockByProduct?.[editing.id] ?? 0}
+          warehouses={warehouses}
+          warehousePrices={warehousePrices?.[editing.id] || {}}
           canEdit={canEdit}
           onClose={() => setEditing(null)}
           onSave={async (row, options) => { const ok = await onSave(row, options); if (ok) setEditing(null); }}
@@ -12038,9 +12499,12 @@ function ProductsView({ products, stockByProduct, warehouses, loading, error, im
 
 // Fiche produit (création / édition) — tous les champs, HT et TTC liés dans
 // les deux sens, pièce jointe dans le bucket privé product-files.
-function ProductForm({ product, stock, canEdit, onClose, onSave }) {
+function ProductForm({ product, stock, warehouses = [], warehousePrices = {}, canEdit, onClose, onSave }) {
   const [local, setLocal] = useState(() => ({ ...product, tagsText: (product.tags || []).join(", ") }));
   const [stockTarget, setStockTarget] = useState(String(stock ?? 0));
+  // Prix par entrepôt : { warehouseId: { ht, ttc } }, pré-rempli avec le prix général.
+  const [perWarehouse, setPerWarehouse] = useState(() => { const m = {}; warehouses.forEach((w) => { m[w.id] = warehousePrices[w.id] || { ht: round2(product.sale_price_ht), ttc: round2(product.sale_price_ttc) }; }); return m; });
+  const setWarehousePrice = (wid, field, value) => setPerWarehouse((prev) => { const cur = prev[wid] || { ht: 0, ttc: 0 }; const next = field === "ht" ? { ht: value, ttc: ttcFromHt(value, local.sale_vat_rate) } : { ttc: value, ht: htFromTtc(value, local.sale_vat_rate) }; return { ...prev, [wid]: { ...cur, ...next } }; });
   const [pendingFile, setPendingFile] = useState(null);
   const [removeAttachment, setRemoveAttachment] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -12069,7 +12533,7 @@ function ProductForm({ product, stock, canEdit, onClose, onSave }) {
     const row = { ...local, name: local.name.trim(), tags: String(local.tagsText || "").split(",").map((t) => t.trim()).filter(Boolean) };
     delete row.tagsText;
     try {
-      await onSave(row, { stockTarget: Number(stockTarget), pendingFile, removeAttachment });
+      await onSave(row, { stockTarget: Number(stockTarget), pendingFile, removeAttachment, warehousePrices: row.price_per_warehouse ? perWarehouse : {} });
     } catch (err) {
       setError(err.message || "Impossible d'enregistrer ce produit pour l'instant.");
     } finally {
@@ -12117,7 +12581,18 @@ function ProductForm({ product, stock, canEdit, onClose, onSave }) {
             {field("Devise", <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={local.currency} onChange={(e) => patch({ currency: e.target.value })} disabled={!canEdit}>{CURRENCIES.map((c) => <option key={c} value={c}>{currencyLabel(c)}</option>)}</select>)}
             {field("Nature", <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={local.nature} onChange={(e) => patch({ nature: e.target.value })} disabled={!canEdit}>{PRODUCT_NATURES.map(([id, l]) => <option key={id} value={id}>{l}</option>)}</select>)}
             {field("Catégorie", text("category", { placeholder: "Ex. Sols, Plomberie…" }))}
-            <div className="sm:col-span-2">{check("price_per_warehouse", "Prix de vente différent selon l'entrepôt", "Les prix par entrepôt se règlent à l'étape Entrepôts.")}</div>
+            <div className="sm:col-span-2">{check("price_per_warehouse", "Prix de vente différent selon l'entrepôt", warehouses.length ? "Un prix HT / TTC par entrepôt, utilisé à la place du prix général." : "Crée d'abord un entrepôt (Gestion de stock, Entrepôts) pour saisir des prix différents.")}</div>
+            {local.price_per_warehouse && warehouses.length > 0 && (
+              <div className="sm:col-span-2 space-y-2 rounded-lg p-3" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                {warehouses.map((w) => (
+                  <div key={w.id} className="grid grid-cols-1 items-center gap-2 sm:grid-cols-3">
+                    <span className="text-sm font-medium">{w.name}</span>
+                    <label className="text-xs" style={{ color: colors.inkSoft }}>HT<input type="number" step="0.01" min="0" className="df-input df-mono mt-0.5 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={perWarehouse[w.id]?.ht ?? ""} onChange={(e) => setWarehousePrice(w.id, "ht", e.target.value)} disabled={!canEdit} /></label>
+                    <label className="text-xs" style={{ color: colors.inkSoft }}>TTC<input type="number" step="0.01" min="0" className="df-input df-mono mt-0.5 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={perWarehouse[w.id]?.ttc ?? ""} onChange={(e) => setWarehousePrice(w.id, "ttc", e.target.value)} disabled={!canEdit} /></label>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="sm:col-span-2">{field("Description", <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, minHeight: "4rem" }} value={local.description ?? ""} onChange={(e) => patch({ description: e.target.value })} disabled={!canEdit} />)}</div>
             <div className="sm:col-span-2">{field("Tags / mots-clés", text("tagsText", { placeholder: "séparés par des virgules : extérieur, gel, 60x60" }))}</div>
             {field("Compte comptable (produits)", text("account_sales", { placeholder: "Ex. 707000", className: "df-input df-mono w-full rounded-md px-3 py-2 text-sm" }), "Code comptable de vente.")}
