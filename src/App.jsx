@@ -17,6 +17,7 @@ import {
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
   Maximize2, Minimize2, Camera, ImagePlus,
   Home, HardHat, Files, ChevronRight,
+  Filter, MoreHorizontal, Paperclip,
 } from "lucide-react";
 
 // Chaque couleur pointe vers une variable CSS (définie par le thème
@@ -819,10 +820,6 @@ function withGeoCountry(profile) {
 function emptyCompanyProfile() {
   return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "" };
 }
-function emptyPrestation() {
-  return { id: nextId("pr"), designation: "", category: "", unit: "", unitPrice: 0, tva: 20 };
-}
-
 function nextNumber(documents, type) {
   const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", situation: "SIT", pv_reception: "PV", bpu: "BPU", rapport: "RI", contrat: "CTR", relance: "MED", planning: "PLN" };
   const prefix = prefixes[type] || "FAC";
@@ -2304,7 +2301,7 @@ function DeviFactAppInner() {
   const documentsRef = useRef(documents);
   documentsRef.current = documents;
   const [clients, setClients] = useState([]);
-  const [prestations, setPrestations] = useState([]);
+  const [, setPrestations] = useState([]); // ancienne Bibliothèque : lue une fois pour la reprise dans Produits
   const [companyProfile, setCompanyProfile] = useState(emptyCompanyProfile());
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2372,7 +2369,6 @@ function DeviFactAppInner() {
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingClients, setSavingClients] = useState(false);
-  const [savingPrestations, setSavingPrestations] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
   const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_lastActiveId")) || null);
   // Document tout juste ouvert ("Nouveau devis" etc.) mais jamais
@@ -2415,7 +2411,7 @@ function DeviFactAppInner() {
       { id: "nav-chantiers", label: "Aller à Chantiers", icon: MapPinned, action: () => setView("chantiers") },
       { id: "nav-planning-equipe", label: "Aller au Planning d'équipe", icon: Calendar, action: () => setView("planning-equipe") },
       { id: "nav-clients", label: "Aller à Clients", icon: Users, action: () => setView("clients") },
-      { id: "nav-prestations", label: "Aller à Bibliothèque", icon: Library, action: () => setView("prestations") },
+      { id: "nav-stock-produits", label: "Aller à Produits (Gestion de stock)", icon: Package, keywords: "bibliothèque prestations stock", action: () => setView("stock-produits") },
       { id: "nav-company", label: "Aller à Mon entreprise", icon: Building2, action: () => setView("company") },
       { id: "nav-team", label: "Aller à Équipe", icon: UserPlus, action: () => setView("team") },
       { id: "nav-account", label: "Aller à Mon compte", icon: UserCircle, action: () => setView("account") },
@@ -2781,6 +2777,8 @@ function DeviFactAppInner() {
     setClients(cls);
     setCompanyProfile(comp);
     setPrestations(prest);
+    // Produits : reprise éventuelle de l'ancienne Bibliothèque, puis chargement.
+    loadProductsWithLegacy(orgId, prest);
     // Garde une copie locale à jour à chaque chargement réussi — c'est
     // cette copie qui sera utilisée si la connexion vient à manquer la
     // prochaine fois.
@@ -2802,6 +2800,9 @@ function DeviFactAppInner() {
     setClients([]);
     setCompanyProfile(emptyCompanyProfile());
     setPrestations([]);
+    setProducts([]);
+    setStockByProduct({});
+    setLegacyImportInfo(null);
     setActiveId(null);
     setOfflineMode(false);
     // Efface aussi la position mémorisée (vue + document actif) et la
@@ -3211,24 +3212,112 @@ function DeviFactAppInner() {
     if (!window.confirm(`Supprimer définitivement le client "${client?.name || ""}" ? Cette action est irréversible.`)) return;
     persistClients(clients.filter((c) => c.id !== id));
   }
-  async function persistPrestations(next) {
-    setPrestations(next);
-    setSavingPrestations(true);
+  // -------------------------------------------------------------------
+  // Produits (Gestion de stock) — table products + vue product_stock.
+  // L'ancienne Bibliothèque (kv_store « prestations ») n'est plus
+  // écrite : elle est reprise une fois dans products, puis conservée.
+  // -------------------------------------------------------------------
+  const [products, setProducts] = useState([]);
+  const [stockByProduct, setStockByProduct] = useState({});
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [productsError, setProductsError] = useState("");
+  const [legacyImportInfo, setLegacyImportInfo] = useState(null);
+  const [warehouses] = useState([]); // étape 2
+  async function loadProducts(orgId = account?.organizationId) {
+    if (!orgId) return;
+    setProductsLoading(true);
     try {
-      await window.storage.set("prestations", JSON.stringify(next), false);
-    } catch (e) {
-      console.error("Erreur d'enregistrement prestations", e);
+      const res = await fetchProducts(orgId);
+      setProducts(res.products);
+      setStockByProduct(res.stockByProduct);
+      setProductsError("");
+    } catch (err) {
+      console.error("Erreur de chargement des produits", err);
+      setProductsError("Impossible de charger les produits pour l'instant (la table « products » est-elle bien créée ?).");
     } finally {
-      setSavingPrestations(false);
+      setProductsLoading(false);
     }
   }
-  function upsertPrestation(p) {
-    const exists = prestations.some((x) => x.id === p.id);
-    const next = exists ? prestations.map((x) => (x.id === p.id ? p : x)) : [p, ...prestations];
-    persistPrestations(next);
+  // Reprise de la Bibliothèque puis chargement — appelé après loadUserData.
+  async function loadProductsWithLegacy(orgId, prest) {
+    try {
+      const info = await syncLegacyPrestations(orgId, prest);
+      if (info.imported > 0) setLegacyImportInfo(info);
+      console.log(`[Produits] Bibliothèque : ${info.total} prestation(s), ${info.imported} reprise(s) cette fois.`);
+    } catch (err) {
+      console.error("Erreur de reprise de la Bibliothèque dans Produits", err);
+    }
+    await loadProducts(orgId);
   }
-  function deletePrestation(id) {
-    persistPrestations(prestations.filter((x) => x.id !== id));
+  // Enregistre un produit (création ou modification), le stock de départ
+  // ou son ajustement, et la pièce jointe. Renvoie true si tout est passé.
+  async function saveProduct(row, options = {}) {
+    if (isLocked) return false;
+    const orgId = account?.organizationId;
+    const payload = productRow({ ...row, organization_id: orgId });
+    if (!row.id) payload.created_by = account?.id || null;
+    const { data, error } = await db.from("products").upsert(payload).select().single();
+    if (error) {
+      console.error("Erreur d'enregistrement du produit", error);
+      throw new Error(error.code === "23505" ? "Un produit identique existe déjà." : "Impossible d'enregistrer ce produit pour l'instant.");
+    }
+    const saved = data;
+    // Stock : la fiche affiche une quantité cible ; l'écart devient un
+    // mouvement d'ajustement (le stock reste toujours la somme des mouvements).
+    const current = Number(stockByProduct[saved.id] ?? 0);
+    const target = Number(options.stockTarget);
+    if (Number.isFinite(target) && Math.abs(target - current) > 0.0005) {
+      const { error: mvError } = await db.from("stock_movements").insert({ organization_id: orgId, product_id: saved.id, warehouse_id: null, kind: "ajustement", quantity: Math.round((target - current) * 1000) / 1000, reason: row.id ? "Ajustement depuis la fiche produit" : "Stock de départ", created_by: account?.id || null });
+      if (mvError) { console.error("Erreur d'ajustement du stock", mvError); alert("Produit enregistré, mais la quantité en stock n'a pas pu être mise à jour."); }
+    }
+    // Pièce jointe : envoi après l'enregistrement (il faut l'identifiant).
+    try {
+      if (options.removeAttachment && saved.attachment_path) {
+        await db.storage.from(PRODUCT_FILES_BUCKET).remove([saved.attachment_path]);
+        await db.from("products").update({ attachment_path: null, attachment_name: null }).eq("id", saved.id);
+      }
+      if (options.pendingFile) {
+        if (saved.attachment_path && !options.removeAttachment) await db.storage.from(PRODUCT_FILES_BUCKET).remove([saved.attachment_path]).catch(() => {});
+        const up = await uploadProductFile(orgId, saved.id, options.pendingFile);
+        await db.from("products").update({ attachment_path: up.path, attachment_name: up.name }).eq("id", saved.id);
+      }
+    } catch (err) {
+      console.error("Erreur de pièce jointe", err);
+      alert(err.message || "Produit enregistré, mais la pièce jointe n'a pas pu être envoyée.");
+    }
+    await loadProducts(orgId);
+    return true;
+  }
+  async function deleteProduct(id, skipConfirm = false) {
+    if (isLocked) return;
+    const p = products.find((x) => x.id === id);
+    if (!skipConfirm && !window.confirm(`Supprimer définitivement le produit « ${p?.name || ""} » ? Son historique de stock sera supprimé aussi.`)) return;
+    if (p?.attachment_path) await db.storage.from(PRODUCT_FILES_BUCKET).remove([p.attachment_path]).catch(() => {});
+    const { error } = await db.from("products").delete().eq("id", id);
+    if (error) { console.error("Erreur de suppression du produit", error); alert("Impossible de supprimer ce produit pour l'instant."); return; }
+    await loadProducts();
+  }
+  async function duplicateProduct(id) {
+    if (isLocked) return;
+    const p = products.find((x) => x.id === id);
+    if (!p) return;
+    const copy = { ...p, id: undefined, name: `${p.name} (copie)`, legacy_prestation_id: null, attachment_path: null, attachment_name: null };
+    try { await saveProduct(copy, {}); } catch (err) { alert(err.message); }
+  }
+  async function toggleProductActive(id, active) {
+    if (isLocked) return;
+    const { error } = await db.from("products").update({ is_active: !!active }).eq("id", id);
+    if (error) { console.error("Erreur de mise à jour du produit", error); alert("Impossible de modifier ce produit pour l'instant."); return; }
+    await loadProducts();
+  }
+  // Depuis l'éditeur : « Enregistrer comme produit » (ex-prestation).
+  async function saveLineAsProduct(line) {
+    const tva = Number(line.tva) || 0;
+    const ht = round2(line.unitPrice);
+    try {
+      await saveProduct({ ...emptyProduct(account?.organizationId), name: String(line.designation || "").trim(), unit: line.unit || "", sale_price_ht: ht, sale_vat_rate: tva, sale_price_ttc: ttcFromHt(ht, tva), kind: "service" }, {});
+      alert("Ligne enregistrée dans Produits.");
+    } catch (err) { alert(err.message); }
   }
   async function resetTestData() {
     if (isLocked) return;
@@ -3843,7 +3932,8 @@ function DeviFactAppInner() {
         doc={activeDoc}
         saving={saving}
         clients={clients}
-        prestations={prestations}
+        products={products}
+        stockByProduct={stockByProduct}
         account={account}
         plans={plans}
         siteSettings={siteSettings}
@@ -3855,7 +3945,7 @@ function DeviFactAppInner() {
         onBack={backToDashboard}
         onConvert={() => convertToInvoice(activeDoc.id)}
         onSaveClient={upsertClient}
-        onSavePrestation={upsertPrestation}
+        onSaveProduct={saveLineAsProduct}
         onSplit={(extractedItems) => createSplitDocument(activeDoc, extractedItems)}
         splitNotice={splitNotice}
         onOpenSplitDoc={() => { if (splitNotice) { setActiveId(splitNotice.id); setSplitNotice(null); } }}
@@ -4075,10 +4165,10 @@ function DeviFactAppInner() {
       page = <ApiView account={account} siteSettings={siteSettings} />;
     } else if (view === "account") {
       page = <AccountView account={account} siteSettings={siteSettings} />;
-    } else if (view === "prestations") {
+    } else if (view === "stock-produits" || view === "prestations") {
       page = hasAccess(account, "pro")
-        ? <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} siteSettings={siteSettings} darkMode={darkMode} />
-        : <LockedFeature onGoToPricing={goPricing} />;
+        ? <ProductsView products={products} stockByProduct={stockByProduct} warehouses={warehouses} loading={productsLoading} error={productsError} importInfo={legacyImportInfo} isLocked={isLocked} isViewer={isViewer} account={account} siteSettings={siteSettings} darkMode={darkMode} onSave={saveProduct} onDelete={deleteProduct} onDuplicate={duplicateProduct} onToggleActive={toggleProductActive} onGoToPricing={goPricing} />
+        : <LockedFeature onGoToPricing={goPricing} title="Gestion de stock réservée aux forfaits Pro et Entreprise" text="Produits, entrepôts et mouvements de stock font partie des forfaits Pro et Entreprise." />;
     } else if (view === "pricing") {
       page = (
         <PricingView
@@ -4314,15 +4404,15 @@ function DeviFactAppInner() {
     );
   }
 
-  if (view === "prestations") {
+  if (view === "stock-produits" || view === "prestations") {
     return (
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
         {hasAccess(account, "pro") ? (
-          <PrestationsView prestations={prestations} saving={savingPrestations} onSave={upsertPrestation} onDelete={deletePrestation} siteSettings={siteSettings} darkMode={darkMode} />
+          <ProductsView products={products} stockByProduct={stockByProduct} warehouses={warehouses} loading={productsLoading} error={productsError} importInfo={legacyImportInfo} isLocked={isLocked} isViewer={isViewer} account={account} siteSettings={siteSettings} darkMode={darkMode} onSave={saveProduct} onDelete={deleteProduct} onDuplicate={duplicateProduct} onToggleActive={toggleProductActive} onGoToPricing={() => setView("pricing")} />
         ) : (
-          <LockedFeature onGoToPricing={() => setView("pricing")} />
+          <LockedFeature onGoToPricing={() => setView("pricing")} title="Gestion de stock réservée aux forfaits Pro et Entreprise" text="Produits, entrepôts et mouvements de stock font partie des forfaits Pro et Entreprise." />
         )}
       </div>
     );
@@ -6300,7 +6390,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
     { id: "chantiers", label: "Chantiers", icon: MapPinned },
     { id: "planning-equipe", label: "Planning", icon: Calendar },
     { id: "clients", label: "Clients", icon: Users },
-    { id: "prestations", label: "Bibliothèque", icon: Library },
+    { id: "stock", label: "Gestion de stock", icon: Package },
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
     ...(account?.plan === "entreprise" && account?.role === "owner" ? [{ id: "api", label: "API", icon: KeyRound }] : []),
@@ -6421,8 +6511,10 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                     <NavItem id={id} label={label} icon={Icon} />
                     {orgSwitcher}
                   </Fragment>
+                ) : id === "stock" ? (
+                  <StockMenu key={id} variant="sidebar" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} iconColor={adv.accent} />
                 ) : (
-                  <NavItem key={id} id={id} label={label} icon={Icon} locked={id === "prestations" && !hasAccess(account, "pro")} />
+                  <NavItem key={id} id={id} label={label} icon={Icon} />
                 )
               )}
             </div>
@@ -6522,9 +6614,13 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
               </div>
               <div className="my-2 border-t" style={{ borderColor: adv.line }} />
               {tabs.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => { setView(id); setMobileNavOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={tabStyle(view === id)}>
-                  <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} className="ml-auto" />}
-                </button>
+                id === "stock" ? (
+                  <StockMenu key={id} variant="inline" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} textColor={darkMode ? "#9AA5B5" : adv.inkSoft} onNavigate={() => setMobileNavOpen(false)} />
+                ) : (
+                  <button key={id} onClick={() => { setView(id); setMobileNavOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={tabStyle(view === id)}>
+                    <Icon size={15} /> {label}
+                  </button>
+                )
               ))}
               <div className="my-2 border-t" style={{ borderColor: adv.line }} />
               <button onClick={() => setView("contact")} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={{ color: adv.inkSoft }}><Mail size={15} /> Nous contacter</button>
@@ -6619,9 +6715,11 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                     );
                   })()}
                 </Fragment>
+              ) : id === "stock" ? (
+                <StockMenu key={id} variant="dropdown" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} iconColor={colors.brassDark} />
               ) : (
                 <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
-                  <Icon size={15} /> {label} {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} />}
+                  <Icon size={15} /> {label}
                 </button>
               )
             )}
@@ -6741,15 +6839,18 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             <div className="fixed inset-0 z-10" onClick={() => setMobileNavOpen(false)} />
             <div className="absolute left-0 top-full z-20 mt-1 w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
               {tabs.map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  onClick={() => { setView(id); setMobileNavOpen(false); }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm"
-                  style={{ background: view === id ? colors.paper : "transparent", color: colors.ink, fontWeight: view === id ? 600 : 400 }}
-                >
-                  <Icon size={15} style={{ color: view === id ? colors.brassDark : colors.inkSoft }} /> {label}
-                  {id === "prestations" && !hasAccess(account, "pro") && <Lock size={11} className="ml-auto" />}
-                </button>
+                id === "stock" ? (
+                  <StockMenu key={id} variant="inline" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={(active) => ({ background: active ? colors.paper : "transparent", color: colors.ink, fontWeight: active ? 600 : 400 })} textColor={colors.inkSoft} onNavigate={() => setMobileNavOpen(false)} />
+                ) : (
+                  <button
+                    key={id}
+                    onClick={() => { setView(id); setMobileNavOpen(false); }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm"
+                    style={{ background: view === id ? colors.paper : "transparent", color: colors.ink, fontWeight: view === id ? 600 : 400 }}
+                  >
+                    <Icon size={15} style={{ color: view === id ? colors.brassDark : colors.inkSoft }} /> {label}
+                  </button>
+                )
               ))}
             </div>
           </>
@@ -10164,7 +10265,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   const moreItems = [
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
-    { id: "prestations", label: "Bibliothèque de prestations", icon: Library, locked: !hasAccess(account, "pro") },
+    ...STOCK_MENU.map((m) => ({ id: m.id, label: `Gestion de stock · ${m.label}`, icon: m.icon, locked: !hasAccess(account, "pro") })),
     { id: "planning-equipe", label: "Planning d'équipe", icon: Calendar },
     { id: "pricing", label: "Abonnement", icon: CreditCard },
     { id: "account", label: "Mon compte", icon: UserCircle },
@@ -11587,107 +11688,489 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
   );
 }
 
-function PrestationsView({ prestations, saving, onSave, onDelete, siteSettings, darkMode }) {
-  const [editing, setEditing] = useState(null);
-  const [search, setSearch] = useState("");
-  const [designationError, setDesignationError] = useState(false);
+// ===========================================================================
+// Gestion de stock — étape 1 : produits (fusion de la Bibliothèque de
+// prestations). Tables products / warehouses / stock_movements (voir
+// supabase/migrations_audit/2026-09-13_gestion-de-stock.sql). La clé
+// kv_store « prestations » n'est plus modifiée : elle sert de sauvegarde
+// et de source d'import (rejouable grâce à legacy_prestation_id).
+// ===========================================================================
+const STOCK_MENU = [
+  { id: "stock-produits", label: "Produits", icon: Package },
+  // Étapes suivantes : documents de stock, entrepôts, entrée, sortie.
+];
+const isStockView = (view) => typeof view === "string" && view.startsWith("stock-");
+const PRODUCT_KINDS = [["produit", "Produit"], ["service", "Prestation de service"]];
+const PRODUCT_NATURES = [["", "— Non précisée —"], ["materiel", "Matériel"], ["main_oeuvre", "Main-d'œuvre"], ["sous_traitance", "Sous-traitance"], ["frais", "Frais"]];
+const PRODUCT_UNITS = ["", "pièce", "kg", "g", "m", "m²", "m³", "ml", "L", "forfait", "heure", "jour", "lot", "paquet", "rouleau", "sac"];
+const PRODUCT_FILES_BUCKET = "product-files";
+const productKindLabel = (k) => PRODUCT_KINDS.find(([id]) => id === k)?.[1] || k;
+const productNatureLabel = (n) => PRODUCT_NATURES.find(([id]) => id === n)?.[1] || n || "—";
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const ttcFromHt = (ht, tva) => round2((Number(ht) || 0) * (1 + (Number(tva) || 0) / 100));
+const htFromTtc = (ttc, tva) => round2((Number(ttc) || 0) / (1 + (Number(tva) || 0) / 100));
 
-  const filtered = prestations.filter((p) => {
-    if (!search.trim()) return true;
-    const s = search.toLowerCase();
-    return (p.designation || "").toLowerCase().includes(s) || (p.category || "").toLowerCase().includes(s);
-  });
+function emptyProduct(organizationId) {
+  return {
+    organization_id: organizationId, name: "", reference: "", supplier_reference: "", description: "", tags: [], category: "",
+    kind: "produit", nature: "", unit: "",
+    sale_price_ht: 0, sale_vat_rate: 20, sale_price_ttc: 0, currency: geoDefaults().currency, price_per_warehouse: false, default_quantity: 1,
+    purchase_price_ht: 0, purchase_vat_rate: 20, purchase_price_ttc: 0,
+    quantity_restricted: false, is_kit: false,
+    account_sales: "", account_purchases: "", account_vat_sales: "", account_vat_purchases: "", activity_code: "", journal_code: "",
+    custom_field: "", attachment_path: null, attachment_name: null, is_active: true, legacy_prestation_id: null,
+  };
+}
+// Une prestation de l'ancienne Bibliothèque devient un produit.
+function productFromPrestation(p, organizationId) {
+  const tva = Number(p.tva) || 0;
+  const ht = round2(p.unitPrice);
+  return {
+    ...emptyProduct(organizationId),
+    name: String(p.designation || "").trim() || "Prestation sans nom",
+    category: String(p.category || "").trim(),
+    unit: String(p.unit || ""),
+    sale_price_ht: ht, sale_vat_rate: tva, sale_price_ttc: ttcFromHt(ht, tva),
+    kind: "service",
+    legacy_prestation_id: String(p.id),
+  };
+}
+// Colonnes réellement écrites en base (jamais les champs calculés côté client).
+const PRODUCT_COLUMNS = ["organization_id", "name", "reference", "supplier_reference", "description", "tags", "category", "kind", "nature", "unit",
+  "sale_price_ht", "sale_vat_rate", "sale_price_ttc", "currency", "price_per_warehouse", "default_quantity",
+  "purchase_price_ht", "purchase_vat_rate", "purchase_price_ttc", "quantity_restricted", "is_kit",
+  "account_sales", "account_purchases", "account_vat_sales", "account_vat_purchases", "activity_code", "journal_code",
+  "custom_field", "attachment_path", "attachment_name", "is_active", "legacy_prestation_id"];
+function productRow(p) {
+  const row = {};
+  PRODUCT_COLUMNS.forEach((c) => { if (p[c] !== undefined) row[c] = p[c]; });
+  if (p.id) row.id = p.id;
+  ["sale_price_ht", "sale_price_ttc", "purchase_price_ht", "purchase_price_ttc"].forEach((k) => { row[k] = round2(row[k]); });
+  ["sale_vat_rate", "purchase_vat_rate"].forEach((k) => { row[k] = Number(row[k]) || 0; });
+  row.default_quantity = Number(row.default_quantity) > 0 ? Number(row.default_quantity) : 1;
+  row.tags = Array.isArray(row.tags) ? row.tags.map((t) => String(t).trim()).filter(Boolean) : [];
+  return row;
+}
 
-  function startNew() { setEditing(emptyPrestation()); setDesignationError(false); }
-  function startEdit(p) { setEditing({ ...p }); setDesignationError(false); }
-  function save() {
-    if (!editing.designation.trim()) { setDesignationError(true); return; }
-    onSave(editing);
-    setEditing(null);
+async function fetchProducts(organizationId) {
+  const [{ data: rows, error }, { data: stockRows, error: stockError }] = await Promise.all([
+    db.from("products").select("*").eq("organization_id", organizationId).order("name", { ascending: true }),
+    db.from("product_stock").select("product_id, warehouse_id, quantity").eq("organization_id", organizationId),
+  ]);
+  if (error) throw error;
+  if (stockError) console.error("Erreur de lecture du stock", stockError);
+  const stockByProduct = {};
+  (stockRows || []).forEach((r) => { stockByProduct[r.product_id] = (stockByProduct[r.product_id] || 0) + Number(r.quantity || 0); });
+  return { products: rows || [], stockByProduct };
+}
+
+// Reprise des prestations de l'ancienne Bibliothèque : uniquement celles
+// dont l'identifiant n'a pas encore été importé (rejouable, sans doublon).
+async function syncLegacyPrestations(organizationId, prestations) {
+  const list = Array.isArray(prestations) ? prestations.filter((p) => p && p.id) : [];
+  if (!organizationId || list.length === 0) return { imported: 0, total: 0 };
+  const { data: existing, error } = await db.from("products").select("legacy_prestation_id").eq("organization_id", organizationId).not("legacy_prestation_id", "is", null);
+  if (error) throw error;
+  const done = new Set((existing || []).map((r) => r.legacy_prestation_id));
+  const missing = list.filter((p) => !done.has(String(p.id)));
+  if (missing.length === 0) return { imported: 0, total: list.length };
+  const rows = missing.map((p) => productRow(productFromPrestation(p, organizationId)));
+  const { error: insertError } = await db.from("products").insert(rows);
+  if (insertError) {
+    // Course entre deux appareils : l'index unique a déjà fait le travail.
+    if (String(insertError.code) === "23505") return { imported: 0, total: list.length };
+    throw insertError;
   }
+  return { imported: rows.length, total: list.length };
+}
+
+function sanitizeFileName(name) {
+  return String(name || "fichier").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "fichier";
+}
+async function uploadProductFile(organizationId, productId, file) {
+  const path = `${organizationId}/${productId}/${Date.now()}-${sanitizeFileName(file.name)}`;
+  const { error } = await db.storage.from(PRODUCT_FILES_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+  if (error) throw new Error(/mime|type/i.test(error.message || "") ? "Ce type de fichier n'est pas accepté (PDF, image, Word, Excel ou texte, 10 Mo max)." : "Impossible d'envoyer ce fichier pour l'instant.");
+  return { path, name: file.name };
+}
+async function signProductFile(path) {
+  const { data, error } = await db.storage.from(PRODUCT_FILES_BUCKET).createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+// Disponibilité affichée : « sans limite » si la restriction de quantité
+// n'est pas activée, sinon la quantité en stock.
+function productAvailability(p, stockByProduct) {
+  const qty = Number(stockByProduct?.[p.id] ?? 0);
+  if (!p.quantity_restricted) return { label: "sans limite", qty, ok: true };
+  return { label: `${qty}`, qty, ok: qty > 0 };
+}
+
+// Sous-menu « Gestion de stock » dans les navigations (déroulant sur grand
+// écran, liste indentée sur mobile). `variant` : "dropdown" | "inline".
+function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconColor, onNavigate }) {
+  const [open, setOpen] = useState(false);
+  useEscapeToClose(open, () => setOpen(false));
+  const active = isStockView(view);
+  if (variant === "inline") {
+    return (
+      <>
+        <div className="flex items-center gap-2.5 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: textColor }}>
+          <Package size={13} /> Gestion de stock {locked && <Lock size={11} className="ml-auto" />}
+        </div>
+        {STOCK_MENU.map(({ id, label, icon: Icon }) => (
+          <button key={id} onClick={() => { setView(id); if (onNavigate) onNavigate(); }} className="flex w-full items-center gap-2.5 rounded-lg py-2 pl-8 pr-3 text-left text-xs" style={styleFor(view === id)}>
+            <Icon size={14} /> {label}
+          </button>
+        ))}
+      </>
+    );
+  }
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((v) => !v)} className={variant === "sidebar" ? "flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" : "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium"} style={styleFor(active)} title="Gestion de stock">
+        <Package size={15} /> <span className="truncate">Gestion de stock</span>
+        {locked ? <Lock size={11} className="ml-auto shrink-0" /> : <ChevronDown size={12} className="ml-auto shrink-0" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "var(--df-surface, #FFFFFF)", border: "1px solid var(--df-line, #DAE1DC)" }}>
+            {STOCK_MENU.map(({ id, label, icon: Icon }) => (
+              <button key={id} onClick={() => { setOpen(false); setView(id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: view === id ? iconColor : "var(--df-ink, #1B2A33)", fontWeight: view === id ? 600 : 400 }}>
+                <Icon size={14} style={{ color: iconColor }} /> {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Page Produits : filtres, table triable, sélection multiple, actions.
+function ProductsView({ products, stockByProduct, warehouses, loading, error, importInfo, isLocked, isViewer, account, siteSettings, darkMode, onSave, onDelete, onDuplicate, onToggleActive, onGoToPricing }) {
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  const isAtelier = siteSettings?.landingPageVersion === "atelier";
+  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const canEdit = !isLocked && !isViewer;
+  const emptyFilters = { q: "", warehouse: "", kind: "", nature: "", accountSales: "", accountPurchases: "", tag: "", vat: "", includeInactive: false };
+  const [pending, setPending] = useState(emptyFilters);
+  const [filters, setFilters] = useState(emptyFilters);
+  const [moreFilters, setMoreFilters] = useState(false);
+  const [filtersOpenMobile, setFiltersOpenMobile] = useState(false);
+  const [sortDir, setSortDir] = useState("asc");
+  const [selected, setSelected] = useState([]);
+  const [menuFor, setMenuFor] = useState(null);
+  const [editing, setEditing] = useState(null); // null | produit (nouveau sans id)
+  useEscapeToClose(!!menuFor, () => setMenuFor(null));
+
+  const accountsSales = useMemo(() => [...new Set(products.map((p) => p.account_sales).filter(Boolean))].sort(), [products]);
+  const accountsPurchases = useMemo(() => [...new Set(products.map((p) => p.account_purchases).filter(Boolean))].sort(), [products]);
+  const list = useMemo(() => {
+    const q = filters.q.trim().toLowerCase();
+    return products
+      .filter((p) => filters.includeInactive || p.is_active)
+      .filter((p) => !q || (p.name || "").toLowerCase().includes(q) || (p.reference || "").toLowerCase().includes(q) || (p.supplier_reference || "").toLowerCase().includes(q) || (p.tags || []).some((t) => t.toLowerCase().includes(q)))
+      .filter((p) => !filters.kind || p.kind === filters.kind)
+      .filter((p) => !filters.nature || p.nature === filters.nature)
+      .filter((p) => !filters.accountSales || p.account_sales === filters.accountSales)
+      .filter((p) => !filters.accountPurchases || p.account_purchases === filters.accountPurchases)
+      .filter((p) => !filters.tag || (p.tags || []).some((t) => t.toLowerCase() === filters.tag.toLowerCase()))
+      .filter((p) => !filters.vat || Number(p.sale_vat_rate) === Number(filters.vat))
+      .sort((a, b) => (sortDir === "asc" ? 1 : -1) * (a.name || "").localeCompare(b.name || "", "fr"));
+  }, [products, filters, sortDir]);
+  const allSelected = list.length > 0 && list.every((p) => selected.includes(p.id));
+  const toggleAll = () => setSelected(allSelected ? [] : list.map((p) => p.id));
+  const toggleOne = (id) => setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const money = (n, cur) => formatMoney(Number(n) || 0, cur || "EUR");
+  const card = { background: surface, border: `1px solid ${colors.line}` };
+  const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
+  const label = (t) => <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>{t}</label>;
+
+  const filterPanel = (
+    <div className="space-y-3">
+      <div>{label("Recherche (nom, référence, mot-clé)")}<input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={pending.q} onChange={(e) => setPending({ ...pending, q: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") setFilters(pending); }} placeholder="Ex. carrelage, REF-012" /></div>
+      <div>{label("Entrepôt")}<select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={pending.warehouse} onChange={(e) => setPending({ ...pending, warehouse: e.target.value })} disabled={!warehouses.length}><option value="">{warehouses.length ? "Tous" : "Aucun entrepôt (étape suivante)"}</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></div>
+      <div>{label("Type")}<select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={pending.kind} onChange={(e) => setPending({ ...pending, kind: e.target.value })}><option value="">Tous</option>{PRODUCT_KINDS.map(([id, l]) => <option key={id} value={id}>{l}</option>)}</select></div>
+      <div>{label("Nature")}<select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={pending.nature} onChange={(e) => setPending({ ...pending, nature: e.target.value })}><option value="">Toutes</option>{PRODUCT_NATURES.filter(([id]) => id).map(([id, l]) => <option key={id} value={id}>{l}</option>)}</select></div>
+      <div>{label("Compte comptable (produits)")}<select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={pending.accountSales} onChange={(e) => setPending({ ...pending, accountSales: e.target.value })}><option value="">Tous</option>{accountsSales.map((a) => <option key={a} value={a}>{a}</option>)}</select></div>
+      <div>{label("Compte comptable (achats)")}<select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={pending.accountPurchases} onChange={(e) => setPending({ ...pending, accountPurchases: e.target.value })}><option value="">Tous</option>{accountsPurchases.map((a) => <option key={a} value={a}>{a}</option>)}</select></div>
+      <button type="button" onClick={() => setMoreFilters((v) => !v)} className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.slate }}><ChevronDown size={13} style={{ transform: moreFilters ? "rotate(180deg)" : "none" }} /> {moreFilters ? "Moins de filtres" : "Afficher plus de filtres"}</button>
+      {moreFilters && (
+        <>
+          <div>{label("Mot-clé exact")}<input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={pending.tag} onChange={(e) => setPending({ ...pending, tag: e.target.value })} /></div>
+          <div>{label("TVA de vente")}<select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={pending.vat} onChange={(e) => setPending({ ...pending, vat: e.target.value })}><option value="">Toutes</option>{[20, 10, 5.5, 2.1, 0].map((r) => <option key={r} value={r}>{r} %</option>)}</select></div>
+          <label className="flex items-center gap-2 text-xs" style={{ color: colors.inkSoft }}><input type="checkbox" checked={pending.includeInactive} onChange={(e) => setPending({ ...pending, includeInactive: e.target.checked })} /> Inclure les produits inactifs</label>
+        </>
+      )}
+      <div className="flex gap-2 pt-1">
+        <button type="button" onClick={() => { setFilters(pending); setFiltersOpenMobile(false); }} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: colors.brassDark }}><Search size={14} /> Rechercher</button>
+        <button type="button" onClick={() => { setPending(emptyFilters); setFilters(emptyFilters); }} className="rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Effacer</button>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="df-display text-2xl font-semibold">Bibliothèque de prestations</h1>
-          <p className="text-sm" style={{ color: colors.inkSoft }}>Vos prestations types, prêtes à insérer dans n'importe quel devis ou facture.</p>
+          {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Package size={18} /></div>}
+          <h1 className="df-display text-2xl font-semibold">Produits</h1>
+          <p className="text-sm" style={{ color: colors.inkSoft }}>Tes produits et prestations, avec leurs prix, leur stock et leurs comptes comptables. Ils s'insèrent dans tes devis et factures depuis le bouton « Depuis la bibliothèque ».</p>
         </div>
-        <button onClick={startNew} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink }}>
-          <Plus size={15} /> Nouvelle prestation
-        </button>
+        {canEdit && (
+          <button onClick={() => setEditing(emptyProduct(account?.organizationId))} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.brassDark }}><Plus size={15} /> Nouveau produit</button>
+        )}
+      </div>
+
+      {importInfo && importInfo.imported > 0 && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}40`, color: colors.moss }}>
+          <Check size={16} /> {importInfo.imported} prestation{importInfo.imported > 1 ? "s" : ""} de l'ancienne Bibliothèque reprise{importInfo.imported > 1 ? "s" : ""} dans Produits ({importInfo.total} au total). L'ancienne liste est conservée telle quelle.
+        </div>
+      )}
+      {error && <div className="mb-4 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40`, color: colors.brick }}>{error}</div>}
+      {isLocked && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
+          <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}><Lock size={15} /> {isViewer ? "Accès en lecture seule — la gestion des produits est verrouillée." : "Compte verrouillé — la gestion des produits est en lecture seule."}</span>
+          {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick }}>Voir les forfaits</button>}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        {/* Filtres : barre latérale sur grand écran, panneau repliable sur mobile */}
+        <aside className="w-full shrink-0 rounded-2xl lg:w-64" style={card}>
+          <button type="button" onClick={() => setFiltersOpenMobile((v) => !v)} className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold lg:cursor-default">
+            <span className="flex items-center gap-2"><Filter size={15} /> Filtres</span>
+            <ChevronDown size={15} className="lg:hidden" style={{ transform: filtersOpenMobile ? "rotate(180deg)" : "none" }} />
+          </button>
+          <div className={`${filtersOpenMobile ? "block" : "hidden"} border-t px-4 pb-4 pt-3 lg:block`} style={{ borderColor: colors.line }}>{filterPanel}</div>
+        </aside>
+
+        <div className="min-w-0 flex-1">
+          {selected.length > 0 && canEdit && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+              <span className="font-medium" style={{ color: colors.inkSoft }}>{selected.length} sélectionné{selected.length > 1 ? "s" : ""}</span>
+              <button onClick={() => { selected.forEach((id) => onToggleActive(id, false)); setSelected([]); }} className="rounded-md px-2.5 py-1 font-medium" style={{ border: `1px solid ${colors.line}` }}>Désactiver</button>
+              <button onClick={() => { if (window.confirm(`Supprimer définitivement ${selected.length} produit(s) ? Leur historique de stock sera supprimé aussi.`)) { selected.forEach((id) => onDelete(id, true)); setSelected([]); } }} className="rounded-md px-2.5 py-1 font-medium text-white" style={{ background: colors.brick }}>Supprimer</button>
+              <button onClick={() => setSelected([])} className="ml-auto" style={{ color: colors.inkSoft }}>Annuler</button>
+            </div>
+          )}
+          <div className="overflow-hidden rounded-2xl" style={card}>
+            {loading ? (
+              <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin" style={{ color: colors.slate }} /></div>
+            ) : list.length === 0 ? (
+              <div className="px-6 py-16 text-center">
+                <Package size={28} style={{ color: colors.inkSoft, margin: "0 auto 8px" }} />
+                <p className="df-display text-lg font-semibold">{products.length === 0 ? "Aucun produit pour l'instant" : "Aucun produit ne correspond aux filtres"}</p>
+                <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>{products.length === 0 ? "Crée ton premier produit, ou enregistre une ligne de devis comme produit depuis l'éditeur." : "Modifie les filtres puis clique sur Rechercher."}</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" style={{ minWidth: 820 }}>
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide" style={{ color: colors.inkSoft, background: colors.paper }}>
+                      <th className="px-3 py-2"><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Tout sélectionner" /></th>
+                      <th className="px-3 py-2"><button onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))} className="flex items-center gap-1 font-semibold uppercase">Nom {sortDir === "asc" ? <ChevronDown size={12} /> : <ChevronUp size={12} />}</button></th>
+                      <th className="px-3 py-2 text-right">PU HT</th>
+                      <th className="px-3 py-2 text-right">PU TTC</th>
+                      <th className="px-3 py-2 text-right">Disponibilité</th>
+                      <th className="px-3 py-2">Compte produits</th>
+                      <th className="px-3 py-2">Compte achats</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map((p) => {
+                      const availability = productAvailability(p, stockByProduct);
+                      return (
+                        <tr key={p.id} style={{ borderTop: `1px solid ${colors.line}`, opacity: p.is_active ? 1 : 0.55 }}>
+                          <td className="px-3 py-2"><input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggleOne(p.id)} aria-label={`Sélectionner ${p.name}`} /></td>
+                          <td className="px-3 py-2">
+                            <button onClick={() => setEditing({ ...p })} className="text-left font-medium hover:underline">{p.name}</button>
+                            <div className="text-xs" style={{ color: colors.inkSoft }}>{[p.reference, productKindLabel(p.kind), p.nature ? productNatureLabel(p.nature) : null].filter(Boolean).join(" · ")}{!p.is_active && " · inactif"}</div>
+                          </td>
+                          <td className="df-mono px-3 py-2 text-right">{money(p.sale_price_ht, p.currency)}</td>
+                          <td className="df-mono px-3 py-2 text-right">{money(p.sale_price_ttc, p.currency)}</td>
+                          <td className="df-mono px-3 py-2 text-right" style={{ color: availability.ok ? colors.ink : colors.brick }}>{availability.label}{p.quantity_restricted ? ` ${p.unit || ""}` : ""}</td>
+                          <td className="df-mono px-3 py-2 text-xs">{p.account_sales || "—"}</td>
+                          <td className="df-mono px-3 py-2 text-xs">{p.account_purchases || "—"}</td>
+                          <td className="px-2 py-2 text-right">
+                            <div className="relative inline-block">
+                              <button onClick={() => setMenuFor(menuFor === p.id ? null : p.id)} className="rounded-md p-1.5 hover:bg-black/5" title="Actions" aria-label="Actions"><MoreHorizontal size={16} /></button>
+                              {menuFor === p.id && (
+                                <>
+                                  <div className="fixed inset-0 z-10" onClick={() => setMenuFor(null)} />
+                                  <div className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-lg py-1 text-left shadow-lg" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+                                    <button onClick={() => { setMenuFor(null); setEditing({ ...p }); }} className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-black/5"><Pencil size={13} /> {canEdit ? "Modifier" : "Voir"}</button>
+                                    {canEdit && <button onClick={() => { setMenuFor(null); onDuplicate(p.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-black/5"><Copy size={13} /> Dupliquer</button>}
+                                    {canEdit && <button onClick={() => { setMenuFor(null); onToggleActive(p.id, !p.is_active); }} className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-black/5">{p.is_active ? <EyeOff size={13} /> : <Eye size={13} />} {p.is_active ? "Désactiver" : "Réactiver"}</button>}
+                                    {canEdit && <button onClick={() => { setMenuFor(null); onDelete(p.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-black/5" style={{ color: colors.brick }}><Trash2 size={13} /> Supprimer</button>}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>{list.length} produit{list.length > 1 ? "s" : ""} affiché{list.length > 1 ? "s" : ""} sur {products.length}.</p>
+        </div>
       </div>
 
       {editing && (
-        <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brass}` }}>
-          <div className="mb-3 flex items-center justify-between">
-            <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>{prestations.some((p) => p.id === editing.id) ? "Modifier la prestation" : "Nouvelle prestation"}</span>
-            <button onClick={() => setEditing(null)} style={{ color: colors.inkSoft }}><X size={16} /></button>
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <input className="df-input rounded-md px-2 py-1.5 text-sm sm:col-span-2" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation (ex : Fourniture et pose mitigeur)" value={editing.designation} onChange={(e) => setEditing({ ...editing, designation: e.target.value })} />
-            <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Catégorie (optionnel, ex : Plomberie)" value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })} />
-            <select className="df-select rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editing.unit} onChange={(e) => setEditing({ ...editing, unit: e.target.value })}>
-              {UNIT_OPTIONS.map((u) => <option key={u || "none"} value={u}>{unitLabel(u)}</option>)}
-            </select>
-            <input type="number" className="df-input df-mono rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Prix unitaire HT" value={editing.unitPrice} onChange={(e) => setEditing({ ...editing, unitPrice: e.target.value })} />
-            <div className="relative">
-              <input type="number" step="0.1" min="0" className="df-input df-mono w-full rounded-md py-1.5 pl-2 pr-6 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="TVA" value={editing.tva} onChange={(e) => setEditing({ ...editing, tva: e.target.value })} />
-              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: colors.inkSoft }}>%</span>
-            </div>
-          </div>
-          <button onClick={save} className="mt-3 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Enregistrer</button>
-        </div>
+        <ProductForm
+          product={editing}
+          stock={stockByProduct?.[editing.id] ?? 0}
+          canEdit={canEdit}
+          onClose={() => setEditing(null)}
+          onSave={async (row, options) => { const ok = await onSave(row, options); if (ok) setEditing(null); }}
+        />
       )}
+    </div>
+  );
+}
 
-      <div className="mb-4 flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-        <Search size={15} style={{ color: colors.inkSoft }} />
-        <input className="df-input bg-transparent text-sm outline-none" placeholder="Rechercher une prestation..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        {saving && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
-      </div>
+// Fiche produit (création / édition) — tous les champs, HT et TTC liés dans
+// les deux sens, pièce jointe dans le bucket privé product-files.
+function ProductForm({ product, stock, canEdit, onClose, onSave }) {
+  const [local, setLocal] = useState(() => ({ ...product, tagsText: (product.tags || []).join(", ") }));
+  const [stockTarget, setStockTarget] = useState(String(stock ?? 0));
+  const [pendingFile, setPendingFile] = useState(null);
+  const [removeAttachment, setRemoveAttachment] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [attachmentUrl, setAttachmentUrl] = useState(null);
+  useEscapeToClose(true, onClose);
+  useEffect(() => {
+    let cancelled = false;
+    if (product.attachment_path) signProductFile(product.attachment_path).then((u) => { if (!cancelled) setAttachmentUrl(u); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [product.attachment_path]);
 
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl px-6 py-16 text-center" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
-          <Library size={28} style={{ color: colors.inkSoft }} />
-          <p className="df-display mt-3 text-lg font-semibold">Aucune prestation enregistrée</p>
-          <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Ajoute une prestation ici, ou depuis une ligne d'un devis avec l'icône signet.</p>
+  const patch = (p) => setLocal((prev) => ({ ...prev, ...p }));
+  // Prix liés : modifier le HT ou la TVA recalcule le TTC ; modifier le TTC recalcule le HT.
+  const setSaleHt = (v) => patch({ sale_price_ht: v, sale_price_ttc: ttcFromHt(v, local.sale_vat_rate) });
+  const setSaleVat = (v) => patch({ sale_vat_rate: v, sale_price_ttc: ttcFromHt(local.sale_price_ht, v) });
+  const setSaleTtc = (v) => patch({ sale_price_ttc: v, sale_price_ht: htFromTtc(v, local.sale_vat_rate) });
+  const setBuyHt = (v) => patch({ purchase_price_ht: v, purchase_price_ttc: ttcFromHt(v, local.purchase_vat_rate) });
+  const setBuyVat = (v) => patch({ purchase_vat_rate: v, purchase_price_ttc: ttcFromHt(local.purchase_price_ht, v) });
+  const setBuyTtc = (v) => patch({ purchase_price_ttc: v, purchase_price_ht: htFromTtc(v, local.purchase_vat_rate) });
+
+  async function handleSave() {
+    if (!String(local.name || "").trim()) { setError("Le nom du produit est obligatoire."); return; }
+    if (!(Number(local.sale_price_ht) >= 0) || local.sale_price_ht === "") { setError("Le prix de vente HT est obligatoire (0 accepté)."); return; }
+    setSaving(true); setError("");
+    const row = { ...local, name: local.name.trim(), tags: String(local.tagsText || "").split(",").map((t) => t.trim()).filter(Boolean) };
+    delete row.tagsText;
+    try {
+      await onSave(row, { stockTarget: Number(stockTarget), pendingFile, removeAttachment });
+    } catch (err) {
+      setError(err.message || "Impossible d'enregistrer ce produit pour l'instant.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
+  const field = (labelText, node, help) => (
+    <div>
+      <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>{labelText}</label>
+      {node}
+      {help && <p className="mt-1 text-[11px]" style={{ color: colors.inkSoft }}>{help}</p>}
+    </div>
+  );
+  const text = (key, extra = {}) => <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={local[key] ?? ""} onChange={(e) => patch({ [key]: e.target.value })} disabled={!canEdit} {...extra} />;
+  const num = (value, onChange, extra = {}) => <input type="number" step="0.01" min="0" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={value ?? ""} onChange={(e) => onChange(e.target.value)} disabled={!canEdit} {...extra} />;
+  const check = (key, labelText, help) => (
+    <label className="flex items-start gap-2 text-sm">
+      <input type="checkbox" className="mt-1" checked={!!local[key]} onChange={(e) => patch({ [key]: e.target.checked })} disabled={!canEdit} />
+      <span>{labelText}{help && <span className="block text-[11px]" style={{ color: colors.inkSoft }}>{help}</span>}</span>
+    </label>
+  );
+  const section = (title, children) => (
+    <section className="rounded-xl p-4" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+      <h3 className="df-display mb-3 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>{title}</h3>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{children}</div>
+    </section>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" style={{ background: "rgba(27,42,51,0.5)" }} onClick={onClose}>
+      <div className="flex max-h-[100dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl sm:max-h-[92vh] sm:rounded-2xl" style={{ background: colors.surface, color: colors.ink, border: `1px solid ${colors.line}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b px-5 py-3" style={{ borderColor: colors.line }}>
+          <h2 className="df-display text-lg font-semibold">{product.id ? (canEdit ? "Modifier le produit" : "Produit") : "Nouveau produit"}</h2>
+          <button onClick={onClose} className="rounded-md p-2" style={{ color: colors.inkSoft }} title="Fermer (Échap)"><X size={18} /></button>
         </div>
-      ) : siteSettings?.landingPageVersion === "avancee" ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((p) => (
-            <div key={p.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 truncate text-sm font-semibold">{p.designation}</div>
-                <div className="flex shrink-0 gap-2">
-                  <button onClick={() => startEdit(p)} style={{ color: colors.slate }}><Pencil size={15} /></button>
-                  <button onClick={() => { if (window.confirm(`Supprimer "${p.designation}" de la bibliothèque ?`)) onDelete(p.id); }} title="Supprimer" style={{ color: colors.brick }}><Trash2 size={15} /></button>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+          {section("Informations générales", <>
+            <div className="sm:col-span-2">{field("Nom *", text("name", { placeholder: "Ex. Carrelage grès cérame 60×60" }))}</div>
+            {field("Référence interne", text("reference"))}
+            {field("Type", <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={local.kind} onChange={(e) => patch({ kind: e.target.value })} disabled={!canEdit}>{PRODUCT_KINDS.map(([id, l]) => <option key={id} value={id}>{l}</option>)}</select>)}
+            {field("Prix de vente HT *", num(local.sale_price_ht, setSaleHt))}
+            {field("TVA applicable à la vente", <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={String(local.sale_vat_rate)} onChange={(e) => setSaleVat(e.target.value)} disabled={!canEdit}>{[20, 10, 5.5, 2.1, 0].map((r) => <option key={r} value={String(r)}>{r} %</option>)}</select>)}
+            {field("Prix de vente TTC", num(local.sale_price_ttc, setSaleTtc), "Calculé à partir du HT et de la TVA ; modifier le TTC recalcule le HT.")}
+            {field("Devise", <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={local.currency} onChange={(e) => patch({ currency: e.target.value })} disabled={!canEdit}>{CURRENCIES.map((c) => <option key={c} value={c}>{currencyLabel(c)}</option>)}</select>)}
+            {field("Nature", <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={local.nature} onChange={(e) => patch({ nature: e.target.value })} disabled={!canEdit}>{PRODUCT_NATURES.map(([id, l]) => <option key={id} value={id}>{l}</option>)}</select>)}
+            {field("Catégorie", text("category", { placeholder: "Ex. Sols, Plomberie…" }))}
+            <div className="sm:col-span-2">{check("price_per_warehouse", "Prix de vente différent selon l'entrepôt", "Les prix par entrepôt se règlent à l'étape Entrepôts.")}</div>
+            <div className="sm:col-span-2">{field("Description", <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, minHeight: "4rem" }} value={local.description ?? ""} onChange={(e) => patch({ description: e.target.value })} disabled={!canEdit} />)}</div>
+            <div className="sm:col-span-2">{field("Tags / mots-clés", text("tagsText", { placeholder: "séparés par des virgules : extérieur, gel, 60x60" }))}</div>
+            {field("Compte comptable (produits)", text("account_sales", { placeholder: "Ex. 707000", className: "df-input df-mono w-full rounded-md px-3 py-2 text-sm" }), "Code comptable de vente.")}
+            {field("Compte comptable (achats)", text("account_purchases", { placeholder: "Ex. 607000", className: "df-input df-mono w-full rounded-md px-3 py-2 text-sm" }), "Code comptable d'achat.")}
+          </>)}
+
+          {section("Stock et achat", <>
+            <div className="sm:col-span-2">{check("quantity_restricted", "Restriction de quantité (en vente si stock positif)", "Quand cette case est cochée, le produit n'est proposé dans les documents que si sa quantité en stock est supérieure à zéro, et la disponibilité affiche la quantité réelle. Sinon, la disponibilité indique « sans limite ».")}</div>
+            {field("Quantité disponible en stock", <input type="number" step="0.001" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={stockTarget} onChange={(e) => setStockTarget(e.target.value)} disabled={!canEdit} />, product.id ? `Stock actuel : ${stock ?? 0}. Un changement crée un mouvement d'ajustement dans l'historique.` : "Un stock de départ crée un mouvement d'ajustement dans l'historique.")}
+            {field("Unité", <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={local.unit ?? ""} onChange={(e) => patch({ unit: e.target.value })} disabled={!canEdit}>{PRODUCT_UNITS.map((u) => <option key={u || "none"} value={u}>{u || "— Non précisée —"}</option>)}</select>)}
+            {field("Prix d'achat HT", num(local.purchase_price_ht, setBuyHt))}
+            {field("TVA à l'achat", <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={String(local.purchase_vat_rate)} onChange={(e) => setBuyVat(e.target.value)} disabled={!canEdit}>{[20, 10, 5.5, 2.1, 0].map((r) => <option key={r} value={String(r)}>{r} %</option>)}</select>)}
+            {field("Prix d'achat TTC", num(local.purchase_price_ttc, setBuyTtc))}
+            {field("Quantité vendue par défaut", num(local.default_quantity, (v) => patch({ default_quantity: v }), { step: "1", min: "0.001" }), "Quantité proposée quand le produit est ajouté à un document.")}
+            <div className="sm:col-span-2">{check("is_kit", "Lot / kit", "Le produit est composé de plusieurs autres produits (composition gérée à une étape suivante).")}</div>
+            {field("Référence fournisseur", text("supplier_reference"))}
+            {field("Champ additionnel", text("custom_field", { placeholder: "Libre : dimension, coloris, garantie…" }))}
+          </>)}
+
+          {section("Comptabilité avancée", <>
+            {field("Compte comptable TVA (vente)", text("account_vat_sales", { placeholder: "Ex. 445710" }))}
+            {field("Compte comptable TVA (achat)", text("account_vat_purchases", { placeholder: "Ex. 445660" }))}
+            {field("Code activité", text("activity_code"))}
+            {field("Code journal", text("journal_code", { placeholder: "Ex. VE, AC" }))}
+          </>)}
+
+          {section("Divers", <>
+            <div className="sm:col-span-2">{check("is_active", "Actif", "Décoche pour masquer le produit sans le supprimer : il n'apparaît plus dans les documents ni dans la liste (sauf filtre « inclure les inactifs »).")}</div>
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Pièce jointe (fiche technique, notice…)</label>
+              {product.attachment_path && !removeAttachment && !pendingFile ? (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Paperclip size={14} style={{ color: colors.inkSoft }} />
+                  {attachmentUrl ? <a href={attachmentUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: colors.brassDark }}>{product.attachment_name || "Fichier"}</a> : <span>{product.attachment_name || "Fichier"}</span>}
+                  {canEdit && <button type="button" onClick={() => setRemoveAttachment(true)} className="text-xs" style={{ color: colors.brick }}>Retirer</button>}
                 </div>
-              </div>
-              {p.category && <span className="w-fit rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: colors.paper, color: colors.inkSoft }}>{p.category}</span>}
-              <div className="flex items-baseline justify-between">
-                <span className="df-display text-lg font-bold">{eur(Number(p.unitPrice) || 0)}</span>
-                <span className="text-xs" style={{ color: colors.inkSoft }}>{p.unit} · TVA {p.tva}%</span>
-              </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  {canEdit && <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx,.txt" onChange={(e) => { setPendingFile(e.target.files?.[0] || null); setRemoveAttachment(false); }} className="text-xs" />}
+                  {pendingFile && <span className="text-xs" style={{ color: colors.inkSoft }}>{pendingFile.name} (envoyé à l'enregistrement)</span>}
+                  {removeAttachment && <span className="text-xs" style={{ color: colors.brick }}>Le fichier actuel sera retiré à l'enregistrement.</span>}
+                </div>
+              )}
+              <p className="mt-1 text-[11px]" style={{ color: colors.inkSoft }}>PDF, image, Word, Excel ou texte, 10 Mo maximum. Stocké dans un espace privé visible uniquement par ton équipe.</p>
             </div>
-          ))}
+          </>)}
+          {error && <p className="text-sm" style={{ color: colors.brick }}>{error}</p>}
         </div>
-      ) : (
-        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-          {filtered.map((p, idx) => (
-            <div key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
-              <div className="min-w-0 grow basis-56 truncate text-sm font-medium">{p.designation}</div>
-              <div className="w-24 shrink-0 text-xs" style={{ color: colors.inkSoft }}>{p.category || "—"}</div>
-              <div className="w-20 shrink-0 text-xs" style={{ color: colors.inkSoft }}>{p.unit}</div>
-              <div className="df-mono w-24 shrink-0 text-right text-sm font-medium">{eur(Number(p.unitPrice) || 0)}</div>
-              <div className="df-mono w-16 shrink-0 text-right text-xs" style={{ color: colors.inkSoft }}>{p.tva}%</div>
-              <div className="flex shrink-0 gap-2">
-                <button onClick={() => startEdit(p)} style={{ color: colors.slate }}><Pencil size={15} /></button>
-                <button onClick={() => { if (window.confirm(`Supprimer "${p.designation}" de la bibliothèque ?`)) onDelete(p.id); }} title="Supprimer" style={{ color: colors.brick }}><Trash2 size={15} /></button>
-              </div>
-            </div>
-          ))}
+        <div className="flex items-center justify-end gap-2 border-t px-5 py-3" style={{ borderColor: colors.line }}>
+          <button onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>{canEdit ? "Annuler" : "Fermer"}</button>
+          {canEdit && <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: colors.brassDark, opacity: saving ? 0.7 : 1 }}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Enregistrer</button>}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -13875,7 +14358,7 @@ function ReviewRequestNotice({ notice, onSend, onDismiss }) {
   );
 }
 
-function Editor({ doc, saving, clients, prestations, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSavePrestation, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview }) {
+function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
@@ -14065,14 +14548,18 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     setSelectedLineIds([]);
   }
   function addLine() { patch({ items: [...localDoc.items, emptyLine()] }); }
+  // Insertion d'un produit de la Gestion de stock : la ligne garde
+  // l'identifiant et la référence du produit (règle prix / stock à venir).
   function addFromLibrary(p) {
-    patch({ items: [...localDoc.items, { id: nextId("l"), type: "line", designation: p.designation, details: [], qty: 1, unit: p.unit, unitPrice: p.unitPrice, tva: p.tva, discount: 0 }] });
+    patch({ items: [...localDoc.items, { id: nextId("l"), type: "line", designation: p.name, details: [], qty: Number(p.default_quantity) > 0 ? Number(p.default_quantity) : 1, unit: p.unit || "", unitPrice: Number(p.sale_price_ht) || 0, tva: Number(p.sale_vat_rate) || 0, discount: 0, productId: p.id, productRef: p.reference || "" }] });
     setLibraryOpen(false);
     setLibraryQuery("");
   }
+  // Produits proposés : actifs, et en stock si la restriction de quantité est activée.
+  const libraryProducts = (products || []).filter((p) => p.is_active && (!p.quantity_restricted || Number(stockByProduct[p.id] ?? 0) > 0));
   function saveLineAsPrestation(it) {
     if (!it.designation.trim()) { alert("Renseigne d'abord une désignation pour cette ligne avant de l'enregistrer."); return; }
-    onSavePrestation({ id: nextId("pr"), designation: it.designation, category: "", unit: it.unit, unitPrice: it.unitPrice, tva: it.tva });
+    if (onSaveProduct) onSaveProduct(it);
   }
   const [publicLinkState, setPublicLinkState] = useState({ loading: false, url: null, error: null });
 
@@ -15065,12 +15552,13 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                     <div className="absolute right-0 z-10 mt-1 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md shadow-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
                       <input autoFocus className="df-input w-full border-0 border-b px-3 py-2 text-sm" style={{ borderColor: colors.line }} placeholder="Rechercher..." value={libraryQuery} onChange={(e) => setLibraryQuery(e.target.value)} />
                       <div className="max-h-64 overflow-y-auto">
-                        {prestations.filter((p) => p.designation.toLowerCase().includes(libraryQuery.toLowerCase())).map((p) => (
+                        {libraryProducts.filter((p) => (p.name || "").toLowerCase().includes(libraryQuery.toLowerCase()) || (p.reference || "").toLowerCase().includes(libraryQuery.toLowerCase())).map((p) => (
                           <button key={p.id} onClick={() => addFromLibrary(p)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-black/5">
-                            <span className="truncate">{p.designation}</span>
-                            <span className="df-mono shrink-0 text-xs" style={{ color: colors.inkSoft }}>{eur(Number(p.unitPrice) || 0)}</span>
+                            <span className="truncate">{p.name}{p.reference ? <span className="df-mono text-xs" style={{ color: colors.inkSoft }}> · {p.reference}</span> : null}</span>
+                            <span className="df-mono shrink-0 text-xs" style={{ color: colors.inkSoft }}>{formatMoney(Number(p.sale_price_ht) || 0, p.currency)}</span>
                           </button>
                         ))}
+                        {libraryProducts.length === 0 && <p className="px-3 py-3 text-xs" style={{ color: colors.inkSoft }}>Aucun produit actif. Crée-en dans Gestion de stock, Produits.</p>}
                       </div>
                     </div>
                   )}
