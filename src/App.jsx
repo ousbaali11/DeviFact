@@ -3782,7 +3782,12 @@ function DeviFactAppInner() {
 
   if (!account || !account.loggedIn) {
     if (preAuthView === "contact") {
-      return <ContactView siteSettings={siteSettings} onBack={() => setPreAuthView("landing")} />;
+      return <ContactView siteSettings={siteSettings} onBack={() => setPreAuthView("landing")} onLegal={setPreAuthView} />;
+    }
+    // Pages légales (mentions légales, confidentialité, CGU) — accessibles
+    // sans connexion, comme la page Contact.
+    if (LEGAL_PAGES[preAuthView]) {
+      return <LegalView kind={preAuthView} siteSettings={siteSettings} onBack={() => setPreAuthView("landing")} onLegal={setPreAuthView} />;
     }
     if (preAuthView === "landing") {
       const LandingComponent = siteSettings?.landingPageVersion === "atelier" ? LandingPageAtelier : siteSettings?.landingPageVersion === "avancee" ? LandingPageAvancee : LandingPage;
@@ -3793,10 +3798,11 @@ function DeviFactAppInner() {
           onGetStarted={() => { setAuthMode("signup"); setPreAuthView("auth"); }}
           onLogin={() => { setAuthMode("login"); setPreAuthView("auth"); }}
           onContact={() => setPreAuthView("contact")}
+          onLegal={setPreAuthView}
         />
       );
     }
-    return <AuthScreen initialMode={authMode} onBack={() => setPreAuthView("landing")} siteSettings={siteSettings} />;
+    return <AuthScreen initialMode={authMode} onBack={() => setPreAuthView("landing")} siteSettings={siteSettings} onLegal={setPreAuthView} />;
   }
 
   // Le prix de son forfait est passé de 0€ à un prix réel depuis son
@@ -3818,7 +3824,10 @@ function DeviFactAppInner() {
     );
   }
   if (view === "contact") {
-    return <ContactView siteSettings={siteSettings} onBack={() => setView("dashboard")} />;
+    return <ContactView siteSettings={siteSettings} onBack={() => setView("dashboard")} onLegal={setView} />;
+  }
+  if (LEGAL_PAGES[view]) {
+    return <LegalView kind={view} siteSettings={siteSettings} onBack={() => setView("dashboard")} onLegal={setView} />;
   }
 
   const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
@@ -5034,7 +5043,7 @@ function PublicDocumentView({ token }) {
 // — et surtout, JAMAIS bloqué par une histoire d'abonnement expiré :
 // quelqu'un qui n'a plus accès doit toujours pouvoir nous contacter
 // pour savoir comment réactiver son compte.
-function ContactView({ siteSettings, onBack }) {
+function ContactView({ siteSettings, onBack, onLegal }) {
   const emptyForm = { nom: "", prenom: "", telephone: "", email: "", objet: "", message: "" };
   const [form, setForm] = useState(emptyForm);
   const [sending, setSending] = useState(false);
@@ -5144,6 +5153,227 @@ function ContactView({ siteSettings, onBack }) {
             </button>
           </div>
         )}
+        {onLegal && (
+          <div className="mt-8 border-t pt-4 text-center text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+            <LegalLinks onLegal={onLegal} color={colors.inkSoft} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// ⚠️  PAGES LÉGALES — PREMIER JET, NON VALIDÉ  ⚠️
+//
+// Les trois textes ci-dessous (Mentions légales, Politique de
+// confidentialité, Conditions générales d'utilisation) sont un BROUILLON
+// rédigé à partir de l'inventaire technique du site (septembre 2026).
+// Ils DOIVENT être relus et validés par un professionnel du droit avant
+// toute mise en ligne réelle. Les passages entre crochets
+// « [À COMPLÉTER : …] » et « [À VÉRIFIER : …] » sont à renseigner ou à
+// confirmer. Ne pas considérer ce contenu comme un conseil juridique.
+// ===========================================================================
+const LEGAL_PAGES = {
+  "mentions-legales": { title: "Mentions légales", short: "Mentions légales" },
+  "confidentialite": { title: "Politique de confidentialité", short: "Confidentialité" },
+  "cgu": { title: "Conditions générales d'utilisation", short: "CGU" },
+};
+const LEGAL_LAST_UPDATE = "[À COMPLÉTER : date de mise en ligne]";
+
+// Petits blocs de mise en page communs aux trois pages.
+function LegalH2({ children }) { return <h2 className="df-display mb-2 mt-8 text-lg font-semibold">{children}</h2>; }
+function LegalP({ children }) { return <p className="mb-3 text-sm leading-relaxed" style={{ color: colors.inkSoft }}>{children}</p>; }
+function LegalUl({ items }) {
+  return (
+    <ul className="mb-3 list-disc space-y-1 pl-5 text-sm leading-relaxed" style={{ color: colors.inkSoft }}>
+      {items.map((it, i) => <li key={i}>{it}</li>)}
+    </ul>
+  );
+}
+function LegalTodo({ children }) {
+  return <span className="rounded px-1 font-semibold" style={{ background: `${colors.brick}18`, color: colors.brick }}>[{children}]</span>;
+}
+
+// Liens vers les trois pages légales (pieds de page, inscription, contact).
+function LegalLinks({ onLegal, color, className = "" }) {
+  if (!onLegal) return null;
+  return (
+    <span className={className}>
+      {Object.entries(LEGAL_PAGES).map(([id, p], i) => (
+        <Fragment key={id}>
+          {i > 0 && " · "}
+          <button onClick={() => onLegal(id)} className="underline" style={{ color }}>{p.short}</button>
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+function LegalView({ kind, siteSettings, onBack, onLegal }) {
+  const page = LEGAL_PAGES[kind] || LEGAL_PAGES["mentions-legales"];
+  const site = siteSettings?.name || "Chantiflow";
+  const contactEmail = siteSettings?.contactEmail || "contact@chantiflow.fr";
+  useEffect(() => { window.scrollTo(0, 0); }, [kind]);
+
+  return (
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="mx-auto max-w-2xl px-4 py-10 sm:py-16">
+        {onBack && (
+          <button onClick={onBack} className="mb-6 flex items-center gap-1 text-sm" style={{ color: colors.inkSoft }}>
+            <ArrowLeft size={15} /> Retour
+          </button>
+        )}
+        <div className="mb-6 flex flex-wrap gap-2">
+          {Object.entries(LEGAL_PAGES).map(([id, p]) => (
+            <button key={id} onClick={() => onLegal && onLegal(id)} className="rounded-full px-3 py-1.5 text-xs font-medium" style={{ background: id === kind ? colors.ink : colors.surface, color: id === kind ? "white" : colors.inkSoft, border: `1px solid ${id === kind ? colors.ink : colors.line}` }}>{p.short}</button>
+          ))}
+        </div>
+        <h1 className="df-display mb-1 text-3xl font-semibold">{page.title}</h1>
+        <p className="mb-6 text-xs" style={{ color: colors.inkSoft }}>Dernière mise à jour : {LEGAL_LAST_UPDATE}</p>
+
+        {kind === "mentions-legales" && (
+          <>
+            <LegalH2>Éditeur du site</LegalH2>
+            <LegalP>Le site {site} est édité par <LegalTodo>À COMPLÉTER : dénomination ou nom et prénom de l'éditeur</LegalTodo>, <LegalTodo>À COMPLÉTER : forme juridique (entreprise individuelle, SASU, SARL…) et, le cas échéant, capital social</LegalTodo>, immatriculée sous le numéro SIRET <LegalTodo>À COMPLÉTER : SIRET</LegalTodo> (RCS <LegalTodo>À COMPLÉTER : ville du RCS, ou « dispensé d'immatriculation » si applicable</LegalTodo>), numéro de TVA intracommunautaire <LegalTodo>À COMPLÉTER : n° de TVA, ou « non applicable » en franchise en base</LegalTodo>.</LegalP>
+            <LegalP>Siège social : <LegalTodo>À COMPLÉTER : adresse postale complète</LegalTodo>. Contact : {contactEmail}, <LegalTodo>À COMPLÉTER : numéro de téléphone</LegalTodo>.</LegalP>
+            <LegalH2>Directeur de la publication</LegalH2>
+            <LegalP><LegalTodo>À COMPLÉTER : nom et prénom du directeur de la publication (en général le représentant légal)</LegalTodo>, joignable à l'adresse {contactEmail}.</LegalP>
+            <LegalH2>Hébergement</LegalH2>
+            <LegalP>Les données de l'application (base de données, authentification, fichiers, fonctions serveur) sont hébergées par Supabase Inc., <LegalTodo>À COMPLÉTER : adresse de Supabase Inc., voir supabase.com/legal</LegalTodo>, dans la région Union européenne « eu-north-1 » (Stockholm, Suède).</LegalP>
+            <LegalP>Les pages du site (partie visible) sont hébergées par <LegalTodo>À COMPLÉTER : nom et adresse de l'hébergeur du site web (Vercel, Netlify, OVH…), selon l'endroit où le front est déployé</LegalTodo>.</LegalP>
+            <LegalH2>Propriété intellectuelle</LegalH2>
+            <LegalP>L'ensemble du site (textes, mise en page, code, nom et logo {site}) est protégé par le droit d'auteur et le droit des marques. Toute reproduction, même partielle, sans autorisation écrite de l'éditeur est interdite. Les documents (devis, factures…) créés par les utilisateurs restent la propriété de ces derniers.</LegalP>
+            <LegalH2>Crédits</LegalH2>
+            <LegalUl items={[
+              "Icônes : bibliothèque Lucide (licence ISC).",
+              "Polices de caractères : Inter, Space Grotesk et IBM Plex Mono, chargées depuis Google Fonts.",
+              "Drapeaux des pays : images fournies par flagcdn.com.",
+              "Polices DejaVu (licence libre) intégrées dans les fichiers Factur-X.",
+            ]} />
+            <LegalH2>Données personnelles</LegalH2>
+            <LegalP>Le traitement des données personnelles est décrit dans la <button onClick={() => onLegal && onLegal("confidentialite")} className="underline" style={{ color: colors.brassDark }}>politique de confidentialité</button>. Pour toute demande : {contactEmail}.</LegalP>
+          </>
+        )}
+
+        {kind === "confidentialite" && (
+          <>
+            <LegalP>Cette politique explique quelles données {site} collecte, pourquoi, avec qui elles sont partagées et combien de temps elles sont conservées. Elle s'applique au site, à l'application connectée et à l'application de bureau, qui utilisent les mêmes services.</LegalP>
+            <LegalH2>1. Qui est responsable du traitement ?</LegalH2>
+            <LegalP>Le responsable du traitement est l'éditeur du site, identifié dans les mentions légales : <LegalTodo>À COMPLÉTER : dénomination et adresse</LegalTodo>. Contact pour toute question relative aux données : {contactEmail}.</LegalP>
+            <LegalP><LegalTodo>À VÉRIFIER avec un professionnel</LegalTodo> : pour les données des clients que vous saisissez dans vos devis et factures (nom, adresse, email de vos propres clients), vous êtes responsable de leur traitement et {site} agit comme sous-traitant, hébergeant et traitant ces données pour votre compte et selon vos instructions.</LegalP>
+            <LegalH2>2. Données collectées</LegalH2>
+            <LegalUl items={[
+              "Compte utilisateur : adresse email, prénom, nom, nom de l'entreprise, mot de passe (stocké uniquement sous forme hachée par le service d'authentification), date de création, état de confirmation de l'email, rôle dans l'organisation.",
+              "Profil de l'entreprise (« Mon entreprise ») : raison sociale, SIRET, adresse, code postal, ville, pays, email, téléphone, numéro de TVA, IBAN et BIC (optionnels), logo, lien d'avis Google (optionnel).",
+              "Fiches clients et documents : nom, adresse, code postal, ville, pays, email, téléphone, SIRET et numéro de TVA des clients ; contenu des devis, factures et autres documents (lignes, montants, notes, chantier).",
+              "Signatures : nom saisi ou image de la signature (dessinée à l'écran ou importée), y compris lors d'une signature à distance par le client via un lien ou un QR code, avec la date de signature.",
+              "Photos de chantier ajoutées aux rapports d'intervention, PV de réception et situations de travaux (fichiers image, réduits avant envoi).",
+              "Équipe et planning : email des membres invités, rôle, créneaux du planning (titre, dates, membre, chantier).",
+              "Abonnement : forfait, cycle de facturation, identifiants techniques de client et d'abonnement chez Stripe ou PayPal, dates de paiement et d'expiration. Aucun numéro de carte bancaire n'est stocké par le site.",
+              "Formulaire de contact : prénom, nom, email, téléphone (optionnel), objet et message, enregistrés en base et transmis par email à l'éditeur.",
+              "Clés d'accès API (forfait Entreprise) : nom de la clé, empreinte hachée (jamais la clé en clair), date de dernière utilisation, compteur d'appels par minute.",
+              "Liens publics de signature ou de paiement : jeton aléatoire, dates de signature et de paiement.",
+              "Journaux techniques du service d'hébergement (adresses IP, horodatages des requêtes), conservés par Supabase pour la sécurité et le diagnostic.",
+            ]} />
+            <LegalH2>3. Pourquoi ces données sont utilisées</LegalH2>
+            <LegalUl items={[
+              "Fournir le service : créer un compte, produire et stocker les documents, les exporter en PDF, Excel ou Factur-X, faire signer ou payer un document en ligne (exécution du contrat).",
+              "Gérer l'abonnement et les paiements (exécution du contrat, obligations comptables).",
+              "Envoyer les emails de fonctionnement : confirmation de l'adresse email, relances de factures impayées (forfaits Pro et Entreprise, jamais plus d'une par semaine et par facture), demande d'avis Google déclenchée manuellement par vous, réponse à vos messages de contact.",
+              "Proposer des lignes de devis grâce à une intelligence artificielle, uniquement à votre demande explicite.",
+              "Proposer un pays et une devise par défaut lors de la première visite.",
+              "Assurer la sécurité du service, prévenir les abus et diagnostiquer les pannes (intérêt légitime).",
+            ]} />
+            <LegalH2>4. Services tiers qui reçoivent des données</LegalH2>
+            <LegalP>Le site fait appel aux prestataires suivants. Les pays d'établissement et les garanties de transfert hors Union européenne sont à confirmer : <LegalTodo>À VÉRIFIER : localisation et clauses contractuelles de chaque prestataire</LegalTodo>.</LegalP>
+            <LegalUl items={[
+              "Supabase (hébergement de la base de données, authentification, stockage des photos, fonctions serveur) : ensemble des données, région Union européenne (Stockholm, Suède).",
+              "Stripe (paiement par carte) : votre adresse email et l'identifiant de votre organisation lors de la souscription d'un abonnement ; pour le paiement d'une facture par un client, le numéro de la facture et son montant. Les données de carte sont saisies directement sur les pages de Stripe.",
+              "PayPal (paiement de l'abonnement) : identifiant de votre organisation ; le paiement se fait sur les pages de PayPal, dont le script est chargé sur la page Tarifs.",
+              "Resend (envoi des emails) : adresse email du destinataire, contenu de l'email (numéro de facture, montant, nom du client, lien d'avis, votre message de contact).",
+              "Google (Gemini, intelligence artificielle) : uniquement le texte de description du chantier que vous saisissez dans la fenêtre « Suggestions IA ». Aucune donnée de compte, de client ni de montant n'est envoyée.",
+              "GeoJS (détection du pays) : lors de la première visite, l'adresse IP est transmise au service GeoJS afin de proposer un pays et une devise par défaut ; aucune autre donnée n'est envoyée et le résultat est conservé 30 jours sur l'appareil.",
+              "Google Fonts (polices de caractères) et flagcdn.com (images de drapeaux) : votre navigateur charge ces ressources directement, ce qui transmet votre adresse IP à ces services.",
+              "INSEE (indices de révision de prix) : appel effectué par le serveur, sans aucune donnée personnelle.",
+            ]} />
+            <LegalH2>5. Ce qui est enregistré sur votre appareil</LegalH2>
+            <LegalP>Le site n'utilise pas de cookies de suivi ni de mesure d'audience. Il utilise le stockage local du navigateur (localStorage), qui n'est jamais transmis à un tiers, pour :</LegalP>
+            <LegalUl items={[
+              "la session de connexion (jeton fourni par le service d'authentification) ;",
+              "vos préférences d'affichage : mode sombre, dernière page et dernier document ouverts, dernier onglet d'administration ;",
+              "une copie de vos documents, clients, prestations et profil d'entreprise, pour consultation en lecture seule en cas de coupure réseau (mode hors ligne), mise à jour à chaque chargement réussi ;",
+              "le pays détecté lors de la première visite, conservé 30 jours.",
+            ]} />
+            <LegalP>L'application peut être installée sur l'écran d'accueil (application web progressive) : le navigateur garde alors en cache les fichiers de l'application, pas vos données. Le script de paiement PayPal, chargé sur la page Tarifs, peut déposer ses propres cookies : <LegalTodo>À VÉRIFIER : cookies déposés par PayPal et information à donner</LegalTodo>.</LegalP>
+            <LegalH2>6. Durées de conservation</LegalH2>
+            <LegalUl items={[
+              "Compte non confirmé : supprimé automatiquement 8 semaines après sa création.",
+              "Compte confirmé, documents, clients, photos : conservés tant que le compte existe. Un document supprimé par vous est supprimé immédiatement, ainsi que ses photos.",
+              "Abonnement résilié : l'accès est maintenu jusqu'à la fin de la période payée, puis le compte repasse automatiquement au forfait Gratuit ; les données ne sont pas supprimées.",
+              "Factures : à conserver 10 ans au titre des obligations comptables — cette durée s'applique à vos propres obligations en tant qu'émetteur ; " + "[À VÉRIFIER : durée de conservation par le site après suppression du compte]",
+              "Messages du formulaire de contact : [À COMPLÉTER : durée, par exemple 12 mois].",
+              "Données de facturation de l'abonnement (chez Stripe et PayPal) : selon leurs propres politiques et les obligations comptables.",
+            ]} />
+            <LegalH2>7. Vos droits</LegalH2>
+            <LegalP>Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation, d'opposition et de portabilité de vos données, ainsi que du droit de définir des directives après votre décès. Vous pouvez modifier vous-même la plupart de vos données depuis l'application (Mon entreprise, Mon compte, Clients). Pour exercer un autre droit, notamment la suppression complète de votre compte, écrivez à {contactEmail} : la demande est traitée dans un délai de <LegalTodo>À COMPLÉTER : délai, un mois maximum selon le RGPD</LegalTodo>. Vous pouvez aussi introduire une réclamation auprès de la CNIL (cnil.fr).</LegalP>
+            <LegalH2>8. Sécurité</LegalH2>
+            <LegalP>Les échanges sont chiffrés (HTTPS). Les mots de passe ne sont jamais stockés en clair. L'accès aux données est cloisonné par organisation au niveau de la base de données, et les photos de chantier sont stockées dans un espace privé accessible uniquement aux membres de l'organisation, via des liens temporaires. Les clés API ne sont conservées que sous forme hachée.</LegalP>
+            <LegalH2>9. Modifications</LegalH2>
+            <LegalP>Cette politique peut être mise à jour ; la date en tête de page indique la dernière version. En cas de changement important, vous en serez informé dans l'application ou par email.</LegalP>
+          </>
+        )}
+
+        {kind === "cgu" && (
+          <>
+            <LegalH2>1. Objet</LegalH2>
+            <LegalP>Les présentes conditions régissent l'utilisation du service {site}, un outil en ligne de gestion administrative pour les artisans et entreprises du bâtiment : création de devis, factures, factures d'acompte, avoirs, bons de commande et de livraison, situations de travaux, PV de réception, rapports d'intervention, contrats, relances, plannings, bordereaux de prix et révisions de prix ; signature et paiement en ligne ; suivi des chantiers et de l'équipe. En créant un compte, vous acceptez ces conditions.</LegalP>
+            <LegalH2>2. Inscription et compte</LegalH2>
+            <LegalUl items={[
+              "L'inscription nécessite une adresse email valide, un mot de passe et le nom de votre entreprise. Un email de confirmation vous est envoyé ; un compte non confirmé est supprimé au bout de 8 semaines.",
+              "Le service est réservé à un usage professionnel. Vous garantissez l'exactitude des informations fournies, notamment celles qui figurent sur vos documents (identité, SIRET, TVA, mentions obligatoires).",
+              "Vous êtes responsable de la confidentialité de votre mot de passe et de toute activité réalisée depuis votre compte. Vous pouvez inviter des membres dans votre organisation et leur attribuer un rôle ; vous restez responsable de leurs actions.",
+            ]} />
+            <LegalH2>3. Forfaits, paiement et résiliation</LegalH2>
+            <LegalUl items={[
+              "Forfait Gratuit : sans carte bancaire, limité à un nombre de documents indiqué sur la page Tarifs (3 par défaut). Au-delà, le compte passe en lecture seule jusqu'au choix d'un forfait payant.",
+              "Forfaits payants (Essentiel, Pro, Entreprise) : abonnement mensuel ou annuel, aux tarifs affichés sur la page Tarifs au moment de la souscription — ces tarifs font foi. [À VÉRIFIER : tarifs hors taxes ou toutes taxes comprises, et mention de la TVA applicable]",
+              "Le paiement s'effectue par carte bancaire via Stripe ou via PayPal. L'abonnement se renouvelle automatiquement à chaque échéance jusqu'à résiliation.",
+              "Résiliation : possible à tout moment depuis la page Abonnement. L'accès aux fonctionnalités du forfait est conservé jusqu'à la fin de la période déjà payée, puis le compte repasse automatiquement au forfait Gratuit, sans suppression des données. Les périodes entamées ne sont pas remboursées. [À VÉRIFIER : droit de rétractation de 14 jours pour les professionnels dans certains cas, et politique de remboursement]",
+              "L'éditeur peut modifier les tarifs ; les nouveaux tarifs s'appliquent au renouvellement suivant, après information préalable. [À COMPLÉTER : délai de préavis]",
+            ]} />
+            <LegalH2>4. Obligations de l'utilisateur</LegalH2>
+            <LegalUl items={[
+              "Utiliser le service conformément à la loi, notamment aux règles de facturation et de TVA applicables à votre activité. Le service propose des mentions et des calculs standards ; leur adéquation à votre situation relève de votre responsabilité et, si besoin, de celle de votre comptable.",
+              "Ne pas saisir de contenu illicite, ne pas usurper l'identité d'un tiers, ne pas tenter d'accéder aux données d'autres organisations, ne pas surcharger ou contourner le service (y compris via l'API).",
+              "Recueillir, lorsque c'est nécessaire, le consentement de vos clients avant de leur envoyer des emails depuis le service (relances, demande d'avis) et respecter vos propres obligations en matière de données personnelles.",
+            ]} />
+            <LegalH2>5. Signature et paiement en ligne</LegalH2>
+            <LegalP>Le service permet à vos clients de signer un devis (nom saisi ou signature dessinée) et de payer une facture depuis un lien ou un QR code, sans compte. La signature enregistrée est une signature électronique « simple » : le service conserve le nom ou le dessin, la date et le lien utilisé. <LegalTodo>À VÉRIFIER avec un professionnel : valeur probante de cette signature et mentions à ajouter (horodatage, identification du signataire)</LegalTodo>. Le paiement est réalisé par Stripe ; le service n'encaisse pas les fonds pour votre compte.</LegalP>
+            <LegalH2>6. Facturation électronique</LegalH2>
+            <LegalP>Le service permet de télécharger vos factures au format Factur-X. La transmission à une plateforme agréée, prévue par la réforme de la facturation électronique, n'est pas encore assurée par le service et reste à votre charge tant qu'elle n'est pas proposée.</LegalP>
+            <LegalH2>7. Disponibilité et responsabilité</LegalH2>
+            <LegalUl items={[
+              "L'éditeur s'efforce de maintenir le service accessible en permanence mais ne garantit pas une disponibilité ininterrompue (maintenance, panne, incident chez un prestataire). Une copie en lecture seule de vos données reste consultable sur votre appareil en cas de coupure.",
+              "Le service est un outil d'aide à la gestion. Il ne constitue pas un conseil juridique, comptable ou fiscal. L'éditeur ne peut être tenu responsable des erreurs contenues dans les documents que vous produisez, des retards de paiement de vos clients ni de l'usage que vous faites des documents.",
+              "Vous êtes invité à exporter régulièrement vos documents (PDF, Excel) : l'éditeur ne pourra être tenu responsable d'une perte de données au-delà de ce que prévoit la loi. [À VÉRIFIER : plafond de responsabilité, par exemple le montant payé au cours des 12 derniers mois]",
+              "Les suggestions générées par intelligence artificielle sont des propositions à vérifier et à corriger avant utilisation.",
+            ]} />
+            <LegalH2>8. Propriété intellectuelle</LegalH2>
+            <LegalP>Le service, son code, son nom et son logo appartiennent à l'éditeur. Vous disposez d'un droit d'utilisation personnel et non exclusif pendant la durée de votre compte. Les documents et données que vous créez restent votre propriété ; vous accordez à l'éditeur le droit de les héberger et de les traiter uniquement pour fournir le service.</LegalP>
+            <LegalH2>9. Suspension et suppression</LegalH2>
+            <LegalP>En cas de manquement grave aux présentes conditions (fraude, contenu illicite, tentative d'intrusion), l'éditeur peut suspendre ou fermer le compte après vous en avoir informé, sauf urgence. Vous pouvez demander la suppression de votre compte à tout moment à {contactEmail}.</LegalP>
+            <LegalH2>10. Droit applicable et litiges</LegalH2>
+            <LegalP>Les présentes conditions sont soumises au droit français. En cas de litige, les parties rechercheront d'abord une solution amiable. <LegalTodo>À COMPLÉTER : juridiction compétente et, si le service s'adresse aussi à des consommateurs, coordonnées du médiateur de la consommation</LegalTodo>.</LegalP>
+            <LegalH2>11. Contact</LegalH2>
+            <LegalP>Pour toute question sur ces conditions : {contactEmail}.</LegalP>
+          </>
+        )}
+
+        <div className="mt-10 border-t pt-4 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
+          <LegalLinks onLegal={onLegal} color={colors.inkSoft} />
+        </div>
       </div>
     </div>
   );
@@ -5153,7 +5383,7 @@ function ContactView({ siteSettings, onBack }) {
 // depuis Admin → Apparence du site, sans jamais toucher à l'ancienne
 // (gardée intacte juste après, voir LandingPage) ni à aucune logique
 // des services du site : uniquement de la présentation (HTML/CSS).
-function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onContact }) {
+function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onContact, onLegal }) {
   const [mobileMenu, setMobileMenu] = useState(false);
   const visiblePlans = plans.filter((p) => !p.hidden);
   return (
@@ -5288,12 +5518,13 @@ function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onCont
 
       <footer className="border-t px-6 py-8 text-center text-xs sm:px-10 lg:px-16" style={{ borderColor: colors.line, color: adv.inkSoft }}>
         © 2026 {siteSettings?.name || "Chantiflow"} — <button onClick={onContact} className="underline" style={{ color: adv.inkSoft }}>Nous contacter</button>
+        {onLegal && <> · <LegalLinks onLegal={onLegal} color={adv.inkSoft} /></>}
       </footer>
     </div>
   );
 }
 
-function LandingPage({ plans, siteSettings, onGetStarted, onLogin, onContact }) {
+function LandingPage({ plans, siteSettings, onGetStarted, onLogin, onContact, onLegal }) {
   const [openFaq, setOpenFaq] = useState(null);
   const [mobileMenu, setMobileMenu] = useState(false);
   const visiblePlans = plans.filter((p) => !p.hidden);
@@ -5470,6 +5701,7 @@ function LandingPage({ plans, siteSettings, onGetStarted, onLogin, onContact }) 
 
       <footer className="border-t px-6 py-8 text-center text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
         © 2026 {siteSettings.name} — <button onClick={onContact} className="underline" style={{ color: colors.inkSoft }}>Nous contacter</button>
+        {onLegal && <> · <LegalLinks onLegal={onLegal} color={colors.inkSoft} /></>}
       </footer>
     </div>
   );
@@ -5600,7 +5832,7 @@ function RegularizationScreen({ account, plans, siteSettings, onLogout, onContac
   );
 }
 
-function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
+function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
   const [mode, setMode] = useState(initialMode);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -5899,6 +6131,11 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings }) {
         <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-xs" style={{ color: colors.inkSoft }}>
           <Lock size={12} /> Authentification sécurisée (mots de passe hachés, jamais stockés en clair).
         </p>
+        {onLegal && (
+          <p className="mt-2 text-center text-xs" style={{ color: colors.inkSoft }}>
+            En créant un compte, tu acceptes les <button onClick={() => onLegal("cgu")} className="underline">conditions générales d'utilisation</button> et la <button onClick={() => onLegal("confidentialite")} className="underline">politique de confidentialité</button>.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -10702,7 +10939,7 @@ const ATELIER_LANDING_FAQ = [
   { q: "Puis-je changer de forfait ou arrêter quand je veux ?", a: "Oui, depuis ton compte, à tout moment. L'abonnement mensuel est sans engagement." },
 ];
 
-function LandingPageAtelier({ plans, siteSettings, onGetStarted, onLogin, onContact }) {
+function LandingPageAtelier({ plans, siteSettings, onGetStarted, onLogin, onContact, onLegal }) {
   const tone = atelier;
   const [mobileMenu, setMobileMenu] = useState(false);
   const [openFaq, setOpenFaq] = useState(0);
@@ -10964,6 +11201,7 @@ function LandingPageAtelier({ plans, siteSettings, onGetStarted, onLogin, onCont
 
       <footer className="border-t px-4 py-8 text-center text-sm" style={{ borderColor: tone.line, color: tone.inkSoft }}>
         © {year} {siteSettings?.name || "Chantiflow"} · Fait pour les artisans du bâtiment · <button onClick={onContact} className="underline" style={{ color: tone.inkSoft }}>Nous contacter</button>
+        {onLegal && <> · <LegalLinks onLegal={onLegal} color={tone.inkSoft} /></>}
       </footer>
     </div>
   );
