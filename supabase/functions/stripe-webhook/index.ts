@@ -67,7 +67,8 @@ serve(async (req) => {
         const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
         const docIndex = documents.findIndex((d: any) => d.id === documentId);
         if (docIndex !== -1) {
-          documents[docIndex] = { ...documents[docIndex], status: "payée", updatedAt: Date.now() };
+          // paidAt : date de la vente pour les indicateurs du tableau de bord.
+          documents[docIndex] = { ...documents[docIndex], status: "payée", paidAt: new Date().toISOString(), updatedAt: Date.now() };
           await dbAdmin.from("kv_store").update({ value: documents, updated_at: new Date().toISOString() }).eq("organization_id", organizationId).eq("key", "documents").eq("shared", false);
         }
         if (linkId) await dbAdmin.from("public_document_links").update({ paid_at: new Date().toISOString() }).eq("id", linkId);

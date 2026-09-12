@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
+import { computeSalesKpis, FISCAL_MONTHS } from "./kpis.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
@@ -818,7 +819,7 @@ function withGeoCountry(profile) {
   return country ? { ...profile, country } : profile;
 }
 function emptyCompanyProfile() {
-  return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "" };
+  return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "", fiscalStartMonth: 1 };
 }
 function nextNumber(documents, type) {
   const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", situation: "SIT", pv_reception: "PV", bpu: "BPU", rapport: "RI", contrat: "CTR", relance: "MED", planning: "PLN" };
@@ -3497,6 +3498,8 @@ function DeviFactAppInner() {
         if (reviewUrl && clientEmail) {
           setReviewNotice({ docId: id, docNumber: updated.docNumber, clientName: updated.client?.name || "", clientEmail, sending: false, sent: false, error: null });
         }
+        // Date de paiement : date de la vente pour les indicateurs (src/kpis.js).
+        patch = { ...patch, paidAt: new Date().toISOString() };
       }
       persist(documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
       return;
@@ -4312,6 +4315,7 @@ function DeviFactAppInner() {
           visibleServices={visibleServices}
           reminders={reminders}
           reminderMailto={reminderMailto}
+          fiscalStartMonth={companyProfile?.fiscalStartMonth}
           onCreate={openNewService}
           onOpenCreate={() => setAtelierCreateOpen(true)}
           onOpenDoc={openDoc}
@@ -4578,6 +4582,7 @@ function DeviFactAppInner() {
             <button onClick={() => setView("pricing")} className={freeLimitReached ? "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" : "text-xs font-medium underline"} style={freeLimitReached ? { background: colors.brick } : { color: colors.brassDark }}>Passer à un forfait payant</button>
           </div>
         )}
+        <SalesKpis documents={documents} fiscalStartMonth={companyProfile?.fiscalStartMonth} variant={siteSettings?.landingPageVersion === "avancee" ? "avancee" : "classic"} darkMode={darkMode} />
         {siteSettings?.landingPageVersion === "avancee" ? (
           <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: darkMode ? "linear-gradient(to bottom, #2A3241, #1B212C)" : "linear-gradient(to bottom, #BFDBFE, #FFFFFF)", borderColor: darkMode ? "#3A4353" : adv.line }}>
             <div className="p-6 sm:p-8">
@@ -10541,7 +10546,7 @@ function atelierDocDate(d) {
 // Accueil Atelier : ce qu'il y a à faire, créer, reprendre, puis le
 // chiffre d'affaires. Chaque carte « À faire » ouvre la page Documents
 // déjà filtrée.
-function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, reminders, reminderMailto, onCreate, onOpenCreate, onOpenDoc, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
+function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, reminders, reminderMailto, fiscalStartMonth = 1, onCreate, onOpenCreate, onOpenDoc, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
   const tone = atelierTone(darkMode);
   const firstName = account?.firstName || "";
   const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -10610,6 +10615,8 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
         </div>
       )}
       <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
+
+      <SalesKpis documents={documents} fiscalStartMonth={fiscalStartMonth} variant="atelier" darkMode={darkMode} />
 
       <section className="mb-8">
         <h2 className="df-display mb-3 text-base font-semibold">À faire</h2>
@@ -13237,6 +13244,13 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
             <input type="url" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="https://g.page/r/.../review" value={local.googleReviewUrl || ""} onChange={(e) => patch({ googleReviewUrl: e.target.value })} />
             <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Lien « Laisser un avis » de ta fiche Google Business. Quand une facture passe à « payée », il te sera proposé d'envoyer ce lien au client par email — jamais automatiquement.</p>
           </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Début de l'exercice comptable</label>
+            <select className="df-select w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={String(local.fiscalStartMonth || 1)} onChange={(e) => patch({ fiscalStartMonth: Number(e.target.value) })}>
+              {FISCAL_MONTHS.map((m, i) => <option key={m} value={String(i + 1)}>1er {m}{i === 0 ? " (année civile)" : ""}</option>)}
+            </select>
+            <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Sert à l'indicateur « Exercice en cours » du tableau de bord. Laisse janvier si ton exercice suit l'année civile.</p>
+          </div>
           {local.type !== "particulier" && (
             <div>
               <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>N° TVA intracommunautaire (optionnel)</label>
@@ -14774,6 +14788,48 @@ function RevenueChart({ documents, isAdvanced, darkMode }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// Quatre indicateurs de ventes (aujourd'hui, 7 derniers jours, mois en
+// cours, exercice en cours). Montants HT, ventes = factures payées, dates
+// et bornes calculées dans src/kpis.js (testé unitairement).
+function SalesKpis({ documents, fiscalStartMonth = 1, variant = "classic", darkMode = false }) {
+  const kpis = useMemo(
+    () => computeSalesKpis(documents, { now: new Date(), fiscalStartMonth, amountOf: (d) => computeTotals(d).subtotalHT }),
+    [documents, fiscalStartMonth],
+  );
+  const monthName = FISCAL_MONTHS[(Number(fiscalStartMonth) || 1) - 1];
+  const items = [
+    { key: "today", label: "Aujourd'hui", hint: "ventes du jour" },
+    { key: "last7", label: "7 derniers jours", hint: "aujourd'hui inclus" },
+    { key: "month", label: "Mois en cours", hint: "depuis le 1er du mois" },
+    { key: "fiscalYear", label: "Exercice en cours", hint: `depuis le 1er ${monthName}` },
+  ];
+  const isAtelier = variant === "atelier";
+  const isAdvanced = variant === "avancee";
+  const tone = isAtelier ? atelierTone(darkMode) : null;
+  const surface = isAtelier ? tone.surface : isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const ink = isAtelier ? tone.ink : isAdvanced && darkMode ? "#E8EAED" : colors.ink;
+  const soft = isAtelier ? tone.inkSoft : isAdvanced && darkMode ? "#9AA5B5" : colors.inkSoft;
+  const accent = isAtelier ? tone.accent : isAdvanced ? adv.accent : colors.brassDark;
+  const line = isAtelier ? tone.line : isAdvanced && darkMode ? "#3A4353" : colors.line;
+  return (
+    <div className="mb-6">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h2 className={isAtelier ? "df-display text-base font-semibold" : "text-xs font-semibold uppercase tracking-widest"} style={{ color: isAtelier ? ink : soft }}>Ventes encaissées (HT)</h2>
+        <span className="text-[11px]" style={{ color: soft }}>factures payées uniquement</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {items.map(({ key, label, hint }) => (
+          <div key={key} className="rounded-2xl p-4" style={{ background: surface, border: `1px solid ${line}` }}>
+            <div className="text-xs font-medium" style={{ color: soft }}>{label}</div>
+            <div className="df-display mt-1 truncate text-xl font-bold sm:text-2xl" style={{ color: kpis[key].count ? accent : ink }} title={eur(kpis[key].amount)}>{eur(kpis[key].amount)}</div>
+            <div className="mt-1 text-xs" style={{ color: soft }}>{kpis[key].count} vente{kpis[key].count > 1 ? "s" : ""} · {hint}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
