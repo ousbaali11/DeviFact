@@ -81,7 +81,10 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Ce document n'est pas une facture valide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const amount = computeTotalTTC(doc);
+    // Montant à régler = total TTC moins l'acompte déjà versé renseigné sur
+    // la facture (même règle que l'affichage « Montant TTC à régler »).
+    const acompteVerse = Math.max(0, Number(doc.acompteVerse) || 0);
+    const amount = Math.round((computeTotalTTC(doc) - acompteVerse) * 100) / 100;
     if (amount <= 0) {
       return new Response(JSON.stringify({ error: "Montant invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }

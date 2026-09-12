@@ -234,10 +234,6 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   for (const it of items) {
     if (!it || it.type !== "line") continue;
     lineIndex++;
-    if (it.marginScheme) {
-      missing.push(`Ligne ${lineIndex} : le régime de la TVA sur la marge n'est pas encore pris en charge en Factur-X`);
-      continue;
-    }
     const qty = Number(it.qty) || 0;
     const detailsSum = (Array.isArray(it.details) ? it.details : []).filter((d: any) => d?.included).reduce((s: number, d: any) => s + (Number(d.price) || 0), 0);
     const base = qty * (Number(it.unitPrice) || 0) + detailsSum;

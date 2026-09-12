@@ -48,7 +48,6 @@ java -jar Mustang-CLI.jar --action validate --source facture.pdf
 
 - Uniquement les documents de type `facture` (pas encore les avoirs 381 ni les
   factures d'acompte 386).
-- Lignes au régime de la TVA sur la marge : refusées avec un message clair.
 - Les lignes à 0 % de TVA sont exportées avec le motif d'exonération choisi
   sur la facture (bloc « Facturation électronique ») : franchise en base par
   défaut, ou exportation, livraison intracommunautaire, autoliquidation.

@@ -664,8 +664,16 @@ const nextId = (p = "id") => `${p}_${++uidCounter}_${Date.now()}_${Math.floor(Ma
 const eur = (n) => (isFinite(n) ? n : 0).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
 // Formate un montant dans la devise du document (devis/facture/proforma).
 // Distinct de eur() ci-dessus, qui reste réservé aux prix d'abonnement du site (toujours en EUR).
+// Libellé d'affichage d'une devise : le dirham marocain s'écrit « DH »
+// (le code interne reste MAD pour les calculs et les exports normalisés).
+function currencyLabel(currency) {
+  return currency === "MAD" ? "DH" : currency;
+}
 function formatMoney(n, currency) {
   const amount = isFinite(n) ? n : 0;
+  if (currency === "MAD") {
+    return `${amount.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DH`;
+  }
   try {
     return amount.toLocaleString("fr-FR", { style: "currency", currency: currency || "EUR" });
   } catch (e) {
@@ -676,6 +684,64 @@ const CURRENCIES = [
   "EUR", "USD", "GBP", "CHF", "CAD", "MAD", "DZD", "TND", "XOF", "XAF",
   "CNY", "JPY", "AED", "SAR", "TRY", "INR", "BRL", "MXN", "AUD", "SEK", "NOK", "PLN",
 ];
+
+// ---------------------------------------------------------------------------
+// Pays et devise détectés à la première visite (adresse IP, service
+// GeoJS : gratuit, sans clé, sans autre donnée que l'IP). Sert uniquement
+// de valeur de départ pour les NOUVELLES données (entreprise sans pays,
+// nouveau client, nouveau document) — jamais pour écraser une valeur
+// saisie. En cas d'échec, tout reste sur France / EUR, sans message.
+// ---------------------------------------------------------------------------
+const GEO_STORAGE_KEY = "devifact_geo_country";
+const GEO_CACHE_DAYS = 30;
+// Devise par code pays, pour les pays hors de la liste des indices de
+// révision (qui porte déjà sa devise). Seules les devises proposées dans
+// le sélecteur sont utilisées ; sinon EUR.
+const GEO_CURRENCY_BY_CODE = {
+  MA: "MAD", DZ: "DZD", TN: "TND",
+  SN: "XOF", CI: "XOF", ML: "XOF", BF: "XOF", BJ: "XOF", TG: "XOF", NE: "XOF", GW: "XOF",
+  CM: "XAF", GA: "XAF", CG: "XAF", TD: "XAF", CF: "XAF", GQ: "XAF",
+  US: "USD", GB: "GBP", CH: "CHF", CA: "CAD", CN: "CNY", JP: "JPY", AE: "AED", SA: "SAR",
+  TR: "TRY", IN: "INR", BR: "BRL", MX: "MXN", AU: "AUD", SE: "SEK", NO: "NOK", PL: "PLN",
+};
+let detectedGeo = null; // { code: "MA", country: "🇲🇦 MA", currency: "MAD" }
+function geoFromCode(code) {
+  const clean = String(code || "").toUpperCase().trim();
+  if (!/^[A-Z]{2}$/.test(clean)) return null;
+  const country = COUNTRIES.find((c) => c.endsWith(` ${clean}`)) || null;
+  if (!country) return null;
+  const candidate = REVISION_COUNTRY_INFO[country]?.currency || GEO_CURRENCY_BY_CODE[clean] || "EUR";
+  return { code: clean, country, currency: CURRENCIES.includes(candidate) ? candidate : "EUR" };
+}
+// Valeurs de départ pour une nouvelle donnée : pays et devise détectés,
+// sinon les valeurs historiques du site (pays vide, EUR).
+function geoDefaults() {
+  return { country: detectedGeo?.country || "", currency: detectedGeo?.currency || "EUR" };
+}
+async function detectGeoCountry() {
+  if (typeof window === "undefined" || detectedGeo) return;
+  try {
+    const cached = JSON.parse(localStorage.getItem(GEO_STORAGE_KEY) || "null");
+    if (cached?.code && Date.now() - (cached.at || 0) < GEO_CACHE_DAYS * 86400000) {
+      detectedGeo = geoFromCode(cached.code);
+      if (detectedGeo) return;
+    }
+  } catch { /* stockage local indisponible : on détecte à chaque fois */ }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch("https://get.geojs.io/v1/ip/country.json", { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return;
+    const data = await res.json();
+    const geo = geoFromCode(data?.country);
+    if (!geo) return;
+    detectedGeo = geo;
+    try { localStorage.setItem(GEO_STORAGE_KEY, JSON.stringify({ code: geo.code, at: Date.now() })); } catch { /* ignoré */ }
+  } catch {
+    // Service indisponible ou trop lent : valeurs par défaut, sans bruit.
+  }
+}
 const fr = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
 // Format court pour la colonne "Situation" des révisions de prix :
 // jour + mois sur 3 lettres, en majuscules, sans année (ex: "21 FEV").
@@ -688,7 +754,7 @@ const frShort = (d) => {
 const frLong = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 
 function emptyLine() {
-  return { id: nextId("l"), type: "line", designation: "", details: [], qty: 1, unit: "forfait", unitPrice: 0, tva: 20, discount: 0, marginScheme: false, purchasePriceTTC: "", salePriceTTC: "" };
+  return { id: nextId("l"), type: "line", designation: "", details: [], qty: 1, unit: "", unitPrice: 0, tva: 20, discount: 0 };
 }
 const MARKERS = ["▪", "•", "◦", "‣", "▹", "►", "→", "–", "✓", "×", "★", "◆", "○", "■", "♦"];
 function defaultMarker(level) {
@@ -708,23 +774,6 @@ function detailsSum(details) {
 function lineBaseHT(l) {
   return (Number(l.qty) || 0) * (Number(l.unitPrice) || 0) + detailsSum(l.details);
 }
-// Calcul du régime de la TVA sur la marge (article 297 A du CGI) :
-// la TVA n'est due que sur la marge (prix de vente TTC - prix d'achat
-// TTC), pas sur le prix de vente total. Le client ne paie que le prix
-// de vente TTC affiché — aucune TVA n'est ajoutée par-dessus.
-function lineMarginCalc(l, lineDiscount, globalDiscount) {
-  const qty = Number(l.qty) || 0;
-  const sale = Number(l.salePriceTTC) || 0;
-  const purchase = Number(l.purchasePriceTTC) || 0;
-  const factor = (1 - (Number(lineDiscount) || 0) / 100) * (1 - (Number(globalDiscount) || 0) / 100);
-  const saleTTC = qty * sale * factor;
-  const marginTTC = Math.max(0, qty * (sale - purchase)) * factor;
-  const rate = Number(l.tva) || 0;
-  const marginTVA = (marginTTC * rate) / (100 + rate);
-  const totalHT = saleTTC - marginTVA; // pour que Total HT + TVA = prix TTC facturé au client
-  return { saleTTC, marginTTC, marginTVA, totalHT };
-}
-const DEFAULT_MARGIN_MENTION = "Régime particulier - Biens d'occasion (article 297 A du CGI). TVA calculée sur la marge, non récupérable par l'acheteur.";
 function emptySection() {
   return { id: nextId("s"), type: "section", title: "", subtitle: "" };
 }
@@ -758,13 +807,20 @@ const COUNTRIES = [
 // aujourd'hui, les nouveaux champs portent les informations que la norme
 // EN 16931 exige séparément (code postal, ville, SIRET/SIREN, n° TVA).
 function emptyClient() {
-  return { id: nextId("cli"), type: "entreprise", name: "", address: "", country: "", email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" };
+  return { id: nextId("cli"), type: "entreprise", name: "", address: "", country: geoDefaults().country, email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" };
+}
+// Profil d'entreprise sans pays renseigné : proposé avec le pays détecté
+// dans le formulaire (l'utilisateur peut le changer avant d'enregistrer).
+function withGeoCountry(profile) {
+  if (!profile || (profile.country || "").trim()) return profile;
+  const { country } = geoDefaults();
+  return country ? { ...profile, country } : profile;
 }
 function emptyCompanyProfile() {
   return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "" };
 }
 function emptyPrestation() {
-  return { id: nextId("pr"), designation: "", category: "", unit: "forfait", unitPrice: 0, tva: 20 };
+  return { id: nextId("pr"), designation: "", category: "", unit: "", unitPrice: 0, tva: 20 };
 }
 
 function nextNumber(documents, type) {
@@ -777,7 +833,7 @@ function nextNumber(documents, type) {
 
 function emptyProforma() {
   return {
-    serie: "", incoterm: "", incotermPlace: "", currency: "EUR",
+    serie: "", incoterm: "", incotermPlace: "", currency: geoDefaults().currency,
     paymentTerms: "", grossWeight: "", netWeight: "", packagesCount: "",
     originCountry: "", hsCode: "", loadingPort: "", dischargingPort: "", transportMode: "",
     customFields: [],
@@ -1125,7 +1181,7 @@ function computeRevisionLine(line) {
 function emptySituationLine() {
   return {
     id: nextId("sl"), type: "line",
-    designation: "", unit: "forfait", qty: 1, unitPrice: 0, tva: 20,
+    designation: "", unit: "", qty: 1, unitPrice: 0, tva: 20,
     avancementPct: 0, montantCumulePrecedent: 0,
   };
 }
@@ -1708,12 +1764,12 @@ function newDocument(type, documents) {
     type,
     docNumber: nextNumber(documents, type),
     issueDate: new Date().toISOString().slice(0, 10),
-    currency: "EUR",
+    currency: geoDefaults().currency,
     validityDays: 30,
     showValidity: true,
     dueDays: 30,
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false },
-    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" },
+    client: { type: "entreprise", name: "", address: "", country: geoDefaults().country, email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" },
     clientId: null,
     chantier: "",
     // Facturation électronique (réforme 2026-2027) : catégorie de
@@ -1732,7 +1788,6 @@ function newDocument(type, documents) {
     globalDiscount: 0,
     acompte: 0,
     notes: "Merci de votre confiance.",
-    marginLegalMention: DEFAULT_MARGIN_MENTION,
     signature: { mode: "texte", name: "", image: null, drawing: null },
     proforma: type === "proforma" ? emptyProforma() : null,
     status: "brouillon",
@@ -1744,7 +1799,9 @@ function newDocument(type, documents) {
   // planifiée process-recurring-invoices), jusqu'à une date de fin
   // optionnelle — jamais activée par défaut, un vrai choix explicite.
   if (type === "facture") {
-    return { ...base, isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "", remindersEnabled: true };
+    // acompteVerse : acompte déjà réglé par un autre moyen, en montant TTC,
+    // déduit du total (vide par défaut, toujours confirmé par l'artisan).
+    return { ...base, acompteVerse: "", isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "", remindersEnabled: true };
   }
   // Facture d'acompte : doit référencer le devis/marché d'origine et
   // savoir combien reste à facturer après cet acompte — sans ça, ce
@@ -1778,31 +1835,37 @@ function newDocument(type, documents) {
   return base;
 }
 
+// Totaux d'un document à lignes de prix. La remise globale (en %) est
+// appliquée sur le total HT des lignes ; la TVA est calculée sur le
+// total HT après remise. Sans remise, subtotalHTBrut === subtotalHT.
 function computeTotals(doc) {
   const lineItems = (doc.items || []).filter((i) => i.type === "line");
+  const globalDiscountPct = Math.min(100, Math.max(0, Number(doc.globalDiscount) || 0));
   const computedLines = lineItems.map((l) => {
-    if (l.marginScheme) {
-      const { saleTTC, marginTTC, marginTVA, totalHT } = lineMarginCalc(l, l.discount, doc.globalDiscount);
-      return { ...l, totalHT, marginTVA, marginTTC, saleTTC };
-    }
     const base = lineBaseHT(l);
     const afterLine = base * (1 - (Number(l.discount) || 0) / 100);
-    const afterGlobal = afterLine * (1 - (Number(doc.globalDiscount) || 0) / 100);
-    return { ...l, totalHT: afterGlobal };
+    const afterGlobal = afterLine * (1 - globalDiscountPct / 100);
+    return { ...l, totalHTBrut: afterLine, totalHT: afterGlobal };
   });
+  const subtotalHTBrut = computedLines.reduce((s, l) => s + l.totalHTBrut, 0);
   const subtotalHT = computedLines.reduce((s, l) => s + l.totalHT, 0);
+  const globalDiscountAmount = subtotalHTBrut - subtotalHT;
   const tvaGroups = {};
   computedLines.forEach((l) => {
     const rate = Number(l.tva) || 0;
-    const lineTVA = l.marginScheme ? (l.marginTVA || 0) : (l.totalHT * rate) / 100;
+    const lineTVA = (l.totalHT * rate) / 100;
     tvaGroups[rate] = (tvaGroups[rate] || 0) + lineTVA;
   });
   const totalTVA = Object.values(tvaGroups).reduce((a, b) => a + b, 0);
   const totalTTC = subtotalHT + totalTVA;
+  // Devis (et autres) : acompte DEMANDÉ en % du TTC, avec le reste à payer.
   const acompteAmount = totalTTC * ((Number(doc.acompte) || 0) / 100);
   const resteAPayer = totalTTC - acompteAmount;
-  const hasMarginLines = computedLines.some((l) => l.marginScheme);
-  return { computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines };
+  // Factures uniquement : acompte DÉJÀ VERSÉ, en montant TTC, déduit du
+  // total pour obtenir le montant TTC à régler (jamais négatif).
+  const acompteVerse = doc.type === "facture" ? Math.max(0, Number(doc.acompteVerse) || 0) : 0;
+  const montantARegler = Math.max(0, totalTTC - acompteVerse);
+  return { computedLines, subtotalHTBrut, globalDiscountPct, globalDiscountAmount, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, acompteVerse, montantARegler };
 }
 
 const GlobalStyle = () => (
@@ -1905,6 +1968,7 @@ const PUBLIC_QR_OPTIONS = { margin: 0, width: 300, errorCorrectionLevel: "M", co
 
 const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true, publicQr = null }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
+  const hasGlobalDiscount = (totals.globalDiscountPct || 0) > 0 && (totals.globalDiscountAmount || 0) > 0;
   const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
   const dueDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
   const lineItems = (doc.items || []).filter((i) => i.type === "line" || i.type === "section");
@@ -2076,10 +2140,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
               </tr>
             )
           ) : (() => {
-            const isMargin = it.marginScheme;
-            const marginCalc = isMargin ? lineMarginCalc(it, it.discount, doc.globalDiscount) : null;
-            const lineHT = isMargin ? 0 : lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(doc.globalDiscount) || 0) / 100);
-            const lineTVA = isMargin ? 0 : (lineHT * (Number(it.tva) || 0)) / 100;
+            const lineHT = lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(doc.globalDiscount) || 0) / 100);
+            const lineTVA = (lineHT * (Number(it.tva) || 0)) / 100;
             return (
               <tr key={it.id} style={{ pageBreakInside: "avoid", borderBottom: `1px solid ${line}`, background: idx % 2 ? "transparent" : "rgba(27,42,51,0.02)" }}>
                 <td style={{ padding: "6px 6px", verticalAlign: "top" }}>
@@ -2093,30 +2155,19 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
                 </td>
                 <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{it.qty}</td>
                 <td style={{ padding: "6px 6px", verticalAlign: "top" }}>{it.unit}</td>
-                {!hidePrices && (isMargin ? (
-                  <>
-                    <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(Number(it.salePriceTTC) || 0, doc.currency)}</td>
-                    <td colSpan={2} style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", fontSize: "8pt", fontStyle: "italic", color: inkSoft }}>Régime de la marge*</td>
-                    <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono, fontWeight: 600 }}>{formatMoney(marginCalc.saleTTC, doc.currency)}</td>
-                  </>
-                ) : (
+                {!hidePrices && (
                   <>
                     <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(Number(it.unitPrice) || 0, doc.currency)}</td>
                     <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{it.tva}%</td>
                     <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono }}>{formatMoney(lineTVA, doc.currency)}</td>
                     <td style={{ padding: "6px 6px", textAlign: "right", verticalAlign: "top", ...mono, fontWeight: 600 }}>{formatMoney(lineHT, doc.currency)}</td>
                   </>
-                ))}
+                )}
               </tr>
             );
           })())}
         </tbody>
       </table>
-      {totals.hasMarginLines && (
-        <div style={{ marginTop: "6px", fontSize: "7.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>
-          * {doc.marginLegalMention || DEFAULT_MARGIN_MENTION}
-        </div>
-      )}
 
       {/* Conditions + Totaux */}
       <div style={{ display: "flex", justifyContent: "space-between", gap: "24px", marginTop: "18px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
@@ -2127,15 +2178,27 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
               <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{renderMarkup(doc.notes)}</div>
             </>
           )}
-          {Number(doc.acompte) > 0 && (
+          {doc.type !== "facture" && Number(doc.acompte) > 0 && (
             <div style={{ marginTop: "6px" }}>Acompte de {doc.acompte}% à la commande : <strong style={mono}>{formatMoney(acompteAmount, doc.currency)}</strong></div>
           )}
         </div>
 
         {!hidePrices && (
           <div style={{ width: "230px", fontSize: "10pt" }}>
+            {/* Remise globale : Total HT, remise, total HT après remise ;
+                sans remise, seule la ligne Total HT apparaît. */}
+            {hasGlobalDiscount && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, padding: "6px 10px" }}>
+                  <span>Total HT</span><span style={mono}>{formatMoney(totals.subtotalHTBrut, doc.currency)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: brassDark }}>
+                  <span>Remise ({totals.globalDiscountPct} %)</span><span style={mono}>- {formatMoney(totals.globalDiscountAmount, doc.currency)}</span>
+                </div>
+              </>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "7px 10px", fontWeight: 700 }}>
-              <span>Total HT</span><span style={mono}>{formatMoney(subtotalHT, doc.currency)}</span>
+              <span>{hasGlobalDiscount ? "Total HT après remise" : "Total HT"}</span><span style={mono}>{formatMoney(subtotalHT, doc.currency)}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, padding: "7px 10px", fontWeight: 600 }}>
               <span>Total TVA</span><span style={mono}>{formatMoney(totalTVA, doc.currency)}</span>
@@ -2148,10 +2211,21 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
             <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
               <span>{doc.type === "bpu" ? "Montant total estimatif" : "Total TTC"}</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
             </div>
-            {Number(doc.acompte) > 0 && (
+            {doc.type !== "facture" && Number(doc.acompte) > 0 && (
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontWeight: 700, color: brassDark }}>
                 <span>Reste à payer</span><span style={mono}>{formatMoney(resteAPayer, doc.currency)}</span>
               </div>
+            )}
+            {/* Facture : acompte déjà versé déduit du total, montant TTC à régler */}
+            {doc.type === "facture" && (totals.acompteVerse || 0) > 0 && (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: inkSoft }}>
+                  <span>Acompte déjà versé</span><span style={mono}>- {formatMoney(totals.acompteVerse, doc.currency)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 10px", fontWeight: 700, fontSize: "11.5pt", color: brassDark, border: `1px solid ${brassDark}` }}>
+                  <span>Montant TTC à régler</span><span style={mono}>{formatMoney(totals.montantARegler, doc.currency)}</span>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -2207,6 +2281,8 @@ function DeviFactAppInner() {
   // réapparaît pas, la page n'a pas rechargé — la cause est ailleurs.
   useEffect(() => {
     console.log(`%c🔵 Chantiflow démarré à ${new Date().toLocaleTimeString("fr-FR")}`, "background:#1B2A33;color:white;padding:4px 8px;border-radius:4px;font-weight:bold;");
+    // Pays et devise de départ (voir detectGeoCountry) — silencieux.
+    detectGeoCountry();
   }, []);
 
   const [view, setView] = useState(() => {
@@ -3252,6 +3328,7 @@ function DeviFactAppInner() {
           status: "brouillon",
           workStage: "brouillon",
           linkedDevisId: updatedOriginal.id,
+          acompteVerse: "",
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -3343,6 +3420,9 @@ function DeviFactAppInner() {
       issueDate: new Date().toISOString().slice(0, 10),
       status: "brouillon",
       linkedDevisId: original.id,
+      // Acompte déjà versé : laissé vide, même si le devis demandait un
+      // acompte — c'est à l'artisan de confirmer le montant réellement reçu.
+      acompteVerse: "",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -11671,12 +11751,12 @@ function TeamView({ account, siteSettings }) {
 }
 
 function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, isViewer, onGoToPricing }) {
-  const [local, setLocal] = useState(profile);
+  const [local, setLocal] = useState(() => withGeoCountry(profile));
   const [editing, setEditing] = useState(!profile.name);
   const [confirmReset, setConfirmReset] = useState(false);
   const [nameError, setNameError] = useState(false);
 
-  useEffect(() => setLocal(profile), []);
+  useEffect(() => setLocal(withGeoCountry(profile)), []);
 
   function patch(p) {
     setLocal((prev) => ({ ...prev, ...p }));
@@ -11694,7 +11774,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
   }
   function startEdit() {
     if (isLocked) return;
-    setLocal(profile);
+    setLocal(withGeoCountry(profile));
     setEditing(true);
   }
   function cancelEdit() {
@@ -13714,7 +13794,8 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     patch({ items: copy });
   }
 
-  const { computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines } = computeTotals(localDoc);
+  const totals = computeTotals(localDoc);
+  const { computedLines, subtotalHTBrut, globalDiscountPct, globalDiscountAmount, subtotalHT, tvaGroups, totalTTC, acompteAmount, resteAPayer } = totals;
   const hasEssentiel = hasAccess(account, "essentiel");
   const hasPro = hasAccess(account, "pro");
   const currentPlanData = plans.find((p) => p.id === (account?.plan || "gratuit"));
@@ -13893,14 +13974,9 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
         });
       });
     } else {
-      rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT / PV TTC (marge)", "TVA %", "Remise %", "Total"]);
+      rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT", "TVA %", "Remise %", "Total HT"]);
       computedLines.forEach((l) => {
-        const puValue = l.marginScheme ? Number(l.salePriceTTC) || 0 : Number(l.unitPrice) || 0;
-        const lineTotal = l.marginScheme ? Number(l.saleTTC || 0) : Number(l.totalHT || 0);
-        rows.push([l.designation + (l.marginScheme ? " (régime de la marge)" : ""), "", l.qty, l.unit, puValue, l.tva, l.discount, Number(lineTotal.toFixed(2))]);
-        if (l.marginScheme) {
-          rows.push(["", `Prix d'achat TTC unitaire : ${Number(l.purchasePriceTTC) || 0} — TVA sur marge : ${Number(l.marginTVA || 0).toFixed(2)}`, "", "", "", "", "", ""]);
-        }
+        rows.push([l.designation, "", l.qty, l.unit, Number(l.unitPrice) || 0, l.tva, l.discount, Number((l.totalHT || 0).toFixed(2))]);
         (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
           rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + stripMarkup(d.text), "", "", "", "", "", Number(d.price) > 0 ? Number(d.price) : ""]);
         });
@@ -13908,12 +13984,22 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
     }
     if (!hidePricesXls) {
       rows.push([]);
-      rows.push(["", "", "", "", "", "", "Sous-total HT", Number(subtotalHT.toFixed(2))]);
+      if (globalDiscountPct > 0 && globalDiscountAmount > 0) {
+        rows.push(["", "", "", "", "", "", "Total HT", Number(subtotalHTBrut.toFixed(2))]);
+        rows.push(["", "", "", "", "", "", `Remise (${globalDiscountPct} %)`, -Number(globalDiscountAmount.toFixed(2))]);
+        rows.push(["", "", "", "", "", "", "Total HT après remise", Number(subtotalHT.toFixed(2))]);
+      } else {
+        rows.push(["", "", "", "", "", "", "Total HT", Number(subtotalHT.toFixed(2))]);
+      }
       Object.entries(tvaGroups).forEach(([rate, amount]) => rows.push(["", "", "", "", "", "", `TVA ${rate}%`, Number(amount.toFixed(2))]));
       rows.push(["", "", "", "", "", "", "Total TTC", Number(totalTTC.toFixed(2))]);
-      if (Number(localDoc.acompte) > 0) {
+      if (localDoc.type !== "facture" && Number(localDoc.acompte) > 0) {
         rows.push(["", "", "", "", "", "", `Acompte (${localDoc.acompte}%)`, Number(acompteAmount.toFixed(2))]);
         rows.push(["", "", "", "", "", "", "Reste à payer", Number(resteAPayer.toFixed(2))]);
+      }
+      if (localDoc.type === "facture" && totals.acompteVerse > 0) {
+        rows.push(["", "", "", "", "", "", "Acompte déjà versé", -Number(totals.acompteVerse.toFixed(2))]);
+        rows.push(["", "", "", "", "", "", "Montant TTC à régler", Number(totals.montantARegler.toFixed(2))]);
       }
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -14056,7 +14142,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
               <div className="mt-2 flex items-center gap-1.5">
                 <label className="text-xs" style={{ color: colors.inkSoft }}>Devise</label>
                 <select className="df-select df-mono rounded-md px-2 py-1 text-xs" style={inputStyle} value={localDoc.currency || "EUR"} onChange={(e) => patch({ currency: e.target.value })}>
-                  {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {CURRENCIES.map((c) => <option key={c} value={c}>{currencyLabel(c)}</option>)}
                 </select>
               </div>
             </div>
@@ -14620,35 +14706,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                           <Plus size={11} /> Ajouter une description détaillée
                         </button>
                       )}
-                      <button
-                        onClick={() => updateItem(it.id, { marginScheme: !it.marginScheme })}
-                        className="no-print flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium"
-                        style={{ background: it.marginScheme ? `${colors.moss}18` : "transparent", color: it.marginScheme ? colors.moss : colors.inkSoft, border: `1px solid ${it.marginScheme ? colors.moss : colors.line}` }}
-                        title="Régime particulier : TVA calculée sur la marge (biens d'occasion, article 297 A du CGI) au lieu du prix total"
-                      >
-                        <Calculator size={11} /> TVA sur marge
-                      </button>
                     </div>
-                    {it.marginScheme && (
-                      <div className="no-print mt-2 flex flex-wrap gap-2 rounded-md p-2" style={{ background: "rgba(91,122,85,0.06)" }}>
-                        <label className="text-xs" style={{ color: colors.inkSoft }}>
-                          Prix d'achat TTC (unitaire)
-                          <input type="number" className="df-input df-mono mt-0.5 block w-32 rounded-md px-2 py-1 text-sm" style={inputStyle} value={it.purchasePriceTTC} onChange={(e) => updateItem(it.id, { purchasePriceTTC: e.target.value })} />
-                        </label>
-                        <label className="text-xs" style={{ color: colors.inkSoft }}>
-                          Prix de vente TTC (unitaire)
-                          <input type="number" className="df-input df-mono mt-0.5 block w-32 rounded-md px-2 py-1 text-sm" style={inputStyle} value={it.salePriceTTC} onChange={(e) => updateItem(it.id, { salePriceTTC: e.target.value })} />
-                        </label>
-                        <div className="text-xs" style={{ color: colors.inkSoft }}>
-                          Marge TTC
-                          <div className="df-mono mt-0.5 font-medium" style={{ color: colors.moss }}>{formatMoney(lineMarginCalc(it, it.discount, localDoc.globalDiscount).marginTTC, localDoc.currency)}</div>
-                        </div>
-                        <div className="text-xs" style={{ color: colors.inkSoft }}>
-                          dont TVA sur marge
-                          <div className="df-mono mt-0.5 font-medium">{formatMoney(lineMarginCalc(it, it.discount, localDoc.globalDiscount).marginTVA, localDoc.currency)}</div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                   <label className="w-14 text-xs">
                     <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Qté</span>
@@ -14662,11 +14720,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                   </label>
                   <label className="w-24 text-xs">
                     <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>PU HT</span>
-                    {it.marginScheme ? (
-                      <div className="w-24 rounded-md px-1 py-1.5 text-right text-sm" style={{ color: colors.inkSoft }} title="Prix de vente TTC (voir ci-dessus)">TTC</div>
-                    ) : (
-                      <input type="number" className="df-input df-mono w-24 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.unitPrice} onChange={(e) => updateItem(it.id, { unitPrice: e.target.value })} />
-                    )}
+                    <input type="number" className="df-input df-mono w-24 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.unitPrice} onChange={(e) => updateItem(it.id, { unitPrice: e.target.value })} />
                   </label>
                   <label className="w-16 text-xs">
                     <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>TVA %</span>
@@ -14679,9 +14733,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                   <div className="w-24 text-xs">
                     <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Total HT</span>
                     <div className="df-mono py-1.5 text-right text-sm font-medium">
-                      {it.marginScheme
-                        ? formatMoney(lineMarginCalc(it, it.discount, localDoc.globalDiscount).saleTTC, localDoc.currency)
-                        : formatMoney(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(localDoc.globalDiscount) || 0) / 100), localDoc.currency)}
+                      {formatMoney(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(localDoc.globalDiscount) || 0) / 100), localDoc.currency)}
                     </div>
                   </div>
                   <div className="no-print flex w-24 shrink-0 justify-end gap-1 pt-1.5">
@@ -14742,22 +14794,44 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
                 <div className="mb-1" style={{ color: colors.inkSoft }}>Remise globale (%)</div>
                 <input type="number" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.globalDiscount} onChange={(e) => patch({ globalDiscount: e.target.value })} />
               </label>
-              <label className="text-sm">
-                <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte demandé (%)</div>
-                <input type="number" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.acompte} onChange={(e) => patch({ acompte: e.target.value })} />
-              </label>
+              {localDoc.type === "facture" ? (
+                <label className="text-sm">
+                  <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte déjà versé ({currencyLabel(localDoc.currency || "EUR")} TTC)</div>
+                  <input type="number" min="0" step="0.01" className="df-input df-mono w-32 rounded-md px-2 py-1.5" style={inputStyle} placeholder="0,00" value={localDoc.acompteVerse ?? ""} onChange={(e) => patch({ acompteVerse: e.target.value })} title="Montant déjà réglé par le client (virement, chèque, espèces…), déduit du total à régler" />
+                </label>
+              ) : (
+                <label className="text-sm">
+                  <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte demandé (%)</div>
+                  <input type="number" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.acompte} onChange={(e) => patch({ acompte: e.target.value })} />
+                </label>
+              )}
             </div>
 
             <div className="flex items-center gap-8">
               <div className="df-mono space-y-1 text-right text-sm">
-                <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Sous-total HT</span><span>{formatMoney(subtotalHT, localDoc.currency)}</span></div>
+                {globalDiscountPct > 0 && globalDiscountAmount > 0 ? (
+                  <>
+                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Total HT</span><span>{formatMoney(subtotalHTBrut, localDoc.currency)}</span></div>
+                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Remise ({globalDiscountPct} %)</span><span>- {formatMoney(globalDiscountAmount, localDoc.currency)}</span></div>
+                    <div className="flex justify-between gap-8 font-semibold"><span style={{ color: colors.inkSoft }}>Total HT après remise</span><span>{formatMoney(subtotalHT, localDoc.currency)}</span></div>
+                  </>
+                ) : (
+                  <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Total HT</span><span>{formatMoney(subtotalHT, localDoc.currency)}</span></div>
+                )}
                 {Object.entries(tvaGroups).map(([rate, amount]) => (
                   <div key={rate} className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>TVA {rate}%</span><span>{formatMoney(amount, localDoc.currency)}</span></div>
                 ))}
-                {Number(localDoc.acompte) > 0 && (
+                {localDoc.type !== "facture" && Number(localDoc.acompte) > 0 && (
                   <>
                     <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte ({localDoc.acompte}%)</span><span>- {formatMoney(acompteAmount, localDoc.currency)}</span></div>
                     <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Reste à payer</span><span>{formatMoney(resteAPayer, localDoc.currency)}</span></div>
+                  </>
+                )}
+                {localDoc.type === "facture" && totals.acompteVerse > 0 && (
+                  <>
+                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Total TTC</span><span>{formatMoney(totalTTC, localDoc.currency)}</span></div>
+                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte déjà versé</span><span>- {formatMoney(totals.acompteVerse, localDoc.currency)}</span></div>
+                    <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Montant TTC à régler</span><span>{formatMoney(totals.montantARegler, localDoc.currency)}</span></div>
                   </>
                 )}
               </div>
@@ -14777,18 +14851,6 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
             <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Notes</label>
             <FormattableField multiline enabled={hasEssentiel} className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, minHeight: "3.5rem" }} value={localDoc.notes} onChange={(v) => patch({ notes: v })} />
           </div>
-
-          {localDoc.items.some((it) => it.marginScheme) && (
-            <div className="mt-8 border-t pt-6" style={{ borderColor: colors.line }}>
-              <label className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.moss }}>
-                <Calculator size={13} /> Mention légale — TVA sur la marge
-              </label>
-              <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>
-                Adapte ce texte à ta situation (biens d'occasion, objets d'art, véhicules d'occasion...) — la loi impose une mention précise selon la catégorie.
-              </p>
-              <textarea className="df-textarea w-full rounded-md px-3 py-2 text-xs" style={{ ...inputStyle, minHeight: "3rem" }} value={localDoc.marginLegalMention || DEFAULT_MARGIN_MENTION} onChange={(e) => patch({ marginLegalMention: e.target.value })} />
-            </div>
-          )}
 
           <div className="mt-8 border-t pt-6" style={{ borderColor: colors.line }}>
             <div className="df-display mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
@@ -14848,7 +14910,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
         </div>
       </div>
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintDocument ref={printRef} doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+      <PrintDocument ref={printRef} doc={localDoc} totals={totals} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
 
       {presentationMode && (
         <div className="df-presentation no-print" style={{ background: colors.ink }}>
@@ -14856,7 +14918,7 @@ function Editor({ doc, saving, clients, prestations, account, plans, siteSetting
             <Minimize2 size={15} /> Quitter
           </button>
           <div style={{ padding: "24px 12px 48px", zoom: presentationZoom }}>
-            <PrintDocument doc={localDoc} totals={{ computedLines, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, hasMarginLines }} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+            <PrintDocument doc={localDoc} totals={totals} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
           </div>
         </div>
       )}
