@@ -2719,11 +2719,13 @@ function DeviFactAppInner() {
       desktopAppEnabled: data.desktop_app_enabled || false,
       contactInstagramUrl: data.contact_instagram_url || "",
       landingPageVersion: data.landing_page_version || "classique",
+      // Informations légales saisies dans Admin (colonne jsonb legal_info).
+      legalInfo: data.legal_info && typeof data.legal_info === "object" && !Array.isArray(data.legal_info) ? data.legal_info : {},
     });
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", landingPageVersion: "landing_page_version" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", landingPageVersion: "landing_page_version", legalInfo: "legal_info" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -5170,16 +5172,57 @@ function ContactView({ siteSettings, onBack, onLegal }) {
 // confidentialité, Conditions générales d'utilisation) sont un BROUILLON
 // rédigé à partir de l'inventaire technique du site (septembre 2026).
 // Ils DOIVENT être relus et validés par un professionnel du droit avant
-// toute mise en ligne réelle. Les passages entre crochets
-// « [À COMPLÉTER : …] » et « [À VÉRIFIER : …] » sont à renseigner ou à
-// confirmer. Ne pas considérer ce contenu comme un conseil juridique.
+// toute mise en ligne réelle. Les informations propres à l'éditeur et les
+// formulations à valider ne sont PAS codées ici : elles se saisissent dans
+// Admin → Informations légales (colonne site_settings.legal_info) et sont
+// lues par les pages. Tant qu'un champ est vide, la page affiche
+// « Information à venir » ou masque la phrase — jamais un marqueur brut.
+// Ne pas considérer ce contenu comme un conseil juridique.
 // ===========================================================================
 const LEGAL_PAGES = {
   "mentions-legales": { title: "Mentions légales", short: "Mentions légales" },
   "confidentialite": { title: "Politique de confidentialité", short: "Confidentialité" },
   "cgu": { title: "Conditions générales d'utilisation", short: "CGU" },
 };
-const LEGAL_LAST_UPDATE = "[À COMPLÉTER : date de mise en ligne]";
+
+// Champs saisis dans Admin → Informations légales. `kind` : "text" pour une
+// information factuelle, "textarea" pour un paragraphe à valider par un
+// professionnel. `pages` : où le champ apparaît. `empty` : ce que voit un
+// visiteur tant que le champ est vide ("placeholder" = « Information à
+// venir », "hide" = phrase masquée, "default" = texte neutre indiqué).
+const LEGAL_FIELDS = [
+  // Identité de l'entreprise
+  { id: "editorName", group: "Identité de l'entreprise", kind: "text", label: "Éditeur du site", help: "Dénomination sociale, ou nom et prénom si entreprise individuelle. Apparaît en tête des mentions légales et comme responsable du traitement dans la politique de confidentialité.", pages: ["mentions-legales", "confidentialite"], empty: "placeholder" },
+  { id: "legalForm", group: "Identité de l'entreprise", kind: "text", label: "Forme juridique et capital", help: "Ex. « SASU au capital de 1 000 € » ou « entreprise individuelle ».", pages: ["mentions-legales"], empty: "placeholder" },
+  { id: "siret", group: "Identité de l'entreprise", kind: "text", label: "SIRET", help: "Numéro à 14 chiffres.", pages: ["mentions-legales"], empty: "placeholder" },
+  { id: "rcs", group: "Identité de l'entreprise", kind: "text", label: "RCS", help: "Ville d'immatriculation, ou « dispensé d'immatriculation » si c'est le cas. Vide : la mention n'apparaît pas.", pages: ["mentions-legales"], empty: "hide" },
+  { id: "vatNumber", group: "Identité de l'entreprise", kind: "text", label: "Numéro de TVA intracommunautaire", help: "Ou « non applicable » en franchise en base. Vide : la mention n'apparaît pas.", pages: ["mentions-legales"], empty: "hide" },
+  { id: "address", group: "Identité de l'entreprise", kind: "text", label: "Adresse postale complète", help: "Siège social. Apparaît dans les mentions légales et la politique de confidentialité.", pages: ["mentions-legales", "confidentialite"], empty: "placeholder" },
+  { id: "phone", group: "Identité de l'entreprise", kind: "text", label: "Téléphone", help: "Vide : la mention n'apparaît pas.", pages: ["mentions-legales"], empty: "hide" },
+  { id: "publicationDirector", group: "Identité de l'entreprise", kind: "text", label: "Directeur de la publication", help: "Nom et prénom, en général le représentant légal.", pages: ["mentions-legales"], empty: "placeholder" },
+  // Hébergement
+  { id: "hostAppAddress", group: "Hébergement", kind: "text", label: "Adresse de Supabase Inc.", help: "Hébergeur des données (base, authentification, photos). Voir supabase.com/legal. Vide : seul le nom et la région (Stockholm, Suède) sont affichés.", pages: ["mentions-legales"], empty: "hide" },
+  { id: "hostWeb", group: "Hébergement", kind: "text", label: "Hébergeur du site web", help: "Nom et adresse de l'hébergeur des pages du site (Vercel, Netlify, OVH…), selon l'endroit où le front est déployé.", pages: ["mentions-legales"], empty: "placeholder" },
+  // Dates et délais
+  { id: "lastUpdate", group: "Dates et délais", kind: "text", label: "Date de dernière mise à jour", help: "Ex. « 15 septembre 2026 ». Affichée en tête des trois pages. Vide : la ligne n'apparaît pas.", pages: ["mentions-legales", "confidentialite", "cgu"], empty: "hide" },
+  { id: "rightsResponseDelay", group: "Dates et délais", kind: "text", label: "Délai de réponse aux demandes RGPD", help: "Ex. « un mois ». Vide : la page indique « dans le délai prévu par le RGPD ».", pages: ["confidentialite"], empty: "default" },
+  { id: "contactMessagesRetention", group: "Dates et délais", kind: "text", label: "Conservation des messages du formulaire de contact", help: "Ex. « 12 mois ». Aujourd'hui, rien ne les supprime automatiquement : la durée indiquée devra être tenue à la main.", pages: ["confidentialite"], empty: "placeholder" },
+  { id: "invoiceRetention", group: "Dates et délais", kind: "text", label: "Conservation des données après suppression d'un compte", help: "Ex. « 30 jours, puis suppression définitive ». Vide : la précision n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
+  { id: "priceChangeNotice", group: "Dates et délais", kind: "text", label: "Préavis en cas de changement de tarif", help: "Ex. « 30 jours ». Vide : la phrase indique seulement « après information préalable ».", pages: ["cgu"], empty: "hide" },
+  // Tarifs et facturation
+  { id: "pricesTaxNote", group: "Tarifs et facturation", kind: "text", label: "Précision sur les tarifs (HT / TTC, TVA)", help: "Ex. « Tarifs indiqués hors taxes, TVA de 20 % en sus » ou « TVA non applicable, article 293 B du CGI ». Vide : rien n'est affiché.", pages: ["cgu"], empty: "hide" },
+  // Points à valider avec un professionnel
+  { id: "processorClause", group: "Points à valider avec un professionnel", kind: "textarea", label: "Responsabilité du traitement pour les données de vos clients", help: "Paragraphe expliquant que l'artisan est responsable du traitement des données de ses propres clients et que le site agit comme sous-traitant. Vide : le paragraphe n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
+  { id: "thirdPartyTransfers", group: "Points à valider avec un professionnel", kind: "textarea", label: "Localisation des prestataires et transferts hors UE", help: "Pays d'établissement de Stripe, PayPal, Resend, Google, GeoJS… et garanties de transfert (clauses contractuelles types). Vide : le paragraphe n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
+  { id: "paypalCookies", group: "Points à valider avec un professionnel", kind: "textarea", label: "Cookies déposés par le script PayPal", help: "À vérifier puis décrire : quels cookies, à quelle fin, et l'information donnée au visiteur. Vide : la phrase n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
+  { id: "signatureLegalValue", group: "Points à valider avec un professionnel", kind: "textarea", label: "Valeur juridique de la signature électronique", help: "Valeur probante de la signature « simple » (nom saisi ou dessin) et mentions à ajouter. Vide : le paragraphe n'apparaît pas.", pages: ["cgu"], empty: "hide" },
+  { id: "withdrawalRefund", group: "Points à valider avec un professionnel", kind: "textarea", label: "Droit de rétractation et remboursement", help: "Règle applicable aux professionnels (et aux consommateurs si le service leur est ouvert). Vide : le paragraphe n'apparaît pas.", pages: ["cgu"], empty: "hide" },
+  { id: "liabilityCap", group: "Points à valider avec un professionnel", kind: "textarea", label: "Plafond de responsabilité", help: "Ex. limitation au montant payé au cours des 12 derniers mois. Vide : le paragraphe n'apparaît pas.", pages: ["cgu"], empty: "hide" },
+  { id: "jurisdictionMediation", group: "Points à valider avec un professionnel", kind: "textarea", label: "Juridiction compétente et médiateur", help: "Tribunal compétent et, si le service s'adresse aussi à des consommateurs, coordonnées du médiateur de la consommation. Vide : seule la mention du droit français et de la recherche d'une solution amiable apparaît.", pages: ["cgu"], empty: "hide" },
+];
+const LEGAL_GROUPS = [...new Set(LEGAL_FIELDS.map((f) => f.group))];
+function legalValue(info, id) { return String((info || {})[id] || "").trim(); }
+function legalFilledCount(info) { return LEGAL_FIELDS.filter((f) => legalValue(info, f.id)).length; }
 
 // Petits blocs de mise en page communs aux trois pages.
 function LegalH2({ children }) { return <h2 className="df-display mb-2 mt-8 text-lg font-semibold">{children}</h2>; }
@@ -5187,12 +5230,23 @@ function LegalP({ children }) { return <p className="mb-3 text-sm leading-relaxe
 function LegalUl({ items }) {
   return (
     <ul className="mb-3 list-disc space-y-1 pl-5 text-sm leading-relaxed" style={{ color: colors.inkSoft }}>
-      {items.map((it, i) => <li key={i}>{it}</li>)}
+      {items.filter(Boolean).map((it, i) => <li key={i}>{it}</li>)}
     </ul>
   );
 }
-function LegalTodo({ children }) {
-  return <span className="rounded px-1 font-semibold" style={{ background: `${colors.brick}18`, color: colors.brick }}>[{children}]</span>;
+// Valeur saisie dans Admin, ou « Information à venir » tant que le champ
+// est vide (jamais de marqueur brut pour un visiteur).
+function LegalValue({ info, id }) {
+  const v = legalValue(info, id);
+  if (v) return <>{v}</>;
+  return <span style={{ fontStyle: "italic" }}>Information à venir</span>;
+}
+// Paragraphe validé par un professionnel, affiché seulement s'il est rempli
+// (les retours à la ligne saisis dans Admin sont conservés).
+function LegalCustom({ info, id }) {
+  const v = legalValue(info, id);
+  if (!v) return null;
+  return <p className="mb-3 whitespace-pre-line text-sm leading-relaxed" style={{ color: colors.inkSoft }}>{v}</p>;
 }
 
 // Liens vers les trois pages légales (pieds de page, inscription, contact).
@@ -5214,6 +5268,8 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
   const page = LEGAL_PAGES[kind] || LEGAL_PAGES["mentions-legales"];
   const site = siteSettings?.name || "Chantiflow";
   const contactEmail = siteSettings?.contactEmail || "contact@chantiflow.fr";
+  const info = siteSettings?.legalInfo || {};
+  const v = (id) => legalValue(info, id);
   useEffect(() => { window.scrollTo(0, 0); }, [kind]);
 
   return (
@@ -5231,18 +5287,24 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
           ))}
         </div>
         <h1 className="df-display mb-1 text-3xl font-semibold">{page.title}</h1>
-        <p className="mb-6 text-xs" style={{ color: colors.inkSoft }}>Dernière mise à jour : {LEGAL_LAST_UPDATE}</p>
+        {v("lastUpdate") ? (
+          <p className="mb-6 text-xs" style={{ color: colors.inkSoft }}>Dernière mise à jour : {v("lastUpdate")}</p>
+        ) : <div className="mb-6" />}
 
         {kind === "mentions-legales" && (
           <>
             <LegalH2>Éditeur du site</LegalH2>
-            <LegalP>Le site {site} est édité par <LegalTodo>À COMPLÉTER : dénomination ou nom et prénom de l'éditeur</LegalTodo>, <LegalTodo>À COMPLÉTER : forme juridique (entreprise individuelle, SASU, SARL…) et, le cas échéant, capital social</LegalTodo>, immatriculée sous le numéro SIRET <LegalTodo>À COMPLÉTER : SIRET</LegalTodo> (RCS <LegalTodo>À COMPLÉTER : ville du RCS, ou « dispensé d'immatriculation » si applicable</LegalTodo>), numéro de TVA intracommunautaire <LegalTodo>À COMPLÉTER : n° de TVA, ou « non applicable » en franchise en base</LegalTodo>.</LegalP>
-            <LegalP>Siège social : <LegalTodo>À COMPLÉTER : adresse postale complète</LegalTodo>. Contact : {contactEmail}, <LegalTodo>À COMPLÉTER : numéro de téléphone</LegalTodo>.</LegalP>
+            <LegalP>
+              Le site {site} est édité par <LegalValue info={info} id="editorName" />, <LegalValue info={info} id="legalForm" />, immatriculée sous le numéro SIRET <LegalValue info={info} id="siret" />
+              {v("rcs") && <> (RCS {v("rcs")})</>}
+              {v("vatNumber") && <>, numéro de TVA intracommunautaire {v("vatNumber")}</>}.
+            </LegalP>
+            <LegalP>Siège social : <LegalValue info={info} id="address" />. Contact : {contactEmail}{v("phone") && <>, {v("phone")}</>}.</LegalP>
             <LegalH2>Directeur de la publication</LegalH2>
-            <LegalP><LegalTodo>À COMPLÉTER : nom et prénom du directeur de la publication (en général le représentant légal)</LegalTodo>, joignable à l'adresse {contactEmail}.</LegalP>
+            <LegalP><LegalValue info={info} id="publicationDirector" />, joignable à l'adresse {contactEmail}.</LegalP>
             <LegalH2>Hébergement</LegalH2>
-            <LegalP>Les données de l'application (base de données, authentification, fichiers, fonctions serveur) sont hébergées par Supabase Inc., <LegalTodo>À COMPLÉTER : adresse de Supabase Inc., voir supabase.com/legal</LegalTodo>, dans la région Union européenne « eu-north-1 » (Stockholm, Suède).</LegalP>
-            <LegalP>Les pages du site (partie visible) sont hébergées par <LegalTodo>À COMPLÉTER : nom et adresse de l'hébergeur du site web (Vercel, Netlify, OVH…), selon l'endroit où le front est déployé</LegalTodo>.</LegalP>
+            <LegalP>Les données de l'application (base de données, authentification, fichiers, fonctions serveur) sont hébergées par Supabase Inc.{v("hostAppAddress") && <>, {v("hostAppAddress")}</>}, dans la région Union européenne « eu-north-1 » (Stockholm, Suède).</LegalP>
+            <LegalP>Les pages du site (partie visible) sont hébergées par <LegalValue info={info} id="hostWeb" />.</LegalP>
             <LegalH2>Propriété intellectuelle</LegalH2>
             <LegalP>L'ensemble du site (textes, mise en page, code, nom et logo {site}) est protégé par le droit d'auteur et le droit des marques. Toute reproduction, même partielle, sans autorisation écrite de l'éditeur est interdite. Les documents (devis, factures…) créés par les utilisateurs restent la propriété de ces derniers.</LegalP>
             <LegalH2>Crédits</LegalH2>
@@ -5261,8 +5323,8 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
           <>
             <LegalP>Cette politique explique quelles données {site} collecte, pourquoi, avec qui elles sont partagées et combien de temps elles sont conservées. Elle s'applique au site, à l'application connectée et à l'application de bureau, qui utilisent les mêmes services.</LegalP>
             <LegalH2>1. Qui est responsable du traitement ?</LegalH2>
-            <LegalP>Le responsable du traitement est l'éditeur du site, identifié dans les mentions légales : <LegalTodo>À COMPLÉTER : dénomination et adresse</LegalTodo>. Contact pour toute question relative aux données : {contactEmail}.</LegalP>
-            <LegalP><LegalTodo>À VÉRIFIER avec un professionnel</LegalTodo> : pour les données des clients que vous saisissez dans vos devis et factures (nom, adresse, email de vos propres clients), vous êtes responsable de leur traitement et {site} agit comme sous-traitant, hébergeant et traitant ces données pour votre compte et selon vos instructions.</LegalP>
+            <LegalP>Le responsable du traitement est l'éditeur du site, identifié dans les mentions légales : <LegalValue info={info} id="editorName" />, <LegalValue info={info} id="address" />. Contact pour toute question relative aux données : {contactEmail}.</LegalP>
+            <LegalCustom info={info} id="processorClause" />
             <LegalH2>2. Données collectées</LegalH2>
             <LegalUl items={[
               "Compte utilisateur : adresse email, prénom, nom, nom de l'entreprise, mot de passe (stocké uniquement sous forme hachée par le service d'authentification), date de création, état de confirmation de l'email, rôle dans l'organisation.",
@@ -5287,7 +5349,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Assurer la sécurité du service, prévenir les abus et diagnostiquer les pannes (intérêt légitime).",
             ]} />
             <LegalH2>4. Services tiers qui reçoivent des données</LegalH2>
-            <LegalP>Le site fait appel aux prestataires suivants. Les pays d'établissement et les garanties de transfert hors Union européenne sont à confirmer : <LegalTodo>À VÉRIFIER : localisation et clauses contractuelles de chaque prestataire</LegalTodo>.</LegalP>
+            <LegalP>Le site fait appel aux prestataires suivants.</LegalP>
             <LegalUl items={[
               "Supabase (hébergement de la base de données, authentification, stockage des photos, fonctions serveur) : ensemble des données, région Union européenne (Stockholm, Suède).",
               "Stripe (paiement par carte) : votre adresse email et l'identifiant de votre organisation lors de la souscription d'un abonnement ; pour le paiement d'une facture par un client, le numéro de la facture et son montant. Les données de carte sont saisies directement sur les pages de Stripe.",
@@ -5298,6 +5360,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Google Fonts (polices de caractères) et flagcdn.com (images de drapeaux) : votre navigateur charge ces ressources directement, ce qui transmet votre adresse IP à ces services.",
               "INSEE (indices de révision de prix) : appel effectué par le serveur, sans aucune donnée personnelle.",
             ]} />
+            <LegalCustom info={info} id="thirdPartyTransfers" />
             <LegalH2>5. Ce qui est enregistré sur votre appareil</LegalH2>
             <LegalP>Le site n'utilise pas de cookies de suivi ni de mesure d'audience. Il utilise le stockage local du navigateur (localStorage), qui n'est jamais transmis à un tiers, pour :</LegalP>
             <LegalUl items={[
@@ -5306,18 +5369,19 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "une copie de vos documents, clients, prestations et profil d'entreprise, pour consultation en lecture seule en cas de coupure réseau (mode hors ligne), mise à jour à chaque chargement réussi ;",
               "le pays détecté lors de la première visite, conservé 30 jours.",
             ]} />
-            <LegalP>L'application peut être installée sur l'écran d'accueil (application web progressive) : le navigateur garde alors en cache les fichiers de l'application, pas vos données. Le script de paiement PayPal, chargé sur la page Tarifs, peut déposer ses propres cookies : <LegalTodo>À VÉRIFIER : cookies déposés par PayPal et information à donner</LegalTodo>.</LegalP>
+            <LegalP>L'application peut être installée sur l'écran d'accueil (application web progressive) : le navigateur garde alors en cache les fichiers de l'application, pas vos données.</LegalP>
+            <LegalCustom info={info} id="paypalCookies" />
             <LegalH2>6. Durées de conservation</LegalH2>
             <LegalUl items={[
               "Compte non confirmé : supprimé automatiquement 8 semaines après sa création.",
               "Compte confirmé, documents, clients, photos : conservés tant que le compte existe. Un document supprimé par vous est supprimé immédiatement, ainsi que ses photos.",
               "Abonnement résilié : l'accès est maintenu jusqu'à la fin de la période payée, puis le compte repasse automatiquement au forfait Gratuit ; les données ne sont pas supprimées.",
-              "Factures : à conserver 10 ans au titre des obligations comptables — cette durée s'applique à vos propres obligations en tant qu'émetteur ; " + "[À VÉRIFIER : durée de conservation par le site après suppression du compte]",
-              "Messages du formulaire de contact : [À COMPLÉTER : durée, par exemple 12 mois].",
+              <>Factures : en tant qu'émetteur, vous devez conserver vos factures pendant la durée légale (10 ans au titre des obligations comptables).{v("invoiceRetention") && <> Après suppression d'un compte : {v("invoiceRetention")}.</>}</>,
+              <>Messages du formulaire de contact : <LegalValue info={info} id="contactMessagesRetention" />.</>,
               "Données de facturation de l'abonnement (chez Stripe et PayPal) : selon leurs propres politiques et les obligations comptables.",
             ]} />
             <LegalH2>7. Vos droits</LegalH2>
-            <LegalP>Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation, d'opposition et de portabilité de vos données, ainsi que du droit de définir des directives après votre décès. Vous pouvez modifier vous-même la plupart de vos données depuis l'application (Mon entreprise, Mon compte, Clients). Pour exercer un autre droit, notamment la suppression complète de votre compte, écrivez à {contactEmail} : la demande est traitée dans un délai de <LegalTodo>À COMPLÉTER : délai, un mois maximum selon le RGPD</LegalTodo>. Vous pouvez aussi introduire une réclamation auprès de la CNIL (cnil.fr).</LegalP>
+            <LegalP>Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation, d'opposition et de portabilité de vos données, ainsi que du droit de définir des directives après votre décès. Vous pouvez modifier vous-même la plupart de vos données depuis l'application (Mon entreprise, Mon compte, Clients). Pour exercer un autre droit, notamment la suppression complète de votre compte, écrivez à {contactEmail} : la demande est traitée {v("rightsResponseDelay") ? <>dans un délai de {v("rightsResponseDelay")}</> : <>dans le délai prévu par le RGPD</>}. Vous pouvez aussi introduire une réclamation auprès de la CNIL (cnil.fr).</LegalP>
             <LegalH2>8. Sécurité</LegalH2>
             <LegalP>Les échanges sont chiffrés (HTTPS). Les mots de passe ne sont jamais stockés en clair. L'accès aux données est cloisonné par organisation au niveau de la base de données, et les photos de chantier sont stockées dans un espace privé accessible uniquement aux membres de l'organisation, via des liens temporaires. Les clés API ne sont conservées que sous forme hachée.</LegalP>
             <LegalH2>9. Modifications</LegalH2>
@@ -5338,11 +5402,12 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
             <LegalH2>3. Forfaits, paiement et résiliation</LegalH2>
             <LegalUl items={[
               "Forfait Gratuit : sans carte bancaire, limité à un nombre de documents indiqué sur la page Tarifs (3 par défaut). Au-delà, le compte passe en lecture seule jusqu'au choix d'un forfait payant.",
-              "Forfaits payants (Essentiel, Pro, Entreprise) : abonnement mensuel ou annuel, aux tarifs affichés sur la page Tarifs au moment de la souscription — ces tarifs font foi. [À VÉRIFIER : tarifs hors taxes ou toutes taxes comprises, et mention de la TVA applicable]",
+              <>Forfaits payants (Essentiel, Pro, Entreprise) : abonnement mensuel ou annuel, aux tarifs affichés sur la page Tarifs au moment de la souscription — ces tarifs font foi.{v("pricesTaxNote") && <> {v("pricesTaxNote")}</>}</>,
               "Le paiement s'effectue par carte bancaire via Stripe ou via PayPal. L'abonnement se renouvelle automatiquement à chaque échéance jusqu'à résiliation.",
-              "Résiliation : possible à tout moment depuis la page Abonnement. L'accès aux fonctionnalités du forfait est conservé jusqu'à la fin de la période déjà payée, puis le compte repasse automatiquement au forfait Gratuit, sans suppression des données. Les périodes entamées ne sont pas remboursées. [À VÉRIFIER : droit de rétractation de 14 jours pour les professionnels dans certains cas, et politique de remboursement]",
-              "L'éditeur peut modifier les tarifs ; les nouveaux tarifs s'appliquent au renouvellement suivant, après information préalable. [À COMPLÉTER : délai de préavis]",
+              "Résiliation : possible à tout moment depuis la page Abonnement. L'accès aux fonctionnalités du forfait est conservé jusqu'à la fin de la période déjà payée, puis le compte repasse automatiquement au forfait Gratuit, sans suppression des données.",
+              <>L'éditeur peut modifier les tarifs ; les nouveaux tarifs s'appliquent au renouvellement suivant, après information préalable{v("priceChangeNotice") && <> avec un préavis de {v("priceChangeNotice")}</>}.</>,
             ]} />
+            <LegalCustom info={info} id="withdrawalRefund" />
             <LegalH2>4. Obligations de l'utilisateur</LegalH2>
             <LegalUl items={[
               "Utiliser le service conformément à la loi, notamment aux règles de facturation et de TVA applicables à votre activité. Le service propose des mentions et des calculs standards ; leur adéquation à votre situation relève de votre responsabilité et, si besoin, de celle de votre comptable.",
@@ -5350,22 +5415,25 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Recueillir, lorsque c'est nécessaire, le consentement de vos clients avant de leur envoyer des emails depuis le service (relances, demande d'avis) et respecter vos propres obligations en matière de données personnelles.",
             ]} />
             <LegalH2>5. Signature et paiement en ligne</LegalH2>
-            <LegalP>Le service permet à vos clients de signer un devis (nom saisi ou signature dessinée) et de payer une facture depuis un lien ou un QR code, sans compte. La signature enregistrée est une signature électronique « simple » : le service conserve le nom ou le dessin, la date et le lien utilisé. <LegalTodo>À VÉRIFIER avec un professionnel : valeur probante de cette signature et mentions à ajouter (horodatage, identification du signataire)</LegalTodo>. Le paiement est réalisé par Stripe ; le service n'encaisse pas les fonds pour votre compte.</LegalP>
+            <LegalP>Le service permet à vos clients de signer un devis (nom saisi ou signature dessinée) et de payer une facture depuis un lien ou un QR code, sans compte. La signature enregistrée est une signature électronique « simple » : le service conserve le nom ou le dessin, la date et le lien utilisé. Le paiement est réalisé par Stripe ; le service n'encaisse pas les fonds pour votre compte.</LegalP>
+            <LegalCustom info={info} id="signatureLegalValue" />
             <LegalH2>6. Facturation électronique</LegalH2>
             <LegalP>Le service permet de télécharger vos factures au format Factur-X. La transmission à une plateforme agréée, prévue par la réforme de la facturation électronique, n'est pas encore assurée par le service et reste à votre charge tant qu'elle n'est pas proposée.</LegalP>
             <LegalH2>7. Disponibilité et responsabilité</LegalH2>
             <LegalUl items={[
               "L'éditeur s'efforce de maintenir le service accessible en permanence mais ne garantit pas une disponibilité ininterrompue (maintenance, panne, incident chez un prestataire). Une copie en lecture seule de vos données reste consultable sur votre appareil en cas de coupure.",
               "Le service est un outil d'aide à la gestion. Il ne constitue pas un conseil juridique, comptable ou fiscal. L'éditeur ne peut être tenu responsable des erreurs contenues dans les documents que vous produisez, des retards de paiement de vos clients ni de l'usage que vous faites des documents.",
-              "Vous êtes invité à exporter régulièrement vos documents (PDF, Excel) : l'éditeur ne pourra être tenu responsable d'une perte de données au-delà de ce que prévoit la loi. [À VÉRIFIER : plafond de responsabilité, par exemple le montant payé au cours des 12 derniers mois]",
+              "Vous êtes invité à exporter régulièrement vos documents (PDF, Excel) : l'éditeur ne pourra être tenu responsable d'une perte de données au-delà de ce que prévoit la loi.",
               "Les suggestions générées par intelligence artificielle sont des propositions à vérifier et à corriger avant utilisation.",
             ]} />
+            <LegalCustom info={info} id="liabilityCap" />
             <LegalH2>8. Propriété intellectuelle</LegalH2>
             <LegalP>Le service, son code, son nom et son logo appartiennent à l'éditeur. Vous disposez d'un droit d'utilisation personnel et non exclusif pendant la durée de votre compte. Les documents et données que vous créez restent votre propriété ; vous accordez à l'éditeur le droit de les héberger et de les traiter uniquement pour fournir le service.</LegalP>
             <LegalH2>9. Suspension et suppression</LegalH2>
             <LegalP>En cas de manquement grave aux présentes conditions (fraude, contenu illicite, tentative d'intrusion), l'éditeur peut suspendre ou fermer le compte après vous en avoir informé, sauf urgence. Vous pouvez demander la suppression de votre compte à tout moment à {contactEmail}.</LegalP>
             <LegalH2>10. Droit applicable et litiges</LegalH2>
-            <LegalP>Les présentes conditions sont soumises au droit français. En cas de litige, les parties rechercheront d'abord une solution amiable. <LegalTodo>À COMPLÉTER : juridiction compétente et, si le service s'adresse aussi à des consommateurs, coordonnées du médiateur de la consommation</LegalTodo>.</LegalP>
+            <LegalP>Les présentes conditions sont soumises au droit français. En cas de litige, les parties rechercheront d'abord une solution amiable.</LegalP>
+            <LegalCustom info={info} id="jurisdictionMediation" />
             <LegalH2>11. Contact</LegalH2>
             <LegalP>Pour toute question sur ces conditions : {contactEmail}.</LegalP>
           </>
@@ -5373,6 +5441,83 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
 
         <div className="mt-10 border-t pt-4 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
           <LegalLinks onLegal={onLegal} color={colors.inkSoft} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Admin → Informations légales : un champ par information ou formulation à
+// compléter dans les pages légales, avec un compteur d'avancement.
+function LegalInfoSettings({ siteSettings, saving, onSave }) {
+  const [local, setLocal] = useState(() => ({ ...(siteSettings?.legalInfo || {}) }));
+  useEffect(() => { setLocal({ ...(siteSettings?.legalInfo || {}) }); }, [siteSettings?.legalInfo]);
+  const filled = legalFilledCount(local);
+  const total = LEGAL_FIELDS.length;
+  const remaining = total - filled;
+  const dirty = JSON.stringify(local) !== JSON.stringify(siteSettings?.legalInfo || {});
+  const pageShort = (id) => LEGAL_PAGES[id]?.short || id;
+  function patch(id, value) { setLocal((prev) => ({ ...prev, [id]: value })); }
+  function handleSave() {
+    const cleaned = {};
+    LEGAL_FIELDS.forEach((f) => { const v = String(local[f.id] || "").trim(); if (v) cleaned[f.id] = v; });
+    onSave({ legalInfo: cleaned });
+  }
+  return (
+    <div className="mb-6 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3" style={{ borderColor: colors.line }}>
+        <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Informations légales</span>
+        {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={13} className="animate-spin" /> Enregistrement</span>}
+      </div>
+      <div className="border-b px-4 py-3" style={{ borderColor: colors.line, background: remaining === 0 ? `${colors.moss}0D` : `${colors.brass}12` }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm font-semibold" style={{ color: remaining === 0 ? colors.moss : colors.brassDark }}>
+            {remaining === 0 ? `Tous les champs sont remplis (${total}/${total}).` : `${remaining} champ${remaining > 1 ? "s" : ""} sur ${total} encore à compléter`}
+          </span>
+          <span className="df-mono text-xs" style={{ color: colors.inkSoft }}>{filled}/{total} remplis</span>
+        </div>
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full" style={{ background: colors.line }}>
+          <div className="h-full rounded-full" style={{ width: `${Math.round((filled / total) * 100)}%`, background: remaining === 0 ? colors.moss : colors.brass }} />
+        </div>
+        <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>
+          Ces informations alimentent les pages Mentions légales, Confidentialité et CGU. Tant qu'un champ est vide, la page affiche « Information à venir » ou masque la phrase concernée — jamais un texte inventé. Les paragraphes de la dernière section sont à coller tels que validés par ton professionnel du droit.
+        </p>
+      </div>
+      <div className="space-y-6 p-4">
+        {LEGAL_GROUPS.map((group) => (
+          <div key={group}>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="df-display text-sm font-semibold">{group}</h3>
+              <span className="df-mono text-xs" style={{ color: colors.inkSoft }}>{LEGAL_FIELDS.filter((f) => f.group === group && legalValue(local, f.id)).length}/{LEGAL_FIELDS.filter((f) => f.group === group).length}</span>
+            </div>
+            <div className="space-y-4">
+              {LEGAL_FIELDS.filter((f) => f.group === group).map((f) => {
+                const value = local[f.id] || "";
+                const isFilled = String(value).trim().length > 0;
+                return (
+                  <div key={f.id} className="rounded-lg p-3" style={{ background: colors.paper, border: `1px solid ${isFilled ? colors.line : colors.brass + "66"}` }}>
+                    <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                      <label htmlFor={`legal-${f.id}`} className="text-sm font-medium">{f.label}</label>
+                      <span className="flex flex-wrap items-center gap-1">
+                        {f.pages.map((p) => <span key={p} className="rounded-full px-2 py-0.5 text-[10px] font-medium" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}>{pageShort(p)}</span>)}
+                        {!isFilled && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: `${colors.brass}22`, color: colors.brassDark }}>À compléter</span>}
+                      </span>
+                    </div>
+                    <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>{f.help}</p>
+                    {f.kind === "textarea" ? (
+                      <textarea id={`legal-${f.id}`} className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "6rem" }} value={value} onChange={(e) => patch(f.id, e.target.value)} placeholder="Coller ici le paragraphe validé…" />
+                    ) : (
+                      <input id={`legal-${f.id}`} className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={value} onChange={(e) => patch(f.id, e.target.value)} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4" style={{ borderColor: colors.line }}>
+          {dirty && !saving && <span className="text-xs" style={{ color: colors.brassDark }}>Modifications non enregistrées</span>}
+          <button onClick={handleSave} disabled={saving} className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ background: colors.brassDark, opacity: saving ? 0.7 : 1 }}>Enregistrer</button>
         </div>
       </div>
     </div>
@@ -12797,6 +12942,7 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
   const TABS = [
     { id: "apercu", label: "Vue d'ensemble", icon: LayoutDashboard },
     { id: "identite", label: "Identité du site", icon: Building2 },
+    { id: "legal", label: "Informations légales", icon: FileSignature },
     { id: "services", label: "Services", icon: Menu },
     { id: "apparence", label: "Apparence du site", icon: Palette },
     { id: "utilisateurs", label: "Utilisateurs", icon: Users },
@@ -12848,6 +12994,22 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
 
       {tab === "apercu" && (
         <>
+          {/* Avancement des informations légales (Admin → Informations légales) */}
+          {(() => {
+            const filled = legalFilledCount(siteSettings?.legalInfo);
+            const total = LEGAL_FIELDS.length;
+            const remaining = total - filled;
+            const done = remaining === 0;
+            return (
+              <button onClick={() => setTab("legal")} className="mb-4 flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl p-4 text-left" style={{ background: done ? `${colors.moss}0D` : `${colors.brass}12`, border: `1px solid ${done ? colors.moss : colors.brass}40` }}>
+                <span className="flex items-center gap-2 text-sm font-medium" style={{ color: done ? colors.moss : colors.brassDark }}>
+                  <FileSignature size={16} />
+                  {done ? `Informations légales : les ${total} champs sont remplis.` : `Informations légales : ${remaining} champ${remaining > 1 ? "s" : ""} sur ${total} encore à compléter.`}
+                </span>
+                <span className="text-xs font-semibold underline" style={{ color: done ? colors.moss : colors.brassDark }}>Ouvrir</span>
+              </button>
+            );
+          })()}
           <div className="mb-6 rounded-2xl p-4" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}40` }}>
             <div className="flex items-start gap-2">
               <Check size={16} style={{ color: colors.moss, marginTop: "2px", flexShrink: 0 }} />
@@ -12876,6 +13038,10 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
 
       {tab === "identite" && (
         <SiteIdentitySettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
+      )}
+
+      {tab === "legal" && (
+        <LegalInfoSettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
       )}
 
       {tab === "services" && (
