@@ -7055,7 +7055,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                     {orgSwitcher}
                   </Fragment>
                 ) : id === "stock" ? (
-                  <StockMenu key={id} variant="sidebar" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} iconColor={adv.accent} />
+                  <StockMenu key={id} variant="sidebar" itemClass="px-3 py-1.5 text-xs font-medium" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} iconColor={adv.accent} />
                 ) : (
                   <NavItem key={id} id={id} label={label} icon={Icon} />
                 )
@@ -7158,7 +7158,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
               <div className="my-2 border-t" style={{ borderColor: adv.line }} />
               {tabs.map(({ id, label, icon: Icon }) => (
                 id === "stock" ? (
-                  <StockMenu key={id} variant="inline" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} textColor={darkMode ? "#9AA5B5" : adv.inkSoft} onNavigate={() => setMobileNavOpen(false)} />
+                  <StockMenu key={id} variant="inline" itemClass="px-3 py-2 text-xs" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} textColor={darkMode ? "#9AA5B5" : adv.inkSoft} onNavigate={() => setMobileNavOpen(false)} />
                 ) : (
                   <button key={id} onClick={() => { setView(id); setMobileNavOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={tabStyle(view === id)}>
                     <Icon size={15} /> {label}
@@ -7383,7 +7383,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
             <div className="absolute left-0 top-full z-20 mt-1 w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
               {tabs.map(({ id, label, icon: Icon }) => (
                 id === "stock" ? (
-                  <StockMenu key={id} variant="inline" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={(active) => ({ background: active ? colors.paper : "transparent", color: colors.ink, fontWeight: active ? 600 : 400 })} textColor={colors.inkSoft} onNavigate={() => setMobileNavOpen(false)} />
+                  <StockMenu key={id} variant="inline" itemClass="px-3 py-2.5 text-sm" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={(active) => ({ background: active ? colors.paper : "transparent", color: colors.ink, fontWeight: active ? 600 : 400 })} textColor={colors.inkSoft} onNavigate={() => setMobileNavOpen(false)} />
                 ) : (
                   <button
                     key={id}
@@ -11168,6 +11168,10 @@ function AtelierCreateSheet({ open, onClose, visibleServices, onCreate, darkMode
 function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkMode, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, onOpenCreate, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, children }) {
   const tone = atelierTone(darkMode);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Sous-menu « Gestion de stock » du menu Plus : déplié d'office quand une
+  // page du stock est ouverte.
+  const [stockOpen, setStockOpen] = useState(isStockView(view));
+  useEffect(() => { if (isStockView(view)) setStockOpen(true); }, [view]);
   useEscapeToClose(moreOpen, () => setMoreOpen(false));
   useEffect(() => { setMoreOpen(false); }, [view]);
   const activeTab = atelierTabFor(view);
@@ -11178,7 +11182,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   const moreItems = [
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
-    ...STOCK_MENU.map((m) => ({ id: m.id, label: `Gestion de stock · ${m.label}`, icon: m.icon, locked: !hasAccess(account, "pro") })),
+    { id: "stock", label: "Gestion de stock", icon: Package, locked: !hasAccess(account, "pro"), children: STOCK_MENU },
     { id: "planning-equipe", label: "Planning d'équipe", icon: Calendar },
     { id: "pricing", label: "Abonnement", icon: CreditCard },
     { id: "account", label: "Mon compte", icon: UserCircle },
@@ -11233,7 +11237,22 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
             </div>
           )}
           <div className="px-2 py-1">
-            {moreItems.map(({ id, label, icon: Icon, locked }) => (
+            {moreItems.map(({ id, label, icon: Icon, locked, children }) => children ? (
+              <Fragment key={id}>
+                <button onClick={() => setStockOpen((v) => !v)} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={isStockView(view) && !stockOpen ? tabStyle(true) : { color: tone.ink }} aria-expanded={stockOpen}>
+                  <Icon size={18} style={{ color: isStockView(view) ? tone.accent : tone.inkSoft }} />
+                  <span className="flex-1">{label}</span>
+                  {locked && <Lock size={14} style={{ color: tone.inkSoft }} />}
+                  <ChevronDown size={16} style={{ color: tone.inkSoft, transform: stockOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                </button>
+                {stockOpen && children.map(({ id: cid, label: clabel, icon: CIcon }) => (
+                  <button key={cid} onClick={() => { setMoreOpen(false); setView(cid); }} className="df-at-tap flex w-full items-center gap-3 rounded-lg py-2 pl-9 pr-2 text-left text-[15px]" style={view === cid ? tabStyle(true) : { color: tone.ink }}>
+                    <CIcon size={16} style={{ color: view === cid ? tone.accent : tone.inkSoft }} />
+                    <span className="flex-1">{clabel}</span>
+                  </button>
+                ))}
+              </Fragment>
+            ) : (
               <button key={id} onClick={() => { setMoreOpen(false); setView(id); }} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={view === id ? tabStyle(true) : { color: tone.ink }}>
                 <Icon size={18} style={{ color: view === id ? tone.accent : tone.inkSoft }} />
                 <span className="flex-1">{label}</span>
@@ -12611,12 +12630,14 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
 // kv_store « prestations » n'est plus modifiée : elle sert de sauvegarde
 // et de source d'import (rejouable grâce à legacy_prestation_id).
 // ===========================================================================
+// Sous-menu « Gestion de stock » : un seul bouton dans chaque navigation,
+// qui se déplie sur ces six entrées, dans cet ordre.
 const STOCK_MENU = [
   { id: "stock-produits", label: "Produits", icon: Package },
-  { id: "stock-documents", label: "Documents de stock", icon: Archive },
   { id: "stock-entrepots", label: "Entrepôts", icon: Warehouse },
   { id: "stock-entree", label: "Entrée", icon: ArrowDownToLine },
   { id: "stock-sortie", label: "Sortie", icon: ArrowUpFromLine },
+  { id: "stock-documents", label: "Documents de stock", icon: Archive },
   { id: "stock-comptabilite", label: "Comptabilité", icon: Calculator },
 ];
 const isStockView = (view) => typeof view === "string" && view.startsWith("stock-");
@@ -12728,42 +12749,51 @@ function productAvailability(p, stockByProduct) {
 
 // Sous-menu « Gestion de stock » dans les navigations (déroulant sur grand
 // écran, liste indentée sur mobile). `variant` : "dropdown" | "inline".
-function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconColor, onNavigate }) {
-  const [open, setOpen] = useState(false);
-  useEscapeToClose(open, () => setOpen(false));
+function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconColor, onNavigate, itemClass = "px-3 py-2 text-xs" }) {
   const active = isStockView(view);
-  if (variant === "inline") {
+  // Déplié d'office quand une page du stock est ouverte (sidebar et mobile).
+  const [open, setOpen] = useState(variant !== "dropdown" && active);
+  useEffect(() => { if (active && variant !== "dropdown") setOpen(true); }, [active, variant]);
+  useEscapeToClose(open && variant === "dropdown", () => setOpen(false));
+  const go = (id) => { setView(id); if (variant === "dropdown") setOpen(false); if (onNavigate) onNavigate(); };
+  const chevron = locked
+    ? <Lock size={11} className="ml-auto shrink-0" />
+    : <ChevronDown size={12} className="ml-auto shrink-0" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />;
+  if (variant === "dropdown") {
     return (
-      <>
-        <div className="flex items-center gap-2.5 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: textColor }}>
-          <Package size={13} /> Gestion de stock {locked && <Lock size={11} className="ml-auto" />}
-        </div>
-        {STOCK_MENU.map(({ id, label, icon: Icon }) => (
-          <button key={id} onClick={() => { setView(id); if (onNavigate) onNavigate(); }} className="flex w-full items-center gap-2.5 rounded-lg py-2 pl-8 pr-3 text-left text-xs" style={styleFor(view === id)}>
-            <Icon size={14} /> {label}
-          </button>
-        ))}
-      </>
+      <div className="relative">
+        <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={styleFor(active)} aria-expanded={open}>
+          <Package size={15} /> <span className="truncate">Gestion de stock</span>
+          {chevron}
+        </button>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+            <div className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "var(--df-surface, #FFFFFF)", border: "1px solid var(--df-line, #DAE1DC)" }}>
+              {STOCK_MENU.map(({ id, label, icon: Icon }) => (
+                <button key={id} onClick={() => go(id)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: view === id ? iconColor : "var(--df-ink, #1B2A33)", fontWeight: view === id ? 600 : 400 }}>
+                  <Icon size={14} style={{ color: iconColor }} /> {label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     );
   }
+  // Sidebar (Avancée) et menus mobiles : accordéon, mêmes classes que les
+  // boutons voisins (itemClass), entrées indentées.
   return (
-    <div className="relative">
-      <button onClick={() => setOpen((v) => !v)} className={variant === "sidebar" ? "flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" : "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium"} style={styleFor(active)} title="Gestion de stock">
-        <Package size={15} /> <span className="truncate">Gestion de stock</span>
-        {locked ? <Lock size={11} className="ml-auto shrink-0" /> : <ChevronDown size={12} className="ml-auto shrink-0" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />}
+    <div className="flex w-full flex-col gap-0.5">
+      <button onClick={() => setOpen((v) => !v)} className={`flex w-full items-center gap-2.5 rounded-lg text-left ${itemClass}`} style={styleFor(active && !open)} aria-expanded={open}>
+        <Package size={15} className="shrink-0" /> <span className="truncate">Gestion de stock</span>
+        {chevron}
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "var(--df-surface, #FFFFFF)", border: "1px solid var(--df-line, #DAE1DC)" }}>
-            {STOCK_MENU.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => { setOpen(false); setView(id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: view === id ? iconColor : "var(--df-ink, #1B2A33)", fontWeight: view === id ? 600 : 400 }}>
-                <Icon size={14} style={{ color: iconColor }} /> {label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      {open && STOCK_MENU.map(({ id, label, icon: Icon }) => (
+        <button key={id} onClick={() => go(id)} className={`flex w-full items-center gap-2.5 rounded-lg text-left ${itemClass} pl-9`} style={styleFor(view === id)}>
+          <Icon size={14} className="shrink-0" style={view === id ? undefined : { color: iconColor || textColor }} /> {label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -17623,5 +17653,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
