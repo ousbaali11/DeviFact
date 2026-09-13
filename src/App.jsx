@@ -821,7 +821,17 @@ function withGeoCountry(profile) {
   return country ? { ...profile, country } : profile;
 }
 function emptyCompanyProfile() {
-  return { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "", fiscalStartMonth: 1 };
+  return {
+    type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "", fiscalStartMonth: 1,
+    // Mentions légales imprimées sur les devis et factures (audit des champs,
+    // étape A) : forme juridique, capital, immatriculation RCS/RM (art.
+    // R123-237 C. com.), mention « EI » de l'entrepreneur individuel (art.
+    // L526-22 C. com.), assurance décennale (art. L243-2 C. assurances),
+    // médiateur de la consommation (art. L616-1 C. conso).
+    legalForm: "", capital: "", registration: "", entrepreneurIndividuel: false,
+    insuranceName: "", insurancePolicy: "", insuranceZone: "",
+    mediatorName: "", mediatorContact: "",
+  };
 }
 function nextNumber(documents, type) {
   const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", situation: "SIT", pv_reception: "PV", bpu: "BPU", rapport: "RI", contrat: "CTR", relance: "MED", planning: "PLN" };
@@ -13331,6 +13341,28 @@ function TeamView({ account, siteSettings }) {
   );
 }
 
+// Formes juridiques proposées (liste indicative, saisie libre possible).
+const LEGAL_FORMS = ["Entreprise individuelle (EI)", "Micro-entreprise", "EURL", "SARL", "SAS", "SASU", "SA", "SNC", "SCOP", "Association"];
+// « SARL au capital de 5 000 € » / « EI » — libellé de la forme juridique tel
+// qu'imprimé sur les documents (art. R123-237 C. com., L526-22 C. com.).
+function companyLegalFormLabel(p) {
+  if (!p) return "";
+  const parts = [];
+  if (p.legalForm) parts.push(p.legalForm.trim());
+  if (p.capital) parts.push(`au capital de ${String(p.capital).trim()}`);
+  if (p.entrepreneurIndividuel && !/\bEI\b/i.test(p.legalForm || "")) parts.push("EI");
+  return parts.join(" ");
+}
+// « Assurance décennale AXA, contrat n° 123, couverture France » (art. L243-2 C. ass.).
+function companyInsuranceLabel(p) {
+  if (!p || (!p.insuranceName && !p.insurancePolicy)) return "";
+  const parts = [];
+  if (p.insuranceName) parts.push(p.insuranceName.trim());
+  if (p.insurancePolicy) parts.push(`contrat n° ${String(p.insurancePolicy).trim()}`);
+  if (p.insuranceZone) parts.push(`couverture : ${p.insuranceZone.trim()}`);
+  return parts.join(", ");
+}
+
 function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, isViewer, onGoToPricing }) {
   const [local, setLocal] = useState(() => withGeoCountry(profile));
   const [editing, setEditing] = useState(!profile.name);
@@ -13409,6 +13441,10 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
             {profile.vatOnDebits && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>TVA</dt><dd>Option pour le paiement d'après les débits</dd></div>}
             {profile.type !== "particulier" && profile.siret && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>SIRET</dt><dd>{profile.siret}</dd></div>}
             {profile.type !== "particulier" && profile.tva && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>N° TVA</dt><dd>{profile.tva}</dd></div>}
+            {profile.type !== "particulier" && (profile.legalForm || profile.capital || profile.entrepreneurIndividuel) && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Forme</dt><dd>{companyLegalFormLabel(profile)}</dd></div>}
+            {profile.type !== "particulier" && profile.registration && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>RCS / RM</dt><dd>{profile.registration}</dd></div>}
+            {profile.type !== "particulier" && (profile.insuranceName || profile.insurancePolicy) && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Décennale</dt><dd>{companyInsuranceLabel(profile)}</dd></div>}
+            {profile.type !== "particulier" && profile.mediatorName && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Médiateur</dt><dd>{profile.mediatorName}{profile.mediatorContact ? ` — ${profile.mediatorContact}` : ""}</dd></div>}
             {!profile.address && !profile.email && !profile.phone && <p className="text-xs" style={{ color: colors.inkSoft }}>Aucune information renseignée pour le moment.</p>}
           </dl>
         </div>
@@ -13488,6 +13524,59 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
             <div>
               <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>N° TVA intracommunautaire (optionnel)</label>
               <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.tva} onChange={(e) => patch({ tva: e.target.value })} />
+            </div>
+          )}
+          {local.type !== "particulier" && (
+            <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Mentions légales des devis et factures</div>
+              <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Imprimées sur chaque devis, facture, facture d'acompte et avoir. Les champs marqués * sont obligatoires en France pour les sociétés (forme, capital, immatriculation) et pour les professionnels du bâtiment soumis à l'assurance décennale.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Forme juridique *</label>
+                  <input list="df-legal-forms" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="SARL, SAS, EURL, EI, micro-entreprise…" value={local.legalForm || ""} onChange={(e) => patch({ legalForm: e.target.value })} />
+                  <datalist id="df-legal-forms">{LEGAL_FORMS.map((f) => <option key={f} value={f} />)}</datalist>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Capital social (sociétés) *</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : 5 000 €" value={local.capital || ""} onChange={(e) => patch({ capital: e.target.value })} />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Immatriculation RCS ou RM et ville *</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : RCS Lyon 123 456 789 — ou — RM 69 123 456 789" value={local.registration || ""} onChange={(e) => patch({ registration: e.target.value })} />
+                </div>
+              </div>
+              <label className="mt-3 flex items-start gap-2 text-xs" style={{ color: colors.inkSoft }}>
+                <input type="checkbox" className="mt-0.5" checked={!!local.entrepreneurIndividuel} onChange={(e) => patch({ entrepreneurIndividuel: e.target.checked })} />
+                <span>Entrepreneur individuel : ajoute la mention « EI » après le nom sur les documents (obligatoire depuis 2022, micro-entrepreneurs compris)</span>
+              </label>
+              <div className="mt-3 mb-1 text-xs font-semibold" style={{ color: colors.slate }}>Assurance décennale / responsabilité civile *</div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Assureur</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : AXA, MAAF, SMABTP" value={local.insuranceName || ""} onChange={(e) => patch({ insuranceName: e.target.value })} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>N° de contrat</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.insurancePolicy || ""} onChange={(e) => patch({ insurancePolicy: e.target.value })} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Couverture géographique</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : France métropolitaine" value={local.insuranceZone || ""} onChange={(e) => patch({ insuranceZone: e.target.value })} />
+                </div>
+              </div>
+              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Coordonnées de l'assureur, numéro du contrat et zone couverte : mention obligatoire sur les devis et factures des professionnels soumis à l'obligation d'assurance décennale (art. L243-2 du Code des assurances).</p>
+              <div className="mt-3 mb-1 text-xs font-semibold" style={{ color: colors.slate }}>Médiateur de la consommation (clients particuliers)</div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Nom du médiateur</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : Médiateur de la FFB, CM2C…" value={local.mediatorName || ""} onChange={(e) => patch({ mediatorName: e.target.value })} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Site ou adresse du médiateur</label>
+                  <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="https://… ou adresse postale" value={local.mediatorContact || ""} onChange={(e) => patch({ mediatorContact: e.target.value })} />
+                </div>
+              </div>
+              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Tout professionnel qui vend à des particuliers doit leur communiquer les coordonnées du médiateur de la consommation dont il relève (art. L616-1 du Code de la consommation). Laisse vide si tu ne travailles qu'avec des professionnels.</p>
             </div>
           )}
           <div className="rounded-lg p-3" style={{ background: colors.paper }}>
@@ -16597,5 +16686,5 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
-  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView,
+  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
 };

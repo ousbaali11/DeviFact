@@ -111,6 +111,6 @@ describe("application complète → Documents de stock", () => {
       await act(async () => { row.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
       expect(container.textContent).toContain("Colle");
       await unmount();
-    });
+    }, 30000); // l'application complète met plusieurs secondes à se charger quand toute la suite tourne en parallèle
   }
 });
