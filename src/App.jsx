@@ -1360,7 +1360,7 @@ function accountingLinesOf(d) {
 // éventuelles, et calcul automatique des dates de garantie légales
 // françaises à partir de la date de réception effective.
 function emptyReserve() {
-  return { id: nextId("rv"), description: "", localisation: "", delaiJours: 30, levee: false };
+  return { id: nextId("rv"), description: "", localisation: "", delaiJours: 30, levee: false, dateLevee: "" };
 }
 
 function newPvReceptionDocument(documents) {
@@ -1368,10 +1368,13 @@ function newPvReceptionDocument(documents) {
   return {
     id: nextId("doc"),
     type: "pv_reception",
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "pv_reception"),
     issueDate: today,
     marcheNumero: "",
     objet: "",
+    lieuChantier: "",
+    maitreOeuvre: "",
     dateDebutTravaux: "",
     dateReceptionEffective: today,
     typeReception: "sans_reserves", // sans_reserves | avec_reserves | refusee
@@ -1861,6 +1864,15 @@ const REQUIRED_FIELD_RULES = {
     { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
     { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
   ],
+  // PV de réception : parties, objet, date de réception (point de départ des
+  // garanties, art. 1792-6 C. civ.), et des réserves si la réception en comporte.
+  pv_reception: [
+    { label: "Nom de l'entreprise", test: (d) => hasText(d.company?.name) },
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+    { label: "Objet", test: (d) => hasText(d.objet) },
+    { label: "Date de réception effective", test: (d) => hasText(d.dateReceptionEffective) },
+    { label: "Au moins une réserve (réception avec réserves)", test: (d) => d.typeReception !== "avec_reserves" || (Array.isArray(d.reserves) && d.reserves.some((r) => hasText(r.description))) },
+  ],
   // Contrat de chantier : parties, objet, lieu et prix.
   contrat: [
     { label: "Nom de l'entreprise", test: (d) => hasText(d.company?.name) },
@@ -1955,7 +1967,7 @@ function isDocumentEmpty(doc) {
   const specificFields = {
     situation: ["objet", "marcheNumero", "periodeDebut", "chantier", "paymentTerms", "visaMaitreOeuvre"],
     revision: ["objet", "marcheNumero", "dateDemarrage"],
-    pv_reception: ["objet", "marcheNumero"],
+    pv_reception: ["objet", "marcheNumero", "lieuChantier", "maitreOeuvre", "dateDebutTravaux"],
     rapport: ["motifAppel", "diagnostic", "travauxRealises", "adresseIntervention", "technicien"],
     contrat: ["objetTravaux", "montantTotalHT", "lieuTravaux", "devisRef", "lieuSignature"],
     relance: ["factureRef", "montantDu", "signataire"],
@@ -2723,6 +2735,9 @@ function DeviFactAppInner() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [batchExportDoc, setBatchExportDoc] = useState(null);
   const [batchExporting, setBatchExporting] = useState(false);
+  // Adresses signées des photos du document en cours d'export groupé
+  // (auparavant les photos manquaient dans le PDF groupé).
+  const [batchPhotoUrls, setBatchPhotoUrls] = useState({});
   const batchPrintRef = useRef(null);
   const [splitNotice, setSplitNotice] = useState(null);
   const [savingPlanSettings, setSavingPlanSettings] = useState(false);
@@ -4024,11 +4039,12 @@ function DeviFactAppInner() {
           rows.push(["PV DE RÉCEPTION", doc.docNumber]);
           rows.push(["Date de réception", doc.dateReceptionEffective ? fr(doc.dateReceptionEffective) : ""]);
           rows.push(["Marché N°", doc.marcheNumero || ""]);
+          if (doc.lieuChantier) rows.push(["Lieu du chantier", doc.lieuChantier]);
           rows.push(["Client", doc.client?.name || ""]);
           rows.push(["Type de réception", (PV_TYPES[doc.typeReception] || {}).label || ""]);
           rows.push([]);
-          rows.push(["Réserves", "Localisation", "Délai (jours)", "Levée"]);
-          (doc.reserves || []).forEach((r) => rows.push([r.description, r.localisation, r.delaiJours, r.levee ? "Oui" : "Non"]));
+          rows.push(["Réserves", "Localisation", "Délai (jours)", "Levée", "Levée le"]);
+          (doc.reserves || []).forEach((r) => rows.push([r.description, r.localisation, r.delaiJours, r.levee ? "Oui" : "Non", r.levee && r.dateLevee ? fr(r.dateLevee) : ""]));
         } else if (type === "rapport") {
           rows.push(["RAPPORT D'INTERVENTION", doc.docNumber]);
           rows.push(["Date", fr(doc.issueDate)]);
@@ -4115,6 +4131,11 @@ function DeviFactAppInner() {
     const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: isRevision ? "landscape" : "portrait" });
     try {
       for (let i = 0; i < docs.length; i++) {
+        let photoUrls = {};
+        if ((docs[i].photos || []).length) {
+          try { photoUrls = await signPhotoUrls(docs[i].photos); } catch (err) { console.error("Photos indisponibles pour l'export groupé", err); }
+        }
+        setBatchPhotoUrls(photoUrls);
         setBatchExportDoc(docs[i]);
         // Laisse React monter/mettre à jour le rendu caché avant de capturer
         // (marge un peu large : les révisions à plusieurs secteurs ont
@@ -4124,6 +4145,8 @@ function DeviFactAppInner() {
         const el = batchPrintRef.current;
         if (!el) continue;
         el.style.display = "block";
+        // Photos : attend leur chargement avant la capture.
+        await Promise.all([...el.querySelectorAll("img")].map((img) => (img.complete ? null : new Promise((res) => { img.onload = res; img.onerror = res; }))));
         const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: siteSettings?.pdfBackground || "#FBF7EF" });
         const imgData = canvas.toDataURL("image/jpeg", 0.95);
         const pageWidth = pdf.internal.pageSize.getWidth();
@@ -4146,6 +4169,7 @@ function DeviFactAppInner() {
       alert("Impossible de générer le PDF groupé. Réessaie, et préviens-moi si ça persiste.");
     } finally {
       setBatchExportDoc(null);
+      setBatchPhotoUrls({});
       setBatchExporting(false);
     }
   }
@@ -4703,9 +4727,9 @@ function DeviFactAppInner() {
           {batchExportDoc && (() => {
             const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
             if (batchExportDoc.type === "revision") return <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
-            if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} photoUrls={batchPhotoUrls} />;
+            if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} />;
+            if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} />;
             if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
@@ -5219,9 +5243,9 @@ function DeviFactAppInner() {
         {batchExportDoc && (() => {
           const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
           if (batchExportDoc.type === "revision") return <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
-          if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} photoUrls={batchPhotoUrls} />;
+          if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} />;
+          if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} />;
           if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
@@ -8597,6 +8621,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
         {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
       </div>
       {doc.objet && <div style={{ marginTop: "10px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>{doc.objet}</div>}
+      {(doc.lieuChantier || "").trim() && <div style={{ marginTop: "4px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>Lieu du chantier : {doc.lieuChantier.trim()}</div>}
 
       <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
         <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
@@ -8609,9 +8634,10 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
         </div>
       </div>
 
-      <div style={{ marginTop: "16px", display: "flex", gap: "16px", position: "relative", zIndex: 1 }}>
+      <div style={{ marginTop: "16px", display: "flex", flexWrap: "wrap", gap: "16px", position: "relative", zIndex: 1 }}>
         {doc.dateDebutTravaux && <div style={{ fontSize: "9pt" }}>Début des travaux : <strong>{new Date(doc.dateDebutTravaux).toLocaleDateString("fr-FR")}</strong></div>}
         <div style={{ fontSize: "9pt" }}>Date de réception effective : <strong>{doc.dateReceptionEffective ? new Date(doc.dateReceptionEffective).toLocaleDateString("fr-FR") : "—"}</strong></div>
+        {(doc.maitreOeuvre || "").trim() && <div style={{ fontSize: "9pt" }}>Maître d'œuvre présent : <strong>{doc.maitreOeuvre.trim()}</strong></div>}
       </div>
 
       <div style={{ marginTop: "14px", padding: "10px 14px", borderRadius: "4px", background: typeInfo.color, color: "white", fontWeight: 700, fontSize: "11pt", textAlign: "center", position: "relative", zIndex: 1 }}>
@@ -8636,7 +8662,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
                   <td style={{ padding: "5px 4px" }}>{r.description}</td>
                   <td style={{ padding: "5px 4px" }}>{r.localisation}</td>
                   <td style={{ padding: "5px 4px", textAlign: "right" }}>{r.delaiJours} jours</td>
-                  <td style={{ padding: "5px 4px", textAlign: "center" }}>{r.levee ? "Levée" : "Non levée"}</td>
+                  <td style={{ padding: "5px 4px", textAlign: "center" }}>{r.levee ? (r.dateLevee ? `Levée le ${new Date(r.dateLevee).toLocaleDateString("fr-FR")}` : "Levée") : "Non levée"}</td>
                 </tr>
               ))}
             </tbody>
@@ -8647,6 +8673,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
       {garanties && (
         <div style={{ marginTop: "18px", padding: "10px 14px", borderRadius: "4px", background: box, position: "relative", zIndex: 1 }}>
           <div style={{ fontWeight: 700, marginBottom: "6px", fontSize: "9.5pt" }}>Garanties légales (calculées à partir de la date de réception)</div>
+          <div style={{ fontSize: "8pt", color: inkSoft, marginBottom: "4px" }}>La réception, avec ou sans réserves, est le point de départ des garanties de parfait achèvement, de bon fonctionnement et décennale (articles 1792, 1792-3, 1792-4-1 et 1792-6 du Code civil).</div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5pt", padding: "2px 0" }}><span>Garantie de parfait achèvement (1 an)</span><span>{garanties.parfaitAchevement.toLocaleDateString("fr-FR")}</span></div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5pt", padding: "2px 0" }}><span>Garantie biennale — équipements (2 ans)</span><span>{garanties.biennale.toLocaleDateString("fr-FR")}</span></div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "8.5pt", padding: "2px 0" }}><span>Garantie décennale — structure (10 ans)</span><span>{garanties.decennale.toLocaleDateString("fr-FR")}</span></div>
@@ -8813,8 +8840,11 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
     rows.push(["Date de réception", localDoc.dateReceptionEffective ? fr(localDoc.dateReceptionEffective) : ""]);
     rows.push(["Marché N°", localDoc.marcheNumero || ""]);
     rows.push(["Objet", localDoc.objet || ""]);
+    if (localDoc.lieuChantier) rows.push(["Lieu du chantier", localDoc.lieuChantier]);
+    if (localDoc.dateDebutTravaux) rows.push(["Début des travaux", fr(localDoc.dateDebutTravaux)]);
     rows.push(["Entreprise", localDoc.company?.name || ""]);
     rows.push(["Client", localDoc.client?.name || ""]);
+    if (localDoc.maitreOeuvre) rows.push(["Maître d'œuvre présent", localDoc.maitreOeuvre]);
     rows.push(["Type de réception", (PV_TYPES[localDoc.typeReception] || {}).label || ""]);
     if (garanties) {
       rows.push([]);
@@ -8825,8 +8855,8 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
     }
     if ((localDoc.reserves || []).length) {
       rows.push([]);
-      rows.push(["Réserves", "Localisation", "Délai (jours)", "Levée"]);
-      localDoc.reserves.forEach((r) => rows.push([r.description, r.localisation, r.delaiJours, r.levee ? "Oui" : "Non"]));
+      rows.push(["Réserves", "Localisation", "Délai (jours)", "Levée", "Levée le"]);
+      localDoc.reserves.forEach((r) => rows.push([r.description, r.localisation, r.delaiJours, r.levee ? "Oui" : "Non", r.levee && r.dateLevee ? fr(r.dateLevee) : ""]));
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 32 }, { wch: 20 }, { wch: 14 }, { wch: 10 }];
@@ -8873,28 +8903,44 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
               <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.marcheNumero || ""} onChange={(e) => patch({ marcheNumero: e.target.value })} />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date de réception effective</label>
-              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateReceptionEffective || ""} onChange={(e) => patch({ dateReceptionEffective: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date de réception effective *</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${localDoc.dateReceptionEffective ? colors.line : colors.brick}` }} value={localDoc.dateReceptionEffective || ""} onChange={(e) => patch({ dateReceptionEffective: e.target.value })} />
+              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Point de départ des garanties légales (art. 1792-6 du Code civil).</p>
+            </div>
+          </div>
+          <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires pour enregistrer le procès-verbal.</p>
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Début des travaux (optionnel)</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateDebutTravaux || ""} onChange={(e) => patch({ dateDebutTravaux: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Lieu du chantier (optionnel)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse du chantier" value={localDoc.lieuChantier || ""} onChange={(e) => patch({ lieuChantier: e.target.value })} />
             </div>
           </div>
           <div className="mb-6">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet</label>
-            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet *</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.objet || "").trim() ? colors.line : colors.brick}` }} value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
           </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise *</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.company.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
             </div>
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client *</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
             </div>
           </div>
 
+          <div className="mb-6 max-w-sm">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Maître d'œuvre présent (optionnel)</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom de l'architecte ou du bureau d'études" value={localDoc.maitreOeuvre || ""} onChange={(e) => patch({ maitreOeuvre: e.target.value })} />
+          </div>
           <div className="mb-6">
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Type de réception</label>
             <div className="flex flex-wrap gap-2">
@@ -8919,12 +8965,13 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
                       <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Description de la réserve" value={r.description} onChange={(e) => patchReserve(r.id, { description: e.target.value })} />
                       <button onClick={() => removeReserve(r.id)} title="Supprimer cette réserve" style={{ color: colors.brick }}><Trash2 size={14} /></button>
                     </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
                       <input className="df-input rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Localisation" value={r.localisation} onChange={(e) => patchReserve(r.id, { localisation: e.target.value })} />
                       <input type="number" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Délai (jours)" value={r.delaiJours} onChange={(e) => patchReserve(r.id, { delaiJours: e.target.value })} />
                       <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}>
                         <input type="checkbox" checked={r.levee} onChange={(e) => patchReserve(r.id, { levee: e.target.checked })} /> Levée
                       </label>
+                      {r.levee && <input type="date" className="df-input df-mono rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} title="Date effective de levée de la réserve" value={r.dateLevee || ""} onChange={(e) => patchReserve(r.id, { dateLevee: e.target.value })} />}
                     </div>
                   </div>
                 ))}
@@ -8961,7 +9008,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
       <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
     </div>
   );
@@ -17312,5 +17359,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
