@@ -54,7 +54,10 @@ describe("éditeur générique (devis, facture, proforma, acompte, avoir, comman
       const html = await renderOnce(
         <Editor {...common} doc={newDocument(type, [])} clients={[]} products={products} stockByProduct={{ p1: 4 }} companyProfile={emptyCompanyProfile()} onConvert={noop} onSaveClient={noop} onSaveProduct={noop} onSplit={noop} splitNotice={null} onOpenSplitDoc={noop} onDismissSplitNotice={noop} />,
       );
-      expect(html).toContain("Depuis la bibliothèque");
+      // Facture d'acompte : la ligne facturée est générée par le bloc acompte,
+      // la section Prestations (et son bouton) n'est pas affichée.
+      if (type === "acompte") expect(html).not.toContain("Depuis la bibliothèque");
+      else expect(html).toContain("Depuis la bibliothèque");
     });
   }
 });

@@ -1751,6 +1751,14 @@ const hasOneLine = (d) => Array.isArray(d.items) && d.items.some((it) => it.type
 const REQUIRED_FIELD_RULES = {
   // Avoir : facture rectificative, elle doit référencer la facture d'origine
   // et indiquer le motif (art. 289 du CGI).
+  // Facture d'acompte : devis ou marché de référence, montant du marché et
+  // montant de l'acompte (qui génère la ligne facturée), client.
+  acompte: [
+    { label: "Devis / marché d'origine (référence)", test: (d) => hasText(d.sourceDevisRef) },
+    { label: "Montant total du marché HT", test: (d) => (Number(d.montantMarcheHT) || 0) > 0 },
+    { label: "Montant de l'acompte (pourcentage ou montant fixe)", test: (d) => acompteAmountOf(d) > 0 || hasOneLine(d) },
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+  ],
   avoir: [
     { label: "Facture d'origine (numéro)", test: (d) => hasText(d.factureOrigineRef) },
     { label: "Motif de l'avoir", test: (d) => hasText(d.motifAvoir) },
@@ -1761,6 +1769,27 @@ const REQUIRED_FIELD_RULES = {
 function documentValidationErrors(doc) {
   if (!doc) return [];
   return (REQUIRED_FIELD_RULES[doc.type] || []).filter((r) => !r.test(doc)).map((r) => r.label);
+}
+
+// Facture d'acompte : la ligne facturée est GÉNÉRÉE par le bloc acompte
+// (référence du devis, montant du marché, pourcentage ou montant fixe, TVA)
+// pour qu'un seul montant existe sur le PDF. Les documents plus anciens
+// dont les lignes ont été saisies à la main sont laissés tels quels.
+const ACOMPTE_LINE_ID = "acompte-line";
+function acompteAmountOf(doc) {
+  const marche = Number(doc?.montantMarcheHT) || 0;
+  const raw = (doc?.acompteMode || "pourcentage") === "pourcentage" ? (marche * (Number(doc?.acomptePourcentage) || 0)) / 100 : Number(doc?.acompteMontantFixe) || 0;
+  return Math.round(raw * 100) / 100;
+}
+function acompteLineFor(doc) {
+  const amount = acompteAmountOf(doc);
+  if (!(amount > 0)) return null;
+  const pct = (doc.acompteMode || "pourcentage") === "pourcentage" ? `de ${Number(doc.acomptePourcentage) || 0} % ` : "";
+  const ref = (doc.sourceDevisRef || "").trim();
+  return { id: ACOMPTE_LINE_ID, type: "line", designation: `Acompte ${pct}sur ${ref ? `le devis / marché ${ref}` : "le marché"}`, details: [], qty: 1, unit: "forfait", unitPrice: amount, tva: Number(doc.acompteTva ?? 20) || 0, discount: 0 };
+}
+function hasManualAcompteLines(doc) {
+  return (doc?.items || []).some((it) => it.id !== ACOMPTE_LINE_ID && (it.type === "section" || (it.type === "line" && (hasText(it.designation) || Number(it.unitPrice) > 0))));
 }
 
 function isDocumentEmpty(doc) {
@@ -1781,6 +1810,7 @@ function isDocumentEmpty(doc) {
     relance: ["factureRef", "montantDu"],
     planning: ["objet", "marcheNumero"],
     avoir: ["factureOrigineRef", "factureOrigineDate", "motifAvoir", "modeRemboursement"],
+    acompte: ["sourceDevisRef", "montantMarcheHT", "acompteMontantFixe"],
   };
   if ((specificFields[doc.type] || []).some((f) => String(doc[f] || "").trim())) return false;
 
@@ -1844,7 +1874,7 @@ function newDocument(type, documents) {
   // savoir combien reste à facturer après cet acompte — sans ça, ce
   // n'est qu'une facture ordinaire mal nommée.
   if (type === "acompte") {
-    return { ...base, sourceDevisRef: "", montantMarcheHT: "", acompteMode: "pourcentage", acomptePourcentage: 30, acompteMontantFixe: "", notes: "" };
+    return { ...base, sourceDevisRef: "", montantMarcheHT: "", acompteMode: "pourcentage", acomptePourcentage: 30, acompteMontantFixe: "", acompteTva: 20, notes: "", showValidity: false };
   }
   // Avoir : la référence à la facture d'origine et le motif sont
   // obligatoires pour qu'un avoir soit valide (article 289 du CGI).
@@ -2083,7 +2113,9 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   const companyName = companyDisplayName(legalCompanyOf(doc.company, companyProfile));
   // Acompte demandé (en %) : devis et documents assimilés, jamais sur une
   // facture (acompte déjà versé) ni sur un avoir.
-  const showAcompteDemande = doc.type !== "facture" && doc.type !== "avoir" && Number(doc.acompte) > 0;
+  const showAcompteDemande = doc.type !== "facture" && doc.type !== "avoir" && doc.type !== "acompte" && Number(doc.acompte) > 0;
+  // Facture et facture d'acompte : échéance de règlement ; autres : validité.
+  const isInvoiceLike = doc.type === "facture" || doc.type === "acompte";
   const legalLines = legalMentionLines(doc, companyProfile);
   const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
@@ -2113,8 +2145,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
             <span style={mono}>{doc.docNumber || "—"}/{new Date(doc.issueDate).getFullYear()}</span>
           </div>
           <div style={{ fontSize: "9.5pt", color: inkSoft, marginTop: "4px" }}>Date d'émission : {frLong(doc.issueDate)}</div>
-          {(doc.type === "facture" || (doc.type !== "avoir" && doc.showValidity !== false)) && (
-            <div style={{ fontSize: "9.5pt", color: inkSoft }}>{doc.type !== "facture" ? `Valable jusqu'au ${frLong(validityDate)}` : `Échéance : ${frLong(dueDate)}`}</div>
+          {(isInvoiceLike || (doc.type !== "avoir" && doc.showValidity !== false)) && (
+            <div style={{ fontSize: "9.5pt", color: inkSoft }}>{!isInvoiceLike ? `Valable jusqu'au ${frLong(validityDate)}` : `Échéance : ${frLong(dueDate)}`}</div>
           )}
         </div>
         <div style={{ textAlign: "right" }}>
@@ -2160,6 +2192,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
                 <span>Reste à facturer après cet acompte : <strong style={{ color: ink }}>{formatMoney(reste, doc.currency)}</strong></span>
               </div>
             )}
+            <div style={{ marginTop: "4px" }}>Cet acompte sera déduit de la facture définitive.</div>
           </div>
         );
       })()}
@@ -15520,6 +15553,22 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   // un produit est inférieur au prix de vente HT de référence du produit.
   const productById = useMemo(() => new Map((products || []).map((p) => [p.id, p])), [products]);
   const lineWarnings = useMemo(() => priceWarnings(localDoc.items, productById), [localDoc.items, productById]);
+  // Facture d'acompte : ligne facturée générée par le bloc acompte (voir
+  // acompteLineFor). Références stables pour ne pas relancer l'effet à
+  // chaque rendu : seules les valeurs du bloc déclenchent la mise à jour.
+  const acompteAuto = localDoc.type === "acompte" && !hasManualAcompteLines(localDoc);
+  const acompteRef = useRef({ localDoc, patch });
+  acompteRef.current = { localDoc, patch };
+  useEffect(() => {
+    if (!acompteAuto) return;
+    const { localDoc: d, patch: p } = acompteRef.current;
+    const line = acompteLineFor(d);
+    const current = (d.items || []).filter((it) => it.type === "line");
+    if (!line) { if (current.length) p({ items: [] }); return; }
+    const cur = current[0];
+    const same = current.length === 1 && cur.id === ACOMPTE_LINE_ID && cur.designation === line.designation && Number(cur.unitPrice) === line.unitPrice && Number(cur.tva) === line.tva && Number(cur.qty) === 1;
+    if (!same) p({ items: [line] });
+  }, [acompteAuto, localDoc.sourceDevisRef, localDoc.montantMarcheHT, localDoc.acompteMode, localDoc.acomptePourcentage, localDoc.acompteMontantFixe, localDoc.acompteTva]);
   const libraryProducts = (products || []).filter((p) => p.is_active && (!p.quantity_restricted || Number(stockByProduct[p.id] ?? 0) > 0));
   function saveLineAsPrestation(it) {
     if (!it.designation.trim()) { alert("Renseigne d'abord une désignation pour cette ligne avant de l'enregistrer."); return; }
@@ -15809,8 +15858,9 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     const rows = [];
     rows.push([docTypeLabel(localDoc.type).toUpperCase(), localDoc.docNumber]);
     rows.push(["Date d'émission", frLong(localDoc.issueDate)]);
-    if (localDoc.type === "facture" || (localDoc.type !== "avoir" && localDoc.showValidity !== false)) {
-      rows.push([localDoc.type !== "facture" ? "Valable jusqu'au" : "Échéance", frLong(localDoc.type !== "facture" ? validityDate : dueDate)]);
+    const invoiceLikeXls = localDoc.type === "facture" || localDoc.type === "acompte";
+    if (invoiceLikeXls || (localDoc.type !== "avoir" && localDoc.showValidity !== false)) {
+      rows.push([!invoiceLikeXls ? "Valable jusqu'au" : "Échéance", frLong(!invoiceLikeXls ? validityDate : dueDate)]);
     }
     rows.push(["Devise", localDoc.currency || "EUR"]);
     rows.push([]);
@@ -15818,6 +15868,11 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     rows.push(["SIRET", localDoc.company.siret]);
     rows.push([]);
     rows.push(["Client", localDoc.client.name]);
+    if (localDoc.type === "acompte") {
+      rows.push(["Devis / marché d'origine", localDoc.sourceDevisRef || ""]);
+      rows.push(["Montant total du marché HT", Number(localDoc.montantMarcheHT) || 0]);
+      rows.push(["Reste à facturer après cet acompte", Number(((Number(localDoc.montantMarcheHT) || 0) - acompteAmountOf(localDoc)).toFixed(2))]);
+    }
     if (localDoc.type === "avoir") {
       rows.push(["Facture d'origine", localDoc.factureOrigineRef || ""]);
       if (localDoc.factureOrigineDate) rows.push(["Date de la facture d'origine", frLong(localDoc.factureOrigineDate)]);
@@ -15854,7 +15909,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       }
       Object.entries(tvaGroups).forEach(([rate, amount]) => rows.push(["", "", "", "", "", "", `TVA ${rate}%`, Number(amount.toFixed(2))]));
       rows.push(["", "", "", "", "", "", "Total TTC", Number(totalTTC.toFixed(2))]);
-      if (localDoc.type !== "facture" && localDoc.type !== "avoir" && Number(localDoc.acompte) > 0) {
+      if (localDoc.type !== "facture" && localDoc.type !== "avoir" && localDoc.type !== "acompte" && Number(localDoc.acompte) > 0) {
         rows.push(["", "", "", "", "", "", `Acompte (${localDoc.acompte}%)`, Number(acompteAmount.toFixed(2))]);
         rows.push(["", "", "", "", "", "", "Reste à payer", Number(resteAPayer.toFixed(2))]);
       }
@@ -16010,7 +16065,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-2 text-sm">
               <label className="self-center text-right" style={{ color: colors.inkSoft }}>Émis le</label>
               <input type="date" className="df-input df-mono rounded-md px-2 py-1" style={inputStyle} value={localDoc.issueDate} onChange={(e) => patch({ issueDate: e.target.value })} />
-              {localDoc.type === "avoir" ? null : localDoc.type !== "facture" ? (
+              {localDoc.type === "avoir" ? null : localDoc.type !== "facture" && localDoc.type !== "acompte" ? (
                 <>
                   <label className="self-center text-right" style={{ color: colors.inkSoft }}>Validité (jours)</label>
                   <input type="number" className="df-input df-mono rounded-md px-2 py-1" style={inputStyle} value={localDoc.validityDays} onChange={(e) => patch({ validityDays: Number(e.target.value) || 0 })} />
@@ -16322,29 +16377,35 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-xs" style={{ color: colors.inkSoft }}>
-                  Devis / marché d'origine (référence)
-                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : DEV-014" value={localDoc.sourceDevisRef || ""} onChange={(e) => patch({ sourceDevisRef: e.target.value })} />
+                  Devis / marché d'origine (référence) *
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={{ ...inputStyle, borderColor: (localDoc.sourceDevisRef || "").trim() ? colors.line : colors.brick }} placeholder="ex : DEV-014" value={localDoc.sourceDevisRef || ""} onChange={(e) => patch({ sourceDevisRef: e.target.value })} />
                 </label>
                 <label className="text-xs" style={{ color: colors.inkSoft }}>
-                  Montant total du marché HT
-                  <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.montantMarcheHT || ""} onChange={(e) => patch({ montantMarcheHT: e.target.value })} />
+                  Montant total du marché HT *
+                  <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={{ ...inputStyle, borderColor: (Number(localDoc.montantMarcheHT) || 0) > 0 ? colors.line : colors.brick }} value={localDoc.montantMarcheHT || ""} onChange={(e) => patch({ montantMarcheHT: e.target.value })} />
                 </label>
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <button onClick={() => patch({ acompteMode: "pourcentage" })} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: (localDoc.acompteMode || "pourcentage") === "pourcentage" ? colors.ink : colors.paper, color: (localDoc.acompteMode || "pourcentage") === "pourcentage" ? "white" : colors.inkSoft }}>% du marché</button>
                 <button onClick={() => patch({ acompteMode: "montant_fixe" })} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: localDoc.acompteMode === "montant_fixe" ? colors.ink : colors.paper, color: localDoc.acompteMode === "montant_fixe" ? "white" : colors.inkSoft }}>Montant fixe</button>
               </div>
-              {(localDoc.acompteMode || "pourcentage") === "pourcentage" ? (
-                <label className="mt-3 block w-40 text-xs" style={{ color: colors.inkSoft }}>
-                  Pourcentage d'acompte
-                  <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.acomptePourcentage ?? 30} onChange={(e) => patch({ acomptePourcentage: e.target.value })} />
+              <div className="mt-3 flex flex-wrap gap-3">
+                {(localDoc.acompteMode || "pourcentage") === "pourcentage" ? (
+                  <label className="block w-40 text-xs" style={{ color: colors.inkSoft }}>
+                    Pourcentage d'acompte *
+                    <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.acomptePourcentage ?? 30} onChange={(e) => patch({ acomptePourcentage: e.target.value })} />
+                  </label>
+                ) : (
+                  <label className="block w-40 text-xs" style={{ color: colors.inkSoft }}>
+                    Montant fixe HT *
+                    <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.acompteMontantFixe || ""} onChange={(e) => patch({ acompteMontantFixe: e.target.value })} />
+                  </label>
+                )}
+                <label className="block w-28 text-xs" style={{ color: colors.inkSoft }}>
+                  TVA de l'acompte (%)
+                  <input type="number" step="0.1" min="0" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.acompteTva ?? 20} onChange={(e) => patch({ acompteTva: e.target.value })} />
                 </label>
-              ) : (
-                <label className="mt-3 block w-40 text-xs" style={{ color: colors.inkSoft }}>
-                  Montant fixe HT
-                  <input type="number" className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.acompteMontantFixe || ""} onChange={(e) => patch({ acompteMontantFixe: e.target.value })} />
-                </label>
-              )}
+              </div>
               {(() => {
                 const montantMarche = Number(localDoc.montantMarcheHT) || 0;
                 const montantAcompte = (localDoc.acompteMode || "pourcentage") === "pourcentage" ? (montantMarche * (Number(localDoc.acomptePourcentage) || 0)) / 100 : (Number(localDoc.acompteMontantFixe) || 0);
@@ -16356,7 +16417,21 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   </div>
                 );
               })()}
-              <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Astuce : ajoute une ligne "Acompte sur devis N°..." dans les prestations ci-dessous, avec le montant calculé ci-dessus, pour qu'il apparaisse clairement sur le PDF.</p>
+              {acompteAuto ? (() => {
+                const gen = acompteLineFor(localDoc);
+                return gen ? (
+                  <div className="mt-3 rounded-lg border p-3 text-xs" style={{ borderColor: colors.moss, background: `${colors.moss}0D` }} data-testid="acompte-generated-line">
+                    <div className="mb-1 font-semibold" style={{ color: colors.moss }}>Ligne facturée (générée automatiquement)</div>
+                    <div className="flex flex-wrap justify-between gap-2"><span>{gen.designation}</span><span className="df-mono">{formatMoney(gen.unitPrice, localDoc.currency)} HT · TVA {gen.tva} % · {formatMoney(gen.unitPrice * (1 + gen.tva / 100), localDoc.currency)} TTC</span></div>
+                    <div className="mt-1" style={{ color: colors.inkSoft }}>Cet acompte sera déduit de la facture définitive. Modifie le bloc ci-dessus pour changer le montant : c'est le seul montant qui figure sur le PDF.</div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs" style={{ color: colors.brick }}>Renseigne le montant du marché et le pourcentage (ou le montant fixe) : la ligne facturée sera générée automatiquement.</p>
+                );
+              })() : (
+                <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Cette facture d'acompte contient des lignes saisies à la main (ancien fonctionnement) : elles sont conservées telles quelles. Pour passer à la ligne générée automatiquement, supprime ces lignes.</p>
+              )}
+              <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires pour enregistrer la facture d'acompte. Le nom du client l'est aussi.</p>
             </div>
           )}
 
@@ -16472,6 +16547,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             </div>
           )}
 
+          {!acompteAuto && (<>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Prestations</div>
             <div className="no-print flex flex-wrap gap-2">
@@ -16664,6 +16740,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             ))}
           </div>
 
+          </>)}
+
           <div className="mt-8 flex flex-wrap items-start justify-between gap-8 border-t pt-8" style={{ borderColor: colors.line }}>
             <div className="flex flex-wrap gap-6">
               <label className="text-sm">
@@ -16675,7 +16753,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte déjà versé ({currencyLabel(localDoc.currency || "EUR")} TTC)</div>
                   <input type="number" min="0" step="0.01" className="df-input df-mono w-32 rounded-md px-2 py-1.5" style={inputStyle} placeholder="0,00" value={localDoc.acompteVerse ?? ""} onChange={(e) => patch({ acompteVerse: e.target.value })} title="Montant déjà réglé par le client (virement, chèque, espèces…), déduit du total à régler" />
                 </label>
-              ) : localDoc.type === "avoir" ? null : (
+              ) : localDoc.type === "avoir" || localDoc.type === "acompte" ? null : (
                 <label className="text-sm">
                   <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte demandé (%)</div>
                   <input type="number" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.acompte} onChange={(e) => patch({ acompte: e.target.value })} />
@@ -16697,7 +16775,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                 {Object.entries(tvaGroups).map(([rate, amount]) => (
                   <div key={rate} className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>TVA {rate}%</span><span>{formatMoney(amount, localDoc.currency)}</span></div>
                 ))}
-                {localDoc.type !== "facture" && Number(localDoc.acompte) > 0 && (
+                {localDoc.type !== "facture" && localDoc.type !== "avoir" && localDoc.type !== "acompte" && Number(localDoc.acompte) > 0 && (
                   <>
                     <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte ({localDoc.acompte}%)</span><span>- {formatMoney(acompteAmount, localDoc.currency)}</span></div>
                     <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Reste à payer</span><span>{formatMoney(resteAPayer, localDoc.currency)}</span></div>
@@ -16811,5 +16889,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, legalMentionLines, computeTotals, documentValidationErrors, isDocumentEmpty, FinalizeButton,
+  PrintDocument, legalMentionLines, computeTotals, documentValidationErrors, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
