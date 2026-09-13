@@ -244,16 +244,20 @@ function InstagramIcon({ size = 20 }) {
 // comme "Terminé" une fois cliqué. Reste discret et informatif une
 // fois déjà cliqué, plutôt que de disparaître (pour qu'on sache
 // toujours où on en est en revenant sur ce document plus tard).
-function FinalizeButton({ doc, onFinalize, siteSettings }) {
+function FinalizeButton({ doc, onFinalize, siteSettings, errors = [] }) {
   const isDone = doc?.workStage === "termine";
   const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  const blocked = errors.length > 0;
   return (
-    <div className="no-print flex items-center justify-end gap-2 border-t px-6 py-4" style={{ borderColor: colors.line }}>
-      {isDone && <span className="text-xs" style={{ color: colors.inkSoft }}>Marqué comme terminé — modifie-le et enregistre à nouveau si besoin.</span>}
+    <div className="no-print flex flex-wrap items-center justify-end gap-2 border-t px-6 py-4" style={{ borderColor: colors.line }}>
+      {isDone && !blocked && <span className="text-xs" style={{ color: colors.inkSoft }}>Marqué comme terminé — modifie-le et enregistre à nouveau si besoin.</span>}
+      {blocked && <span className="text-xs" style={{ color: colors.brick }} data-testid="required-missing">Champs obligatoires manquants : {errors.join(", ")}</span>}
       <button
         onClick={onFinalize}
+        disabled={blocked}
+        title={blocked ? "Renseigne d'abord les champs obligatoires (marqués *)" : undefined}
         className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium"
-        style={isDone ? { background: isAdvanced ? adv.moss : colors.moss, color: "white" } : isAdvanced ? { background: adv.accent, color: "white" } : { background: colors.brass, color: colors.ink }}
+        style={{ ...(isDone ? { background: isAdvanced ? adv.moss : colors.moss, color: "white" } : isAdvanced ? { background: adv.accent, color: "white" } : { background: colors.brass, color: colors.ink }), ...(blocked ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
       >
         {isDone ? <Check size={16} /> : null} {isDone ? "Terminé" : "Enregistrer"}
       </button>
@@ -555,6 +559,8 @@ const UNIT_OPTIONS = ["", ...UNITS];
 const unitLabel = (u) => u || "— (non précisé)";
 const DEVIS_STATUSES = ["brouillon", "envoyé", "vu", "signé", "refusé", "expiré"];
 const FACTURE_STATUSES = ["brouillon", "envoyée", "payée", "en retard"];
+// Règlement d'un avoir : imputation sur une facture à venir ou remboursement.
+const AVOIR_REGLEMENTS = ["Imputation sur la prochaine facture", "Remboursement par virement", "Remboursement par chèque", "Autre modalité convenue avec le client"];
 const PROFORMA_STATUSES = ["brouillon", "envoyée", "acceptée", "expirée"];
 
 const PLANS = [
@@ -1737,6 +1743,26 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
 // Détecte si un document ne contient encore aucune vraie saisie de la
 // personne — sert à ne jamais enregistrer un service ouvert "pour
 // voir" et refermé aussitôt sans rien avoir écrit dedans.
+// Champs obligatoires par type, contrôlés au clic sur « Enregistrer » /
+// « Terminé » (jamais pendant la saisie : l'enregistrement automatique du
+// brouillon continue). Chaque règle porte le libellé affiché à l'utilisateur.
+const hasText = (v) => !!String(v ?? "").trim();
+const hasOneLine = (d) => Array.isArray(d.items) && d.items.some((it) => it.type === "line" && hasText(it.designation));
+const REQUIRED_FIELD_RULES = {
+  // Avoir : facture rectificative, elle doit référencer la facture d'origine
+  // et indiquer le motif (art. 289 du CGI).
+  avoir: [
+    { label: "Facture d'origine (numéro)", test: (d) => hasText(d.factureOrigineRef) },
+    { label: "Motif de l'avoir", test: (d) => hasText(d.motifAvoir) },
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+    { label: "Au moins une ligne avec une désignation", test: hasOneLine },
+  ],
+};
+function documentValidationErrors(doc) {
+  if (!doc) return [];
+  return (REQUIRED_FIELD_RULES[doc.type] || []).filter((r) => !r.test(doc)).map((r) => r.label);
+}
+
 function isDocumentEmpty(doc) {
   if (!doc) return true;
   if ((doc.client?.name || "").trim()) return false;
@@ -1754,6 +1780,7 @@ function isDocumentEmpty(doc) {
     contrat: ["objetTravaux", "montantTotalHT"],
     relance: ["factureRef", "montantDu"],
     planning: ["objet", "marcheNumero"],
+    avoir: ["factureOrigineRef", "factureOrigineDate", "motifAvoir", "modeRemboursement"],
   };
   if ((specificFields[doc.type] || []).some((f) => String(doc[f] || "").trim())) return false;
 
@@ -1822,7 +1849,9 @@ function newDocument(type, documents) {
   // Avoir : la référence à la facture d'origine et le motif sont
   // obligatoires pour qu'un avoir soit valide (article 289 du CGI).
   if (type === "avoir") {
-    return { ...base, factureOrigineRef: "", motifAvoir: "", notes: "" };
+    // factureOrigineDate et modeRemboursement (imputation ou remboursement)
+    // sont facultatifs ; un avoir n'a pas de « Valable jusqu'au ».
+    return { ...base, factureOrigineRef: "", factureOrigineDate: "", motifAvoir: "", modeRemboursement: "", notes: "", showValidity: false };
   }
   // Bon de commande : s'adresse à un FOURNISSEUR, pas à un client —
   // le champ "client" est réutilisé (même structure nom/adresse) mais
@@ -2052,6 +2081,9 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   const isFreeWatermark = watermarkEnabled; // contrôlé par l'Admin, forfait par forfait
   const hidePrices = doc.type === "livraison" && !doc.showPrices;
   const companyName = companyDisplayName(legalCompanyOf(doc.company, companyProfile));
+  // Acompte demandé (en %) : devis et documents assimilés, jamais sur une
+  // facture (acompte déjà versé) ni sur un avoir.
+  const showAcompteDemande = doc.type !== "facture" && doc.type !== "avoir" && Number(doc.acompte) > 0;
   const legalLines = legalMentionLines(doc, companyProfile);
   const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
@@ -2081,7 +2113,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
             <span style={mono}>{doc.docNumber || "—"}/{new Date(doc.issueDate).getFullYear()}</span>
           </div>
           <div style={{ fontSize: "9.5pt", color: inkSoft, marginTop: "4px" }}>Date d'émission : {frLong(doc.issueDate)}</div>
-          {(doc.type === "facture" || doc.showValidity !== false) && (
+          {(doc.type === "facture" || (doc.type !== "avoir" && doc.showValidity !== false)) && (
             <div style={{ fontSize: "9.5pt", color: inkSoft }}>{doc.type !== "facture" ? `Valable jusqu'au ${frLong(validityDate)}` : `Échéance : ${frLong(dueDate)}`}</div>
           )}
         </div>
@@ -2132,10 +2164,11 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
         );
       })()}
 
-      {doc.type === "avoir" && (doc.factureOrigineRef || doc.motifAvoir) && (
+      {doc.type === "avoir" && (doc.factureOrigineRef || doc.motifAvoir || doc.modeRemboursement) && (
         <div style={{ marginBottom: "18px", padding: "10px 14px", borderRadius: "4px", background: "#F9E3E0", color: "#8A2E1F", fontSize: "9.5pt", position: "relative", zIndex: 1 }}>
-          {doc.factureOrigineRef && <div><strong>AVOIR sur la facture N° {doc.factureOrigineRef}</strong></div>}
+          {doc.factureOrigineRef && <div><strong>AVOIR sur la facture N° {doc.factureOrigineRef}{doc.factureOrigineDate ? ` du ${frLong(doc.factureOrigineDate)}` : ""}</strong></div>}
           {doc.motifAvoir && <div style={{ marginTop: "2px" }}>Motif : {doc.motifAvoir}</div>}
+          {doc.modeRemboursement && <div style={{ marginTop: "2px" }}>Règlement de l'avoir : {doc.modeRemboursement}</div>}
         </div>
       )}
 
@@ -2252,11 +2285,11 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
               <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{renderMarkup(doc.notes)}</div>
             </>
           )}
-          {doc.type !== "facture" && Number(doc.acompte) > 0 && (
+          {showAcompteDemande && (
             <div style={{ marginTop: "6px" }}>Acompte de {doc.acompte}% à la commande : <strong style={mono}>{formatMoney(acompteAmount, doc.currency)}</strong></div>
           )}
           {legalLines.length > 0 && (
-            <div className="print-legal" style={{ marginTop: doc.notes || (doc.type !== "facture" && Number(doc.acompte) > 0) ? "10px" : 0, fontSize: "7.5pt", lineHeight: 1.35, color: inkSoft }}>
+            <div className="print-legal" style={{ marginTop: doc.notes || showAcompteDemande ? "10px" : 0, fontSize: "7.5pt", lineHeight: 1.35, color: inkSoft }}>
               {legalLines.map((l, i) => <div key={i} style={{ marginBottom: "2px" }}>{l}</div>)}
             </div>
           )}
@@ -2290,7 +2323,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
             <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
               <span>{doc.type === "bpu" ? "Montant total estimatif" : "Total TTC"}</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
             </div>
-            {doc.type !== "facture" && Number(doc.acompte) > 0 && (
+            {showAcompteDemande && (
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontWeight: 700, color: brassDark }}>
                 <span>Reste à payer</span><span style={mono}>{formatMoney(resteAPayer, doc.currency)}</span>
               </div>
@@ -3610,6 +3643,11 @@ function DeviFactAppInner() {
     const doc = documents.find((d) => d.id === id) || (pendingDoc?.id === id ? pendingDoc : null);
     if (!doc || isDocumentEmpty(doc)) {
       alert("Il n'y a encore rien à enregistrer — remplis au moins un champ avant.");
+      return;
+    }
+    const missing = documentValidationErrors(doc);
+    if (missing.length) {
+      alert(`Champs obligatoires manquants :\n- ${missing.join("\n- ")}`);
       return;
     }
     updateDoc(id, { workStage: "termine" });
@@ -15771,7 +15809,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     const rows = [];
     rows.push([docTypeLabel(localDoc.type).toUpperCase(), localDoc.docNumber]);
     rows.push(["Date d'émission", frLong(localDoc.issueDate)]);
-    if (localDoc.type === "facture" || localDoc.showValidity !== false) {
+    if (localDoc.type === "facture" || (localDoc.type !== "avoir" && localDoc.showValidity !== false)) {
       rows.push([localDoc.type !== "facture" ? "Valable jusqu'au" : "Échéance", frLong(localDoc.type !== "facture" ? validityDate : dueDate)]);
     }
     rows.push(["Devise", localDoc.currency || "EUR"]);
@@ -15780,6 +15818,12 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     rows.push(["SIRET", localDoc.company.siret]);
     rows.push([]);
     rows.push(["Client", localDoc.client.name]);
+    if (localDoc.type === "avoir") {
+      rows.push(["Facture d'origine", localDoc.factureOrigineRef || ""]);
+      if (localDoc.factureOrigineDate) rows.push(["Date de la facture d'origine", frLong(localDoc.factureOrigineDate)]);
+      rows.push(["Motif de l'avoir", localDoc.motifAvoir || ""]);
+      if (localDoc.modeRemboursement) rows.push(["Règlement de l'avoir", localDoc.modeRemboursement]);
+    }
     const hidePricesXls = localDoc.type === "livraison" && !localDoc.showPrices;
     rows.push([]);
     if (hidePricesXls) {
@@ -15810,7 +15854,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       }
       Object.entries(tvaGroups).forEach(([rate, amount]) => rows.push(["", "", "", "", "", "", `TVA ${rate}%`, Number(amount.toFixed(2))]));
       rows.push(["", "", "", "", "", "", "Total TTC", Number(totalTTC.toFixed(2))]);
-      if (localDoc.type !== "facture" && Number(localDoc.acompte) > 0) {
+      if (localDoc.type !== "facture" && localDoc.type !== "avoir" && Number(localDoc.acompte) > 0) {
         rows.push(["", "", "", "", "", "", `Acompte (${localDoc.acompte}%)`, Number(acompteAmount.toFixed(2))]);
         rows.push(["", "", "", "", "", "", "Reste à payer", Number(resteAPayer.toFixed(2))]);
       }
@@ -15966,7 +16010,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-2 text-sm">
               <label className="self-center text-right" style={{ color: colors.inkSoft }}>Émis le</label>
               <input type="date" className="df-input df-mono rounded-md px-2 py-1" style={inputStyle} value={localDoc.issueDate} onChange={(e) => patch({ issueDate: e.target.value })} />
-              {localDoc.type !== "facture" ? (
+              {localDoc.type === "avoir" ? null : localDoc.type !== "facture" ? (
                 <>
                   <label className="self-center text-right" style={{ color: colors.inkSoft }}>Validité (jours)</label>
                   <input type="number" className="df-input df-mono rounded-md px-2 py-1" style={inputStyle} value={localDoc.validityDays} onChange={(e) => patch({ validityDays: Number(e.target.value) || 0 })} />
@@ -16321,14 +16365,18 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               <div className="df-display mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brick }}>
                 <RotateCcw size={13} /> Référence obligatoire
               </div>
-              <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Un avoir doit obligatoirement référencer la facture qu'il corrige, et préciser le motif — sans ça, il n'est pas valide.</p>
+              <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Un avoir doit obligatoirement référencer la facture qu'il corrige, et préciser le motif — sans ça, il n'est pas valide (art. 289 du CGI). Les champs marqués * sont obligatoires pour l'enregistrer.</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-xs" style={{ color: colors.inkSoft }}>
-                  Facture d'origine (numéro)
-                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : FAC-014" value={localDoc.factureOrigineRef || ""} onChange={(e) => patch({ factureOrigineRef: e.target.value })} />
+                  Facture d'origine (numéro) *
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={{ ...inputStyle, borderColor: (localDoc.factureOrigineRef || "").trim() ? colors.line : colors.brick }} placeholder="ex : FAC-014" value={localDoc.factureOrigineRef || ""} onChange={(e) => patch({ factureOrigineRef: e.target.value })} />
                 </label>
                 <label className="text-xs" style={{ color: colors.inkSoft }}>
-                  Motif de l'avoir
+                  Date de la facture d'origine (optionnel)
+                  <input type="date" className="df-input df-mono mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.factureOrigineDate || ""} onChange={(e) => patch({ factureOrigineDate: e.target.value })} />
+                </label>
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Motif de l'avoir *
                   <select className="df-select mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.motifAvoir || ""} onChange={(e) => patch({ motifAvoir: e.target.value })}>
                     <option value="">— Choisir —</option>
                     <option value="Erreur de facturation">Erreur de facturation</option>
@@ -16339,8 +16387,15 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     <option value="Autre">Autre</option>
                   </select>
                 </label>
+                <label className="text-xs" style={{ color: colors.inkSoft }}>
+                  Règlement de l'avoir (optionnel)
+                  <select className="df-select mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.modeRemboursement || ""} onChange={(e) => patch({ modeRemboursement: e.target.value })}>
+                    <option value="">— Non précisé —</option>
+                    {AVOIR_REGLEMENTS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </label>
               </div>
-              <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Astuce : entre les montants à déduire normalement (en positif) dans les prestations ci-dessous — ils s'afficheront comme un avoir sur le PDF.</p>
+              <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Astuce : entre les montants à déduire normalement (en positif) dans les prestations ci-dessous — ils s'afficheront comme un avoir sur le PDF. Le nom du client et au moins une ligne sont aussi obligatoires.</p>
             </div>
           )}
 
@@ -16620,7 +16675,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte déjà versé ({currencyLabel(localDoc.currency || "EUR")} TTC)</div>
                   <input type="number" min="0" step="0.01" className="df-input df-mono w-32 rounded-md px-2 py-1.5" style={inputStyle} placeholder="0,00" value={localDoc.acompteVerse ?? ""} onChange={(e) => patch({ acompteVerse: e.target.value })} title="Montant déjà réglé par le client (virement, chèque, espèces…), déduit du total à régler" />
                 </label>
-              ) : (
+              ) : localDoc.type === "avoir" ? null : (
                 <label className="text-sm">
                   <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte demandé (%)</div>
                   <input type="number" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.acompte} onChange={(e) => patch({ acompte: e.target.value })} />
@@ -16730,7 +16785,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           </div>
         </div>
       </div>
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} />
       <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
 
       {presentationMode && (
@@ -16756,5 +16811,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, legalMentionLines, computeTotals,
+  PrintDocument, legalMentionLines, computeTotals, documentValidationErrors, isDocumentEmpty, FinalizeButton,
 };
