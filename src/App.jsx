@@ -864,7 +864,7 @@ function nextNumber(documents, type) {
 
 function emptyProforma() {
   return {
-    serie: "", incoterm: "", incotermPlace: "", currency: geoDefaults().currency,
+    serie: "", incoterm: "", incotermPlace: "",
     paymentTerms: "", grossWeight: "", netWeight: "", packagesCount: "",
     originCountry: "", hsCode: "", loadingPort: "", dischargingPort: "", transportMode: "",
     customFields: [],
@@ -1875,6 +1875,15 @@ const REQUIRED_FIELD_RULES = {
     { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
     { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
   ],
+  // Bordereau de prix unitaires et proforma : client et au moins une ligne.
+  bpu: [
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+    { label: "Au moins une ligne avec une désignation", test: hasOneLine },
+  ],
+  proforma: [
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+    { label: "Au moins une ligne avec une désignation", test: hasOneLine },
+  ],
   // Bon de commande : fournisseur et au moins une ligne.
   commande: [
     { label: "Nom du fournisseur", test: (d) => hasText(d.client?.name) },
@@ -2008,6 +2017,7 @@ function isDocumentEmpty(doc) {
     avoir: ["factureOrigineRef", "factureOrigineDate", "motifAvoir", "modeRemboursement"],
     acompte: ["sourceDevisRef", "montantMarcheHT", "acompteMontantFixe"],
     commande: ["offreFournisseurRef", "conditionsPaiement", "adresseLivraison"],
+    bpu: ["marcheRef", "referenceRevision"],
     livraison: ["commandeRef", "reservesLivraison", "transporteur"],
   };
   if ((specificFields[doc.type] || []).some((f) => String(doc[f] || "").trim())) return false;
@@ -2109,7 +2119,9 @@ function newDocument(type, documents) {
   // facturation — les quantités sont estimatives (pas engageantes), et
   // le bordereau a une durée de validité, avec révision possible.
   if (type === "bpu") {
-    return { ...base, dureeValidite: "", referenceRevision: "", notes: "" };
+    // La validité des prix est celle de l'en-tête (« Valable jusqu'au ») ;
+    // l'ancien champ texte dureeValidite (doublon) n'est plus proposé.
+    return { ...base, marcheRef: "", referenceRevision: "", notes: "" };
   }
   return base;
 }
@@ -2331,7 +2343,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   const companyName = companyDisplayName(legalCompanyOf(doc.company, companyProfile));
   // Acompte demandé (en %) : devis et documents assimilés, jamais sur une
   // facture (acompte déjà versé) ni sur un avoir.
-  const showAcompteDemande = doc.type !== "facture" && doc.type !== "avoir" && doc.type !== "acompte" && doc.type !== "livraison" && Number(doc.acompte) > 0;
+  const showAcompteDemande = doc.type !== "facture" && doc.type !== "avoir" && doc.type !== "acompte" && doc.type !== "livraison" && doc.type !== "bpu" && Number(doc.acompte) > 0;
   // Bon de livraison : colonnes « Qté cmd. » et « Reste » dès qu'une ligne
   // porte une quantité commandée.
   const showOrdered = doc.type === "livraison" && (doc.items || []).some((it) => it.type === "line" && Number(it.qtyCommandee) > 0);
@@ -2373,6 +2385,9 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
           )}
           {doc.type === "facture" && doc.sourceDevisNumber && (
             <div style={{ fontSize: "9.5pt", color: inkSoft }}>D'après le devis N° {doc.sourceDevisNumber}</div>
+          )}
+          {doc.type === "proforma" && (
+            <div style={{ fontSize: "9pt", fontStyle: "italic", color: inkSoft, marginTop: "2px" }}>Facture pro forma : ce document ne vaut pas facture et n'a pas de valeur comptable.</div>
           )}
           {doc.type === "devis" && (doc.worksStartDate || (doc.worksDuration || "").trim()) && (
             <div style={{ fontSize: "9.5pt", color: inkSoft }}>{[doc.worksStartDate ? `Début des travaux : ${frLong(doc.worksStartDate)}` : "", (doc.worksDuration || "").trim() ? `Durée estimée : ${doc.worksDuration.trim()}` : ""].filter(Boolean).join(" — ")}</div>
@@ -2462,7 +2477,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
       {doc.type === "bpu" && (
         <div style={{ marginBottom: "18px", padding: "10px 14px", borderRadius: "4px", background: box, fontSize: "9.5pt", position: "relative", zIndex: 1 }}>
           <div style={{ fontStyle: "italic", color: inkSoft }}>Bordereau de prix de référence — les quantités indiquées sont estimatives, non engageantes.</div>
-          {doc.dureeValidite && <div style={{ marginTop: "2px" }}>Durée de validité des prix : <strong>{doc.dureeValidite}</strong></div>}
+          {(doc.marcheRef || "").trim() && <div style={{ marginTop: "2px" }}>Référence du marché / de l'affaire : <strong>{doc.marcheRef.trim()}</strong></div>}
           {doc.referenceRevision && <div style={{ marginTop: "2px" }}>Révision des prix : {doc.referenceRevision}</div>}
         </div>
       )}
@@ -2471,7 +2486,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
         const pf = doc.proforma;
         const rows = [
           ["Série", pf.serie], ["Incoterm", [pf.incoterm, pf.incotermPlace].filter(Boolean).join(" — ")],
-          ["Devise", pf.currency], ["Conditions de paiement", pf.paymentTerms],
+          ["Conditions de paiement", pf.paymentTerms],
           ["Pays d'origine", pf.originCountry], ["Code SH / douanier", pf.hsCode],
           ["Poids brut", pf.grossWeight], ["Poids net", pf.netWeight],
           ["Nombre de colis", pf.packagesCount], ["Port de chargement", pf.loadingPort],
@@ -2498,7 +2513,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9.3pt", position: "relative", zIndex: 1 }}>
         <thead>
           <tr style={{ background: ink, color: "white" }}>
-            <th style={{ textAlign: "left", padding: "6px 6px", fontSize: "8pt", textTransform: "uppercase", letterSpacing: "0.04em" }}>Désignation</th>
+            <th style={{ textAlign: "left", padding: "6px 6px", fontSize: "8pt", textTransform: "uppercase", letterSpacing: "0.04em" }}>{doc.type === "bpu" ? "N° prix / Désignation" : "Désignation"}</th>
             {showOrdered && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Qté cmd.</th>}
             <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>{doc.type === "bpu" ? "Qté estim." : showOrdered ? "Livré" : "Qté"}</th>
             {showOrdered && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Reste</th>}
@@ -2525,7 +2540,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
             return (
               <tr key={it.id} style={{ pageBreakInside: "avoid", borderBottom: `1px solid ${line}`, background: idx % 2 ? "transparent" : "rgba(27,42,51,0.02)" }}>
                 <td style={{ padding: "6px 6px", verticalAlign: "top" }}>
-                  <div>{it.designation || "—"}</div>
+                  <div>{doc.type === "bpu" && (it.productRef || "").trim() ? <><span style={{ ...mono, fontSize: "8.5pt", color: inkSoft }}>{it.productRef.trim()}</span> — </> : null}{it.designation || "—"}</div>
                   {(it.details || []).filter((d) => d.included && (d.text || d.price)).map((d) => (
                     <div key={d.id} style={{ fontSize: "8.5pt", color: inkSoft, marginLeft: `${8 + (d.level - 1) * 14}px`, display: "flex", justifyContent: "space-between", gap: "8px" }}>
                       <span>{d.marker || defaultMarker(d.level)} {renderMarkup(d.text)}</span>
@@ -16422,6 +16437,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     rows.push([]);
     rows.push(["Client", localDoc.client.name]);
     if (localDoc.type === "commande" && localDoc.offreFournisseurRef) rows.push(["Référence de l'offre fournisseur", localDoc.offreFournisseurRef]);
+    if (localDoc.type === "bpu" && localDoc.marcheRef) rows.push(["Référence du marché / de l'affaire", localDoc.marcheRef]);
+    if (localDoc.type === "proforma") rows.push(["Mention", "Facture pro forma : ne vaut pas facture, sans valeur comptable"]);
     if (localDoc.type === "livraison") {
       if (localDoc.commandeRef) rows.push(["Commande / devis d'origine", localDoc.commandeRef]);
       rows.push(["État de la livraison", localDoc.etatLivraison === "reserves" ? "Livré avec réserves" : localDoc.etatLivraison === "incomplete" ? "Livraison incomplète" : "Conforme"]);
@@ -16453,7 +16470,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     } else {
       rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT", "TVA %", "Remise %", "Total HT"]);
       computedLines.forEach((l) => {
-        rows.push([l.designation, "", l.qty, l.unit, Number(l.unitPrice) || 0, l.tva, l.discount, Number((l.totalHT || 0).toFixed(2))]);
+        rows.push([localDoc.type === "bpu" && (l.productRef || "").trim() ? `${l.productRef.trim()} — ${l.designation}` : l.designation, "", l.qty, l.unit, Number(l.unitPrice) || 0, l.tva, l.discount, Number((l.totalHT || 0).toFixed(2))]);
         (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
           rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + stripMarkup(d.text), "", "", "", "", "", Number(d.price) > 0 ? Number(d.price) : ""]);
         });
@@ -16470,7 +16487,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       }
       Object.entries(tvaGroups).forEach(([rate, amount]) => rows.push(["", "", "", "", "", "", `TVA ${rate}%`, Number(amount.toFixed(2))]));
       rows.push(["", "", "", "", "", "", "Total TTC", Number(totalTTC.toFixed(2))]);
-      if (localDoc.type !== "facture" && localDoc.type !== "avoir" && localDoc.type !== "acompte" && localDoc.type !== "livraison" && Number(localDoc.acompte) > 0) {
+      if (localDoc.type !== "facture" && localDoc.type !== "avoir" && localDoc.type !== "acompte" && localDoc.type !== "livraison" && localDoc.type !== "bpu" && Number(localDoc.acompte) > 0) {
         rows.push(["", "", "", "", "", "", `Acompte (${localDoc.acompte}%)`, Number(acompteAmount.toFixed(2))]);
         rows.push(["", "", "", "", "", "", "Reste à payer", Number(resteAPayer.toFixed(2))]);
       }
@@ -16890,10 +16907,6 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : Casablanca" value={pf.incotermPlace} onChange={(e) => patchProforma({ incotermPlace: e.target.value })} />
                   </label>
                   <label className="text-xs" style={{ color: colors.inkSoft }}>
-                    Devise
-                    <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="EUR, USD..." value={pf.currency} onChange={(e) => patchProforma({ currency: e.target.value })} />
-                  </label>
-                  <label className="text-xs" style={{ color: colors.inkSoft }}>
                     Conditions de paiement
                     <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : Crédit documentaire irrévocable" value={pf.paymentTerms} onChange={(e) => patchProforma({ paymentTerms: e.target.value })} />
                   </label>
@@ -17131,14 +17144,15 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Un bordereau de prix unitaires fixe des prix de référence — les quantités saisies ci-dessous sont <strong>estimatives</strong>, pas engageantes. Les commandes réelles se feront ensuite via des bons de commande à ces prix.</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-xs" style={{ color: colors.inkSoft }}>
-                  Durée de validité des prix
-                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : 12 mois à compter de la notification" value={localDoc.dureeValidite || ""} onChange={(e) => patch({ dureeValidite: e.target.value })} />
+                  Référence du marché / de l'affaire (optionnel)
+                  <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : marché 2026-07, lot 3" value={localDoc.marcheRef || ""} onChange={(e) => patch({ marcheRef: e.target.value })} />
                 </label>
                 <label className="text-xs" style={{ color: colors.inkSoft }}>
                   Révision des prix (référence, si applicable)
                   <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : voir REV-003" value={localDoc.referenceRevision || ""} onChange={(e) => patch({ referenceRevision: e.target.value })} />
                 </label>
               </div>
+              <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>La validité des prix est celle de l'en-tête (« Validité (jours) », imprimée « Valable jusqu'au »). Le n° de prix de chaque ligne se saisit au-dessus de sa désignation et s'imprime devant elle. Le nom du client et au moins une ligne sont obligatoires.</p>
             </div>
           )}
 
@@ -17243,6 +17257,9 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                 <div className="flex flex-wrap items-start gap-2">
                   <input type="checkbox" className="no-print mt-2" checked={selectedLineIds.includes(it.id)} onChange={() => toggleLineSelect(it.id)} style={{ accentColor: colors.brick }} aria-label="Sélectionner cette ligne" />
                   <div className="grow basis-56">
+                    {localDoc.type === "bpu" && (
+                      <input className="df-input df-mono mb-1 w-28 rounded-md px-2 py-1 text-xs" style={inputStyle} placeholder="N° prix" title="Numéro de prix du bordereau (rempli automatiquement depuis la bibliothèque)" value={it.productRef || ""} onChange={(e) => updateItem(it.id, { productRef: e.target.value })} />
+                    )}
                     <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Désignation" value={it.designation} onChange={(e) => updateItem(it.id, { designation: e.target.value })} />
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       {!(openDetailsFor.includes(it.id) || (it.details || []).length > 0) && (
@@ -17354,7 +17371,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte déjà versé ({currencyLabel(localDoc.currency || "EUR")} TTC)</div>
                   <input type="number" min="0" step="0.01" className="df-input df-mono w-32 rounded-md px-2 py-1.5" style={inputStyle} placeholder="0,00" value={localDoc.acompteVerse ?? ""} onChange={(e) => patch({ acompteVerse: e.target.value })} title="Montant déjà réglé par le client (virement, chèque, espèces…), déduit du total à régler" />
                 </label>
-              ) : localDoc.type === "avoir" || localDoc.type === "acompte" || localDoc.type === "livraison" ? null : (
+              ) : localDoc.type === "avoir" || localDoc.type === "acompte" || localDoc.type === "livraison" || localDoc.type === "bpu" ? null : (
                 <label className="text-sm">
                   <div className="mb-1" style={{ color: colors.inkSoft }}>Acompte demandé (%)</div>
                   <input type="number" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.acompte} onChange={(e) => patch({ acompte: e.target.value })} />
@@ -17391,7 +17408,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                 {Object.entries(tvaGroups).map(([rate, amount]) => (
                   <div key={rate} className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>TVA {rate}%</span><span>{formatMoney(amount, localDoc.currency)}</span></div>
                 ))}
-                {localDoc.type !== "facture" && localDoc.type !== "avoir" && localDoc.type !== "acompte" && localDoc.type !== "livraison" && Number(localDoc.acompte) > 0 && (
+                {localDoc.type !== "facture" && localDoc.type !== "avoir" && localDoc.type !== "acompte" && localDoc.type !== "livraison" && localDoc.type !== "bpu" && Number(localDoc.acompte) > 0 && (
                   <>
                     <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte ({localDoc.acompte}%)</span><span>- {formatMoney(acompteAmount, localDoc.currency)}</span></div>
                     <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Reste à payer</span><span>{formatMoney(resteAPayer, localDoc.currency)}</span></div>
