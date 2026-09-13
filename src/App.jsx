@@ -12254,7 +12254,11 @@ function StockDocumentsView({ movements, loading, products, warehouses, account,
   const [kind, setKind] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
   const [search, setSearch] = useState("");
-  const [openRef, setOpenRef] = useState(null);
+  // Détail des lignes (produits, quantités) visible d'emblée pour chaque
+  // document ; un clic sur l'en-tête le replie. Avant, tout était replié
+  // derrière un chevron et les produits n'apparaissaient pas à l'ouverture.
+  const [collapsedRefs, setCollapsedRefs] = useState(() => new Set());
+  const toggleDoc = (key) => setCollapsedRefs((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   // Chargement à l'ouverture de la page (fonction lue via une référence
   // pour ne pas relancer le chargement à chaque rendu du parent).
   const refreshRef = useRef(onRefresh);
@@ -12310,11 +12314,11 @@ function StockDocumentsView({ movements, loading, products, warehouses, account,
         ) : docs.length === 0 ? (
           <div className="px-6 py-16 text-center"><Archive size={28} style={{ color: colors.inkSoft, margin: "0 auto 8px" }} /><p className="df-display text-lg font-semibold">Aucun document de stock</p><p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Enregistre une entrée ou une sortie pour commencer l'historique.</p></div>
         ) : docs.map((d, i) => {
-          const isOpen = openRef === d.key;
+          const isOpen = !collapsedRefs.has(d.key);
           const total = d.lines.reduce((s, l) => s + Number(l.quantity), 0);
           return (
             <div key={d.key} style={{ borderTop: i ? `1px solid ${colors.line}` : "none" }}>
-              <button onClick={() => setOpenRef(isOpen ? null : d.key)} className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left">
+              <button onClick={() => toggleDoc(d.key)} title={isOpen ? "Masquer le détail" : "Afficher le détail"} className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left">
                 <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase" style={{ background: `${kindColor(d.kind)}18`, color: kindColor(d.kind) }}>{STOCK_KINDS[d.kind]?.label || d.kind}</span>
                 <span className="df-mono text-sm font-semibold">{d.ref}</span>
                 <span className="text-xs" style={{ color: colors.inkSoft }}>{new Date(d.movedAt).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })} · {warehouseName(warehouses, d.warehouseId)} · {members[d.createdBy] || "—"}</span>
@@ -16593,5 +16597,5 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
-  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView,
+  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView,
 };
