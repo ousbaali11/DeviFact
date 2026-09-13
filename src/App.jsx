@@ -3,7 +3,8 @@ import { flushSync } from "react-dom";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
-import { computeSalesKpis, FISCAL_MONTHS } from "./kpis.js";
+import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
+import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults } from "./accounting.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
@@ -2413,6 +2414,7 @@ function DeviFactAppInner() {
       { id: "nav-planning-equipe", label: "Aller au Planning d'équipe", icon: Calendar, action: () => setView("planning-equipe") },
       { id: "nav-clients", label: "Aller à Clients", icon: Users, action: () => setView("clients") },
       { id: "nav-stock-produits", label: "Aller à Produits (Gestion de stock)", icon: Package, keywords: "bibliothèque prestations stock", action: () => setView("stock-produits") },
+      { id: "nav-stock-comptabilite", label: "Aller à Comptabilité (Gestion de stock)", icon: Calculator, keywords: "écritures comptes journal export comptable", action: () => setView("stock-comptabilite") },
       { id: "nav-company", label: "Aller à Mon entreprise", icon: Building2, action: () => setView("company") },
       { id: "nav-team", label: "Aller à Équipe", icon: UserPlus, action: () => setView("team") },
       { id: "nav-account", label: "Aller à Mon compte", icon: UserCircle, action: () => setView("account") },
@@ -3874,7 +3876,7 @@ function DeviFactAppInner() {
     return `mailto:${doc.client.email || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
-  function exportAccountingCSV() {
+  async function exportAccountingCSV() {
     const rows = [["Type", "Numéro", "Date d'émission", "Client", "Statut", "Montant HT", "Montant TVA", "Montant TTC"]];
     documents
       .slice()
@@ -3910,6 +3912,24 @@ function DeviFactAppInner() {
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws, "Export comptable");
+    // Gestion de stock (étape 4) : deuxième feuille « Écritures » avec les
+    // écritures de vente et d'entrée de stock, ajoutée sans modifier la
+    // première feuille. Mouvements rechargés au moment de l'export.
+    if (hasAccess(account, "pro")) {
+      let mvts = movements;
+      try { mvts = await fetchMovements(account?.organizationId); } catch (err) { console.error("Mouvements de stock indisponibles pour l'export, écritures de vente seules", err); }
+      const productById = new Map(products.map((p) => [p.id, p]));
+      const defaults = accountingDefaults(companyProfile?.accounting);
+      const entries = [
+        ...buildSalesEntries(documents, { productById, defaults, computeLines: (d) => computeTotals(d).computedLines }),
+        ...buildStockEntries(mvts, { productById, defaults }).entries,
+      ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      const entryRows = [["Date", "Journal", "Pièce", "Libellé", "Compte", "Débit", "Crédit", "Code activité", "Source"]];
+      entries.forEach((e) => entryRows.push([e.date, e.journal, e.piece, e.label, e.account, e.debit, e.credit, e.activity || "", e.source]));
+      const ws2 = XLSX.utils.aoa_to_sheet(entryRows);
+      ws2["!cols"] = [{ wch: 12 }, { wch: 8 }, { wch: 16 }, { wch: 36 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 8 }];
+      XLSX.utils.book_append_sheet(wb, ws2, "Écritures");
+    }
     XLSX.writeFile(wb, `export-comptable-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
@@ -4180,6 +4200,9 @@ function DeviFactAppInner() {
     }
     if (which === "stock-entree" || which === "stock-sortie") {
       return <StockMovementView key={which} kind={which === "stock-entree" ? "entree" : "sortie"} products={products} warehouses={warehouses} stockDetail={stockDetail} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onSubmit={submitStockMovement} onGoToProducts={() => setView("stock-produits")} onGoToWarehouses={() => setView("stock-entrepots")} />;
+    }
+    if (which === "stock-comptabilite") {
+      return <ComptabiliteView documents={documents} products={products} movements={movements} movementsLoading={movementsLoading} companyProfile={companyProfile} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onRefreshMovements={loadMovements} onSaveDefaults={(accounting) => persistCompanyProfile({ ...companyProfile, accounting })} onExportXlsx={exportAccountingCSV} />;
     }
     if (which === "stock-documents") {
       return <StockDocumentsView movements={movements} loading={movementsLoading} products={products} warehouses={warehouses} account={account} siteSettings={siteSettings} darkMode={darkMode} onRefresh={loadMovements} onGoToEntry={() => setView("stock-entree")} onGoToExit={() => setView("stock-sortie")} />;
@@ -11782,6 +11805,7 @@ const STOCK_MENU = [
   { id: "stock-entrepots", label: "Entrepôts", icon: Warehouse },
   { id: "stock-entree", label: "Entrée", icon: ArrowDownToLine },
   { id: "stock-sortie", label: "Sortie", icon: ArrowUpFromLine },
+  { id: "stock-comptabilite", label: "Comptabilité", icon: Calculator },
 ];
 const isStockView = (view) => typeof view === "string" && view.startsWith("stock-");
 const PRODUCT_KINDS = [["produit", "Produit"], ["service", "Prestation de service"]];
@@ -12309,6 +12333,210 @@ function StockDocumentsView({ movements, loading, products, warehouses, account,
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Onglet Comptabilité (Gestion de stock — étape 4) : vue d'ensemble des
+// comptes utilisés, écritures générées à partir des ventes et des entrées
+// de stock (src/accounting.js), filtres par période / journal / activité,
+// export CSV. Les comptes par défaut sont enregistrés dans le profil de
+// l'entreprise (companyProfile.accounting).
+const ACCOUNT_KIND_LABELS = { produits: "Comptes de produits (ventes)", achats: "Comptes d'achats", tva_vente: "Comptes de TVA sur ventes", tva_achat: "Comptes de TVA sur achats" };
+const ACCOUNT_DEFAULT_FIELDS = [
+  ["sales", "Compte de produits par défaut"], ["purchases", "Compte d'achats par défaut"],
+  ["vatSales", "TVA collectée par défaut"], ["vatPurchases", "TVA déductible par défaut"],
+  ["customer", "Compte clients"], ["supplier", "Compte fournisseurs"],
+  ["journalSales", "Journal des ventes"], ["journalPurchases", "Journal des achats"],
+];
+const amount2 = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const isoDay = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+
+function ComptabiliteView({ documents, products, movements, movementsLoading, companyProfile, canEdit, siteSettings, darkMode, onRefreshMovements, onSaveDefaults, onExportXlsx }) {
+  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
+  const isAtelier = siteSettings?.landingPageVersion === "atelier";
+  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const card = { background: surface, border: `1px solid ${colors.line}` };
+  const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
+  const fiscalMonth = Number(companyProfile?.fiscalStartMonth) || 1;
+  const [from, setFrom] = useState(() => isoDay(fiscalYearStart(new Date(), fiscalMonth)));
+  const [to, setTo] = useState(() => isoDay(new Date()));
+  const [journal, setJournal] = useState("");
+  const [activity, setActivity] = useState("");
+  const [source, setSource] = useState("");
+  const [showDefaults, setShowDefaults] = useState(false);
+  const [defaultsDraft, setDefaultsDraft] = useState(() => accountingDefaults(companyProfile?.accounting));
+  const [savingDefaults, setSavingDefaults] = useState(false);
+  // Mouvements chargés à l'ouverture (référence stable, comme sur Documents de stock).
+  const refreshRef = useRef(onRefreshMovements);
+  refreshRef.current = onRefreshMovements;
+  useEffect(() => { refreshRef.current(); }, []);
+
+  const defaults = useMemo(() => accountingDefaults(companyProfile?.accounting), [companyProfile?.accounting]);
+  const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const salesEntries = useMemo(() => buildSalesEntries(documents, { productById, defaults, computeLines: (d) => computeTotals(d).computedLines }), [documents, productById, defaults]);
+  const stock = useMemo(() => buildStockEntries(movements, { productById, defaults }), [movements, productById, defaults]);
+  const consumption = useMemo(() => valuedStockMovements(movements, { productById }).filter((m) => (!from || m.date >= from) && (!to || m.date <= to)), [movements, productById, from, to]);
+  const allEntries = useMemo(() => [...salesEntries, ...stock.entries].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)), [salesEntries, stock.entries]);
+  const journals = useMemo(() => [...new Set(allEntries.map((e) => e.journal))].sort(), [allEntries]);
+  const activities = useMemo(() => [...new Set([...allEntries.map((e) => e.activity), ...products.map((p) => (p.activity_code || "").trim())])].filter(Boolean).sort(), [allEntries, products]);
+  const entries = useMemo(() => filterEntries(allEntries, { from, to, journal, activity, source }), [allEntries, from, to, journal, activity, source]);
+  const totals = useMemo(() => entriesTotals(entries), [entries]);
+  const overview = useMemo(() => accountsOverview(products), [products]);
+  const missing = useMemo(() => ({
+    produits: products.filter((p) => !(p.account_sales || "").trim()).length,
+    achats: products.filter((p) => p.kind === "produit" && !(p.account_purchases || "").trim()).length,
+    tva_vente: products.filter((p) => !(p.account_vat_sales || "").trim()).length,
+    tva_achat: products.filter((p) => p.kind === "produit" && !(p.account_vat_purchases || "").trim()).length,
+  }), [products]);
+  const unpricedInPeriod = useMemo(() => {
+    const refs = new Set(movements.filter((m) => m.kind === "entree" && (!from || String(m.moved_at).slice(0, 10) >= from) && (!to || String(m.moved_at).slice(0, 10) <= to)).map((m) => m.document_ref || m.id));
+    return stock.unpriced.filter((u) => refs.has(u.ref));
+  }, [stock.unpriced, movements, from, to]);
+
+  function exportCsv() {
+    downloadBlob(new Blob([entriesToCsv(entries)], { type: "text/csv;charset=utf-8" }), `ecritures-comptables-${from || "debut"}-${to || "fin"}.csv`);
+  }
+  async function saveDefaults() {
+    setSavingDefaults(true);
+    try { await onSaveDefaults(accountingDefaults(defaultsDraft)); setShowDefaults(false); }
+    finally { setSavingDefaults(false); }
+  }
+  function resetFilters() {
+    setFrom(isoDay(fiscalYearStart(new Date(), fiscalMonth))); setTo(isoDay(new Date())); setJournal(""); setActivity(""); setSource("");
+  }
+  const accentBg = isAtelier ? atelier.accentSoft : adv.accentSoft;
+  const accentFg = isAtelier ? atelier.accent : adv.accent;
+  const balanced = totals.debit === totals.credit;
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: accentBg, color: accentFg }}><Calculator size={18} /></div>}
+          <h1 className="df-display text-2xl font-semibold">Comptabilité</h1>
+          <p className="text-sm" style={{ color: colors.inkSoft }}>Comptes utilisés par tes produits, et écritures générées à partir des factures émises et des entrées de stock. À vérifier avec ton comptable avant tout import.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={onRefreshMovements} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }} title="Recharger les mouvements de stock"><RotateCcw size={15} className={movementsLoading ? "animate-spin" : ""} /> Actualiser</button>
+          <button onClick={exportCsv} disabled={entries.length === 0} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: entries.length ? 1 : 0.5 }} title="Écritures affichées, au format CSV (point-virgule)"><Download size={15} /> CSV des écritures</button>
+          <button onClick={onExportXlsx} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }} title="Classeur Excel : liste des documents + feuille des écritures"><FileSpreadsheet size={15} /> Export comptable (xlsx)</button>
+        </div>
+      </div>
+
+      {/* Vue d'ensemble des comptes */}
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {Object.entries(ACCOUNT_KIND_LABELS).map(([kind, label]) => {
+          const codes = overview.filter((o) => o.kind === kind);
+          return (
+            <div key={kind} className="rounded-2xl p-4" style={card}>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.inkSoft }}>{label}</div>
+              {codes.length === 0 ? <p className="text-sm" style={{ color: colors.inkSoft }}>Aucun compte renseigné</p> : (
+                <ul className="space-y-1">
+                  {codes.map((c) => <li key={c.code} className="flex items-center justify-between text-sm" title={c.products.join(", ")}><span className="df-mono font-semibold">{c.code}</span><span className="text-xs" style={{ color: colors.inkSoft }}>{c.count} produit{c.count > 1 ? "s" : ""}</span></li>)}
+                </ul>
+              )}
+              {missing[kind] > 0 && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{missing[kind]} sans compte : compte par défaut utilisé</p>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Comptes par défaut */}
+      <div className="mb-6 rounded-2xl" style={card}>
+        <button onClick={() => setShowDefaults((v) => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+          <div><div className="text-sm font-semibold">Comptes et journaux par défaut</div><div className="text-xs" style={{ color: colors.inkSoft }}>Utilisés quand un produit n'a pas de compte, et pour les lignes sans produit lié · {defaults.sales} / {defaults.purchases} / {defaults.vatSales} / {defaults.vatPurchases} · journaux {defaults.journalSales} et {defaults.journalPurchases}</div></div>
+          <ChevronDown size={15} className="shrink-0" style={{ color: colors.inkSoft, transform: showDefaults ? "rotate(180deg)" : "none" }} />
+        </button>
+        {showDefaults && (
+          <div className="border-t px-4 pb-4 pt-3" style={{ borderColor: colors.line }}>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {ACCOUNT_DEFAULT_FIELDS.map(([key, label]) => (
+                <label key={key} className="block text-xs" style={{ color: colors.inkSoft }}>{label}
+                  <input className="df-input df-mono mt-1 w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={defaultsDraft[key] || ""} onChange={(e) => setDefaultsDraft((d) => ({ ...d, [key]: e.target.value }))} disabled={!canEdit} />
+                </label>
+              ))}
+            </div>
+            {canEdit && <div className="mt-3 flex justify-end"><button onClick={saveDefaults} disabled={savingDefaults} className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ background: colors.moss, opacity: savingDefaults ? 0.6 : 1 }}>{savingDefaults ? "Enregistrement…" : "Enregistrer"}</button></div>}
+          </div>
+        )}
+      </div>
+
+      {/* Filtres */}
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <label className="text-xs" style={{ color: colors.inkSoft }}>Du<input type="date" className="df-input mt-1 block rounded-md px-3 py-2 text-sm" style={inputStyle} value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="text-xs" style={{ color: colors.inkSoft }}>Au<input type="date" className="df-input mt-1 block rounded-md px-3 py-2 text-sm" style={inputStyle} value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={journal} onChange={(e) => setJournal(e.target.value)}><option value="">Tous les journaux</option>{journals.map((j) => <option key={j} value={j}>{j}</option>)}</select>
+        <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={activity} onChange={(e) => setActivity(e.target.value)}><option value="">Tous les codes activité</option>{activities.map((a) => <option key={a} value={a}>{a}</option>)}</select>
+        <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={source} onChange={(e) => setSource(e.target.value)}><option value="">Ventes et stock</option><option value="vente">Ventes uniquement</option><option value="stock">Entrées de stock uniquement</option></select>
+        <button onClick={resetFilters} className="rounded-md px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }}>Exercice en cours</button>
+      </div>
+
+      {unpricedInPeriod.length > 0 && (
+        <div className="mb-3 rounded-lg px-3 py-2 text-xs" style={{ background: `${colors.brick}12`, color: colors.brick, border: `1px solid ${colors.brick}40` }}>
+          <AlertTriangle size={13} className="mr-1 inline" /> {unpricedInPeriod.length} ligne{unpricedInPeriod.length > 1 ? "s" : ""} d'entrée de stock sans prix d'achat, non valorisée{unpricedInPeriod.length > 1 ? "s" : ""} : {[...new Set(unpricedInPeriod.map((u) => `${u.name} (${u.ref})`))].slice(0, 5).join(", ")}{unpricedInPeriod.length > 5 ? "…" : ""}. Renseigne le prix d'achat sur la fiche produit.
+        </div>
+      )}
+
+      {/* Écritures */}
+      <div className="overflow-hidden rounded-2xl" style={card}>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${colors.line}` }}>
+          <div className="text-sm font-semibold">Écritures <span className="font-normal" style={{ color: colors.inkSoft }}>· {entries.length} ligne{entries.length > 1 ? "s" : ""}</span></div>
+          <div className="df-mono text-xs" style={{ color: balanced ? colors.moss : colors.brick }}>Débit {amount2(totals.debit)} · Crédit {amount2(totals.credit)}{balanced ? "" : " · déséquilibre (filtre partiel ?)"}</div>
+        </div>
+        {movementsLoading && movements.length === 0 ? (
+          <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin" style={{ color: colors.slate }} /></div>
+        ) : entries.length === 0 ? (
+          <div className="px-6 py-16 text-center"><Calculator size={28} style={{ color: colors.inkSoft, margin: "0 auto 8px" }} /><p className="df-display text-lg font-semibold">Aucune écriture sur cette période</p><p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Les écritures viennent des factures, factures d'acompte et avoirs émis (hors brouillons), et des entrées de stock valorisées au prix d'achat.</p></div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs uppercase tracking-wide" style={{ color: colors.inkSoft, background: colors.paper }}>
+                <th className="px-3 py-2">Date</th><th className="px-3 py-2">Journal</th><th className="px-3 py-2">Pièce</th><th className="px-3 py-2">Libellé</th><th className="px-3 py-2">Compte</th><th className="px-3 py-2 text-right">Débit</th><th className="px-3 py-2 text-right">Crédit</th><th className="px-3 py-2">Activité</th>
+              </tr></thead>
+              <tbody>
+                {entries.map((e, i) => (
+                  <tr key={`${e.documentId}-${e.account}-${e.activity}-${i}`} style={{ borderTop: `1px solid ${colors.line}` }}>
+                    <td className="whitespace-nowrap px-3 py-1.5">{e.date ? fr(e.date) : "—"}</td>
+                    <td className="df-mono px-3 py-1.5">{e.journal}</td>
+                    <td className="df-mono whitespace-nowrap px-3 py-1.5">{e.piece || "—"}</td>
+                    <td className="max-w-[280px] truncate px-3 py-1.5" title={e.label}>{e.label}</td>
+                    <td className="df-mono px-3 py-1.5">{e.account}</td>
+                    <td className="df-mono whitespace-nowrap px-3 py-1.5 text-right">{e.debit ? amount2(e.debit) : ""}</td>
+                    <td className="df-mono whitespace-nowrap px-3 py-1.5 text-right">{e.credit ? amount2(e.credit) : ""}</td>
+                    <td className="df-mono px-3 py-1.5 text-xs">{e.activity || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Sorties et ajustements valorisés (information) */}
+      {consumption.length > 0 && source !== "vente" && (
+        <div className="mt-6 overflow-hidden rounded-2xl" style={card}>
+          <div className="px-4 py-3" style={{ borderBottom: `1px solid ${colors.line}` }}>
+            <div className="text-sm font-semibold">Sorties et ajustements de stock valorisés</div>
+            <div className="text-xs" style={{ color: colors.inkSoft }}>Pour information : consommation valorisée au prix d'achat HT du produit, sans écriture générée.</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs uppercase tracking-wide" style={{ color: colors.inkSoft, background: colors.paper }}><th className="px-3 py-2">Date</th><th className="px-3 py-2">Document</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Produit</th><th className="px-3 py-2 text-right">Quantité</th><th className="px-3 py-2 text-right">Coût unitaire HT</th><th className="px-3 py-2 text-right">Valeur HT</th><th className="px-3 py-2">Compte</th></tr></thead>
+              <tbody>
+                {consumption.map((m) => (
+                  <tr key={m.id} style={{ borderTop: `1px solid ${colors.line}` }}>
+                    <td className="whitespace-nowrap px-3 py-1.5">{fr(m.date)}</td><td className="df-mono px-3 py-1.5">{m.ref || "—"}</td><td className="px-3 py-1.5">{STOCK_KINDS[m.kind]?.label || m.kind}</td><td className="px-3 py-1.5">{m.productName}</td>
+                    <td className="df-mono whitespace-nowrap px-3 py-1.5 text-right" style={{ color: m.quantity < 0 ? colors.brick : colors.moss }}>{m.quantity > 0 ? "+" : ""}{stockQty(m.quantity)}</td>
+                    <td className="df-mono px-3 py-1.5 text-right">{m.unitCost ? amount2(m.unitCost) : <span style={{ color: colors.brick }}>non renseigné</span>}</td>
+                    <td className="df-mono px-3 py-1.5 text-right">{amount2(m.value)}</td><td className="df-mono px-3 py-1.5 text-xs">{m.account || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -16357,5 +16585,5 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
-  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS,
+  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView,
 };

@@ -9,6 +9,11 @@ import { defineConfig } from 'vite'
        tailwindcss(),
        VitePWA({
          registerType: 'autoUpdate',
+         // Le bundle principal dépasse la limite par défaut de 2 Mio du
+         // cache hors ligne (Workbox) depuis l'onglet Comptabilité ; sans
+         // cette limite relevée, le build échoue et le fichier ne serait
+         // plus mis en cache.
+         workbox: { maximumFileSizeToCacheInBytes: 3 * 1024 * 1024 },
          manifest: {
            name: 'DeviFact',
            short_name: 'DeviFact',
