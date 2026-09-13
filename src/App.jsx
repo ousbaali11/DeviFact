@@ -1976,7 +1976,69 @@ function publicDocumentUrl(token) {
 }
 const PUBLIC_QR_OPTIONS = { margin: 0, width: 300, errorCorrectionLevel: "M", color: { dark: "#1B2A33", light: "#FFFFFF" } };
 
-const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true, publicQr = null }, ref) {
+// Mentions d'exonération de TVA imprimées sur le PDF classique quand une
+// ligne est à 0 % (mêmes textes que le XML Factur-X, voir facturx.ts).
+const VAT_EXEMPTION_TEXTS = {
+  franchise: "TVA non applicable, art. 293 B du CGI.",
+  export: "Exonération de TVA, art. 262 I du CGI (exportation hors Union européenne).",
+  intracom: "Exonération de TVA, art. 262 ter I du CGI (livraison intracommunautaire).",
+  autoliquidation: "Autoliquidation : TVA due par le preneur, art. 283 du CGI.",
+};
+// Champs du profil entreprise portant les mentions légales (audit des champs,
+// étape B) : lus sur la copie du profil enregistrée dans le document, sinon
+// sur le profil courant (documents créés avant l'étape A).
+const LEGAL_COMPANY_FIELDS = ["legalForm", "capital", "registration", "entrepreneurIndividuel", "insuranceName", "insurancePolicy", "insuranceZone", "mediatorName", "mediatorContact", "vatOnDebits"];
+function legalCompanyOf(docCompany, companyProfile) {
+  const out = { ...(docCompany || {}) };
+  for (const f of LEGAL_COMPANY_FIELDS) {
+    const v = out[f];
+    if ((v === undefined || v === null || v === "") && companyProfile && companyProfile[f] !== undefined) out[f] = companyProfile[f];
+  }
+  return out;
+}
+// « EI » accolé au nom de l'entrepreneur individuel (art. L526-22 C. com.).
+function companyDisplayName(co) {
+  const name = (co?.name || "").trim();
+  if (!name || !co?.entrepreneurIndividuel || /\bEI\b/.test(name)) return name;
+  return `${name} EI`;
+}
+// Lignes du bloc de mentions légales d'un devis, d'une facture, d'une
+// facture d'acompte ou d'un avoir. Fonction pure : tableau de phrases,
+// vide si rien ne s'applique.
+//   * forme juridique, capital, immatriculation (art. R123-237 C. com.) ;
+//   * assurance décennale (art. L243-2 C. assurances) ;
+//   * factures et acomptes entre professionnels : pénalités de retard,
+//     indemnité forfaitaire de 40 €, escompte (art. L441-9 et D441-5 C. com.)
+//     — jamais pour un particulier (l'indemnité ne s'applique qu'en B2B) ;
+//   * TVA : motif d'exonération si une ligne est à 0 %, option débits ;
+//   * médiateur de la consommation pour un client particulier (art. L616-1 C. conso).
+function legalMentionLines(doc, companyProfile) {
+  if (!doc || !["devis", "facture", "acompte", "avoir"].includes(doc.type)) return [];
+  const co = legalCompanyOf(doc.company, companyProfile);
+  const isCompany = co.type !== "particulier";
+  const clientIsPro = doc.client?.type !== "particulier";
+  const isInvoice = doc.type === "facture" || doc.type === "acompte";
+  const lines = [];
+  if (isCompany) {
+    const form = companyLegalFormLabel(co);
+    const reg = (co.registration || "").trim();
+    if (form || reg) lines.push([form, reg].filter(Boolean).join(" — "));
+    const ins = companyInsuranceLabel(co);
+    if (ins) lines.push(`Assurance décennale et responsabilité civile professionnelle : ${ins}.`);
+  }
+  if (isInvoice && clientIsPro) {
+    lines.push("Pénalités de retard : trois fois le taux d'intérêt légal, exigibles le jour suivant la date de règlement. Indemnité forfaitaire pour frais de recouvrement : 40 € (art. D441-5 du Code de commerce). Pas d'escompte pour paiement anticipé.");
+  }
+  const zeroRated = (doc.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) === 0);
+  if (zeroRated && VAT_EXEMPTION_TEXTS[doc.vatExemptionReason]) lines.push(VAT_EXEMPTION_TEXTS[doc.vatExemptionReason]);
+  if ((isInvoice || doc.type === "avoir") && co.vatOnDebits) lines.push("TVA acquittée d'après les débits.");
+  if (!clientIsPro && (co.mediatorName || "").trim()) {
+    lines.push(`Médiateur de la consommation : ${co.mediatorName.trim()}${(co.mediatorContact || "").trim() ? ` — ${co.mediatorContact.trim()}` : ""} (art. L616-1 du Code de la consommation).`);
+  }
+  return lines;
+}
+
+const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true, publicQr = null, companyProfile = null }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const hasGlobalDiscount = (totals.globalDiscountPct || 0) > 0 && (totals.globalDiscountAmount || 0) > 0;
   const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
@@ -1989,6 +2051,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
   const mono = { fontFamily: "'IBM Plex Mono', monospace" };
   const isFreeWatermark = watermarkEnabled; // contrôlé par l'Admin, forfait par forfait
   const hidePrices = doc.type === "livraison" && !doc.showPrices;
+  const companyName = companyDisplayName(legalCompanyOf(doc.company, companyProfile));
+  const legalLines = legalMentionLines(doc, companyProfile);
   const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
@@ -2025,8 +2089,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
           {doc.company.logo && (
             <img src={doc.company.logo} alt="Logo" style={{ height: "46px", marginLeft: "auto", marginBottom: "6px", objectFit: "contain" }} />
           )}
-          {doc.company.name && (
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontWeight: 700 }}>{doc.company.name}</div>
+          {companyName && (
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontWeight: 700 }}>{companyName}</div>
           )}
         </div>
       </div>
@@ -2034,7 +2098,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
       {/* Émetteur / Client */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "20px", position: "relative", zIndex: 1 }}>
         <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
-          <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
+          <div style={{ fontWeight: 700, marginBottom: "3px" }}>{companyName || "—"}</div>
           {doc.company.address && <div>{doc.company.address}</div>}
           {(doc.company.postalCode || doc.company.city) && <div>{[doc.company.postalCode, doc.company.city].filter(Boolean).join(" ")}</div>}
           {doc.company.phone && <div>Téléphone : {doc.company.phone}</div>}
@@ -2190,6 +2254,11 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
           )}
           {doc.type !== "facture" && Number(doc.acompte) > 0 && (
             <div style={{ marginTop: "6px" }}>Acompte de {doc.acompte}% à la commande : <strong style={mono}>{formatMoney(acompteAmount, doc.currency)}</strong></div>
+          )}
+          {legalLines.length > 0 && (
+            <div className="print-legal" style={{ marginTop: doc.notes || (doc.type !== "facture" && Number(doc.acompte) > 0) ? "10px" : 0, fontSize: "7.5pt", lineHeight: 1.35, color: inkSoft }}>
+              {legalLines.map((l, i) => <div key={i} style={{ marginBottom: "2px" }}>{l}</div>)}
+            </div>
           )}
         </div>
 
@@ -4395,7 +4464,7 @@ function DeviFactAppInner() {
             if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           })()}
         </div>
       </AtelierShell>
@@ -4911,7 +4980,7 @@ function DeviFactAppInner() {
           if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
         })()}
       </div>
     </div>
@@ -16662,7 +16731,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         </div>
       </div>
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintDocument ref={printRef} doc={localDoc} totals={totals} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+      <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
 
       {presentationMode && (
         <div className="df-presentation no-print" style={{ background: colors.ink }}>
@@ -16670,7 +16739,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <Minimize2 size={15} /> Quitter
           </button>
           <div style={{ padding: "24px 12px 48px", zoom: presentationZoom }}>
-            <PrintDocument doc={localDoc} totals={totals} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+            <PrintDocument doc={localDoc} totals={totals} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
           </div>
         </div>
       )}
@@ -16687,4 +16756,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
+  PrintDocument, legalMentionLines, computeTotals,
 };
