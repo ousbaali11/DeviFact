@@ -1566,10 +1566,10 @@ function computeRelanceDateLimite(doc) {
 // chantier. Le statut affiché tient compte de la date du jour même si
 // personne ne l'a mis à jour manuellement (sauf "terminé", qui reste
 // définitif une fois coché).
-const PLANNING_COULEURS = ["#8AA6C7", "#B8763E", "#7A9E7E", "#B06A6A", "#9B87B0", "#C7A96B"];
-
-function emptyTachePlanning(index = 0) {
-  return { id: nextId("tc"), designation: "", dateDebut: "", dateFin: "", corpsMetier: "", statut: "a_venir", couleur: PLANNING_COULEURS[index % PLANNING_COULEURS.length] };
+// Tâche : statut « a_venir » = automatique (déduit des dates) ; « en_cours »,
+// « retard » et « termine » peuvent être forcés à la main. Avancement en %.
+function emptyTachePlanning() {
+  return { id: nextId("tc"), designation: "", dateDebut: "", dateFin: "", corpsMetier: "", statut: "a_venir", avancementPct: 0 };
 }
 
 function newPlanningChantierDocument(documents) {
@@ -1577,11 +1577,14 @@ function newPlanningChantierDocument(documents) {
   return {
     id: nextId("doc"),
     type: "planning",
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "planning"),
     issueDate: today,
     marcheNumero: "",
     objet: "",
-    taches: [emptyTachePlanning(0)],
+    adresseChantier: "",
+    responsable: "",
+    taches: [emptyTachePlanning()],
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
     clientId: null,
@@ -1595,7 +1598,7 @@ function newPlanningChantierDocument(documents) {
 // "Terminé" reste tel quel une fois coché ; sinon le statut se déduit
 // de la date du jour comparée aux dates de la tâche.
 function computeTacheStatutEffectif(tache) {
-  if (tache.statut === "termine") return "termine";
+  if (tache.statut === "termine" || tache.statut === "en_cours" || tache.statut === "retard") return tache.statut;
   if (!tache.dateDebut && !tache.dateFin) return "a_venir";
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const debut = tache.dateDebut ? new Date(tache.dateDebut) : null;
@@ -1872,6 +1875,10 @@ const REQUIRED_FIELD_RULES = {
     { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
     { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
   ],
+  // Planning de chantier : au moins une tâche nommée.
+  planning: [
+    { label: "Au moins une tâche avec une désignation", test: (d) => Array.isArray(d.taches) && d.taches.some((t) => hasText(t.designation)) },
+  ],
   // Rapport d'intervention : client, technicien, et un contenu (motif ou travaux).
   rapport: [
     { label: "Nom du client", test: (d) => hasText(d.client?.name) },
@@ -1985,7 +1992,7 @@ function isDocumentEmpty(doc) {
     rapport: ["motifAppel", "diagnostic", "travauxRealises", "adresseIntervention", "technicien"],
     contrat: ["objetTravaux", "montantTotalHT", "lieuTravaux", "devisRef", "lieuSignature"],
     relance: ["factureRef", "montantDu", "signataire"],
-    planning: ["objet", "marcheNumero"],
+    planning: ["objet", "marcheNumero", "adresseChantier", "responsable"],
     avoir: ["factureOrigineRef", "factureOrigineDate", "motifAvoir", "modeRemboursement"],
     acompte: ["sourceDevisRef", "montantMarcheHT", "acompteMontantFixe"],
   };
@@ -4095,8 +4102,11 @@ function DeviFactAppInner() {
           rows.push(["Marché N°", doc.marcheNumero || ""]);
           rows.push(["Objet", doc.objet || ""]);
           rows.push([]);
-          rows.push(["Tâche", "Corps de métier", "Début", "Fin", "Statut"]);
-          (doc.taches || []).forEach((t) => rows.push([t.designation, t.corpsMetier, t.dateDebut ? fr(t.dateDebut) : "", t.dateFin ? fr(t.dateFin) : "", (STATUTS_TACHE[computeTacheStatutEffectif(t)] || {}).label || ""]));
+          if (doc.adresseChantier) rows.push(["Adresse du chantier", doc.adresseChantier]);
+          if (doc.responsable) rows.push(["Responsable", doc.responsable]);
+          if (doc.notes) rows.push(["Notes", doc.notes]);
+          rows.push(["Tâche", "Corps de métier", "Début", "Fin", "Statut", "Avancement %"]);
+          (doc.taches || []).forEach((t) => rows.push([t.designation, t.corpsMetier, t.dateDebut ? fr(t.dateDebut) : "", t.dateFin ? fr(t.dateFin) : "", (STATUTS_TACHE[computeTacheStatutEffectif(t)] || {}).label || "", Number(t.avancementPct) || 0]));
         }
         const ws = XLSX.utils.aoa_to_sheet(rows);
         let sheetName = doc.docNumber.replace(/[\\/*?:[\]]/g, "").slice(0, 31);
@@ -10220,9 +10230,15 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
           <div style={{ fontWeight: 700, fontSize: "14pt" }}>PLANNING DE CHANTIER</div>
           <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}{doc.marcheNumero ? ` — Marché N° ${doc.marcheNumero}` : ""}</div>
           {doc.objet && <div style={{ color: inkSoft }}>{doc.objet}</div>}
-          {doc.client?.name && <div style={{ color: inkSoft }}>Client : {doc.client.name}</div>}
+          {(doc.adresseChantier || "").trim() && <div style={{ color: inkSoft }}>Chantier : {doc.adresseChantier.trim()}</div>}
+          {doc.client?.name && <div style={{ color: inkSoft }}>Client : {doc.client.name}{(doc.client.address || "").trim() ? ` — ${doc.client.address.trim()}` : ""}</div>}
+          {(doc.responsable || "").trim() && <div style={{ color: inkSoft }}>Responsable : {doc.responsable.trim()}</div>}
         </div>
-        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "44px", maxWidth: "150px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "12pt" }}>{doc.company.name}</div>}
+        <div style={{ textAlign: "right" }}>
+          {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "44px", maxWidth: "150px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "12pt" }}>{doc.company.name}</div>}
+          {doc.company.logo && doc.company.name && <div style={{ fontSize: "8.5pt", fontWeight: 600 }}>{doc.company.name}</div>}
+          {(doc.company.address || "").trim() && <div style={{ fontSize: "8pt", color: inkSoft }}>{doc.company.address.trim()}</div>}
+        </div>
       </div>
 
       {range ? (
@@ -10243,14 +10259,16 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
               <div key={t.id} style={{ display: "flex", alignItems: "center", marginBottom: "6px" }}>
                 <div style={{ width: "160px", flexShrink: 0, fontSize: "8.5pt", paddingRight: "8px" }}>
                   <div style={{ fontWeight: 600 }}>{t.designation || "—"}</div>
-                  {t.corpsMetier && <div style={{ color: inkSoft, fontSize: "7.5pt" }}>{t.corpsMetier}</div>}
+                  {(t.corpsMetier || Number(t.avancementPct) > 0) && <div style={{ color: inkSoft, fontSize: "7.5pt" }}>{[t.corpsMetier, Number(t.avancementPct) > 0 ? `${Number(t.avancementPct)} %` : ""].filter(Boolean).join(" · ")}</div>}
                 </div>
                 <div style={{ flex: 1, position: "relative", height: "18px", background: "#00000006", borderRadius: "3px" }}>
                   {monthMarkers.map((m, i) => (
                     <div key={i} style={{ position: "absolute", left: `${m.leftPct}%`, top: 0, bottom: 0, borderLeft: `1px solid ${line}` }} />
                   ))}
                   {pos && (
-                    <div style={{ position: "absolute", left: `${pos.leftPct}%`, width: `${pos.widthPct}%`, top: "2px", bottom: "2px", background: info.color, borderRadius: "3px", minWidth: "3px" }} />
+                    <div style={{ position: "absolute", left: `${pos.leftPct}%`, width: `${pos.widthPct}%`, top: "2px", bottom: "2px", background: Number(t.avancementPct) > 0 && Number(t.avancementPct) < 100 ? `${info.color}66` : info.color, borderRadius: "3px", minWidth: "3px", overflow: "hidden" }}>
+                      {Number(t.avancementPct) > 0 && Number(t.avancementPct) < 100 && <div style={{ width: `${Math.min(100, Number(t.avancementPct))}%`, height: "100%", background: info.color }} />}
+                    </div>
                   )}
                 </div>
               </div>
@@ -10364,11 +10382,15 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
     rows.push(["Date", fr(localDoc.issueDate)]);
     rows.push(["Marché N°", localDoc.marcheNumero || ""]);
     rows.push(["Objet", localDoc.objet || ""]);
+    if (localDoc.adresseChantier) rows.push(["Adresse du chantier", localDoc.adresseChantier]);
+    if (localDoc.responsable) rows.push(["Responsable", localDoc.responsable]);
+    if (localDoc.client?.name) rows.push(["Client", [localDoc.client.name, localDoc.client.address].filter(Boolean).join(" — ")]);
+    if (localDoc.notes) rows.push(["Notes", localDoc.notes]);
     rows.push([]);
-    rows.push(["Tâche", "Corps de métier", "Début", "Fin", "Statut"]);
-    (localDoc.taches || []).forEach((t) => rows.push([t.designation, t.corpsMetier, t.dateDebut ? fr(t.dateDebut) : "", t.dateFin ? fr(t.dateFin) : "", STATUTS_TACHE[computeTacheStatutEffectif(t)]?.label || ""]));
+    rows.push(["Tâche", "Corps de métier", "Début", "Fin", "Statut", "Avancement %"]);
+    (localDoc.taches || []).forEach((t) => rows.push([t.designation, t.corpsMetier, t.dateDebut ? fr(t.dateDebut) : "", t.dateFin ? fr(t.dateFin) : "", STATUTS_TACHE[computeTacheStatutEffectif(t)]?.label || "", Number(t.avancementPct) || 0]));
     const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{ wch: 26 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+    ws["!cols"] = [{ wch: 26 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Planning");
     XLSX.writeFile(wb, `${localDoc.docNumber}.xlsx`);
@@ -10433,10 +10455,18 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet</label>
               <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
             </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Adresse du chantier (optionnel)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.adresseChantier || ""} onChange={(e) => patch({ adresseChantier: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Responsable / chef de chantier (optionnel)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.responsable || ""} onChange={(e) => patch({ responsable: e.target.value })} />
+            </div>
           </div>
 
           <div className="mb-3 flex items-center justify-between">
-            <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tâches</label>
+            <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tâches * <span className="normal-case tracking-normal" style={{ color: colors.inkSoft }}>(au moins une tâche nommée pour enregistrer)</span></label>
             <button onClick={addTache} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Tâche</button>
           </div>
           <div className="mb-6 space-y-2">
@@ -10446,7 +10476,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
               return (
                 <div key={t.id} className="rounded-lg p-3" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
                   <div className="mb-2 flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: t.couleur }} />
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: info.color }} />
                     <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation de la tâche" value={t.designation} onChange={(e) => patchTache(t.id, { designation: e.target.value })} />
                     <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${info.color}18`, color: info.color }}>{info.label}</span>
                     {(localDoc.taches || []).length > 1 && <button onClick={() => removeTache(t.id)} title="Supprimer cette tâche" style={{ color: colors.brick }}><Trash2 size={14} /></button>}
@@ -10458,9 +10488,18 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
                       <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${t.dateDebut && t.dateFin && t.dateFin < t.dateDebut ? colors.brick : colors.line}` }} value={t.dateFin} onChange={(e) => patchTache(t.id, { dateFin: e.target.value })} />
                       {t.dateDebut && t.dateFin && t.dateFin < t.dateDebut && <p className="mt-0.5 text-xs" style={{ color: colors.brick }}>Avant la date de début</p>}
                     </div>
-                    <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}>
-                      <input type="checkbox" checked={t.statut === "termine"} onChange={(e) => patchTache(t.id, { statut: e.target.checked ? "termine" : "a_venir" })} /> Terminé
-                    </label>
+                    <select className="df-select rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} title="Statut : automatique selon les dates, ou forcé à la main" value={["en_cours", "retard", "termine"].includes(t.statut) ? t.statut : "a_venir"} onChange={(e) => patchTache(t.id, { statut: e.target.value })}>
+                      <option value="a_venir">Automatique (selon les dates)</option>
+                      <option value="en_cours">En cours</option>
+                      <option value="retard">En retard</option>
+                      <option value="termine">Terminé</option>
+                    </select>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 text-xs" style={{ color: colors.inkSoft }}>
+                    <span>Avancement</span>
+                    <input type="number" min="0" max="100" step="5" className="df-input df-mono w-20 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={t.avancementPct ?? 0} onChange={(e) => patchTache(t.id, { avancementPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })} />
+                    <span>%</span>
+                    <div className="h-1.5 grow overflow-hidden rounded-full" style={{ background: `${info.color}33` }}><div className="h-full" style={{ width: `${Math.max(0, Math.min(100, Number(t.avancementPct) || 0))}%`, background: info.color }} /></div>
                   </div>
                 </div>
               );
@@ -10503,7 +10542,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
       <PrintPlanning ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -17413,5 +17452,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
