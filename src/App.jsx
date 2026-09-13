@@ -569,6 +569,9 @@ const DOCUMENT_SCHEMA_VERSION = 2;
 const RELANCE_NIVEAUX = [["relance1", "Première relance"], ["relance2", "Deuxième relance"], ["mise_en_demeure", "Mise en demeure"]];
 const relanceNiveauOf = (doc) => (RELANCE_NIVEAUX.some(([id]) => id === doc?.niveau) ? doc.niveau : "mise_en_demeure");
 const relanceNiveauLabel = (doc) => RELANCE_NIVEAUX.find(([id]) => id === relanceNiveauOf(doc))[1];
+// Contrat de chantier : clauses proposées par défaut (modifiables).
+const CONTRAT_CLAUSE_RECEPTION = "La réception des travaux est prononcée contradictoirement, par procès-verbal, avec ou sans réserves. Elle constitue le point de départ de la garantie de parfait achèvement (un an), de la garantie de bon fonctionnement des équipements (deux ans) et de la garantie décennale (dix ans), conformément aux articles 1792 et suivants du Code civil.";
+const CONTRAT_CLAUSE_RETRACTATION = "Le maître d'ouvrage, consommateur, dispose d'un délai de quatorze jours à compter de la signature du présent contrat pour exercer son droit de rétractation, sans avoir à motiver sa décision (art. L221-18 du Code de la consommation). Les travaux ne pourront commencer avant l'expiration de ce délai qu'à sa demande expresse.";
 // Règlement d'un avoir : imputation sur une facture à venir ou remboursement.
 const AVOIR_REGLEMENTS = ["Imputation sur la prochaine facture", "Remboursement par virement", "Remboursement par chèque", "Autre modalité convenue avec le client"];
 // Modes de règlement d'une facture (imprimés avec l'IBAN du profil).
@@ -1462,9 +1465,17 @@ function newContratChantierDocument(documents) {
   return {
     id: nextId("doc"),
     type: "contrat",
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "contrat"),
     issueDate: today,
+    // Devise des montants (auparavant absente : EUR imposé sur le PDF).
+    currency: geoDefaults().currency || "EUR",
     objetTravaux: "",
+    // Lieu des travaux (obligatoire pour un nouveau contrat), devis servant
+    // de document contractuel, retenue de garantie (loi 71-584) en option.
+    lieuTravaux: "",
+    devisRef: "",
+    retenueGarantiePct: "",
     montantTotalHT: "",
     tva: 20,
     dateDebutTravaux: "",
@@ -1474,6 +1485,13 @@ function newContratChantierDocument(documents) {
     assurances: "L'entreprise déclare être couverte par une assurance responsabilité civile professionnelle et une assurance décennale pour les travaux concernés, dont elle remettra les attestations au maître d'ouvrage.",
     clauseResiliation: "Le contrat peut être résilié par écrit par l'une ou l'autre des parties en cas de manquement grave de l'autre partie à ses obligations, après mise en demeure restée sans effet.",
     clauseLitiges: "En cas de litige, les parties s'efforceront de trouver une solution amiable avant tout recours judiciaire.",
+    clauseReception: CONTRAT_CLAUSE_RECEPTION,
+    // Contrat conclu hors établissement avec un particulier : délai de
+    // rétractation de 14 jours (art. L221-18 C. conso), clause imprimée
+    // seulement dans ce cas.
+    horsEtablissement: false,
+    clauseRetractation: CONTRAT_CLAUSE_RETRACTATION,
+    lieuSignature: "",
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
     clientId: null,
@@ -1843,6 +1861,14 @@ const REQUIRED_FIELD_RULES = {
     { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
     { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
   ],
+  // Contrat de chantier : parties, objet, lieu et prix.
+  contrat: [
+    { label: "Nom de l'entreprise", test: (d) => hasText(d.company?.name) },
+    { label: "Nom du maître d'ouvrage", test: (d) => hasText(d.client?.name) },
+    { label: "Objet des travaux", test: (d) => hasText(d.objetTravaux) },
+    { label: "Lieu des travaux", test: (d) => hasText(d.lieuTravaux) },
+    { label: "Montant total HT", test: (d) => (Number(d.montantTotalHT) || 0) > 0 },
+  ],
   // Révision de prix : référence du marché, entreprise, et un montant à réviser.
   revision: [
     { label: "Marché N°", test: (d) => hasText(d.marcheNumero) },
@@ -1931,7 +1957,7 @@ function isDocumentEmpty(doc) {
     revision: ["objet", "marcheNumero", "dateDemarrage"],
     pv_reception: ["objet", "marcheNumero"],
     rapport: ["motifAppel", "diagnostic", "travauxRealises", "adresseIntervention", "technicien"],
-    contrat: ["objetTravaux", "montantTotalHT"],
+    contrat: ["objetTravaux", "montantTotalHT", "lieuTravaux", "devisRef", "lieuSignature"],
     relance: ["factureRef", "montantDu", "signataire"],
     planning: ["objet", "marcheNumero"],
     avoir: ["factureOrigineRef", "factureOrigineDate", "motifAvoir", "modeRemboursement"],
@@ -4018,6 +4044,7 @@ function DeviFactAppInner() {
           rows.push(["Entreprise", doc.company?.name || ""]);
           rows.push(["Maître d'ouvrage", doc.client?.name || ""]);
           rows.push(["Objet des travaux", doc.objetTravaux || ""]);
+          rows.push(["Lieu des travaux", doc.lieuTravaux || ""]);
           rows.push(["Montant total HT", Number(doc.montantTotalHT) || 0]);
           rows.push(["TVA %", Number(doc.tva) || 0]);
           rows.push(["Modalités de paiement", doc.modalitesPaiement || ""]);
@@ -4418,6 +4445,7 @@ function DeviFactAppInner() {
     return (
       <ContratChantierEditor
         doc={activeDoc}
+        companyProfile={companyProfile}
         saving={saving}
         account={account}
         plans={plans}
@@ -4678,7 +4706,7 @@ function DeviFactAppInner() {
             if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
@@ -5194,7 +5222,7 @@ function DeviFactAppInner() {
           if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
@@ -9348,7 +9376,12 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
   );
 }
 
-const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, watermarkEnabled = true }, ref) {
+const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, watermarkEnabled = true, companyProfile = null }, ref) {
+  const currency = doc.currency || "EUR";
+  const co = legalCompanyOf(doc.company, companyProfile);
+  const insurance = companyInsuranceLabel(co);
+  const clientIsParticulier = doc.client?.type === "particulier";
+  const retenuePct = Number(doc.retenueGarantiePct) || 0;
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
@@ -9401,12 +9434,15 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
       </div>
 
       {clause("Article 1 — Objet des travaux", doc.objetTravaux)}
+      {(doc.lieuTravaux || "").trim() && <div style={{ marginTop: "4px", position: "relative", zIndex: 1 }}>Lieu des travaux : <strong>{doc.lieuTravaux.trim()}</strong></div>}
+      {(doc.devisRef || "").trim() && <div style={{ marginTop: "4px", color: inkSoft, position: "relative", zIndex: 1 }}>Documents contractuels : le présent contrat et le devis n° {doc.devisRef.trim()} accepté par le maître d'ouvrage.</div>}
 
       <div style={{ marginTop: "14px", padding: "10px 14px", borderRadius: "4px", background: box, position: "relative", zIndex: 1 }}>
         <div style={{ fontWeight: 700, marginBottom: "6px" }}>Article 2 — Prix</div>
-        <div style={{ display: "flex", justifyContent: "space-between" }}><span>Montant total HT</span><span style={mono}>{formatMoney(Number(doc.montantTotalHT) || 0, "EUR")}</span></div>
-        <div style={{ display: "flex", justifyContent: "space-between", color: inkSoft }}><span>TVA {doc.tva}%</span><span style={mono}>{formatMoney(montantTVA, "EUR")}</span></div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, marginTop: "3px" }}><span>Montant total TTC</span><span style={mono}>{formatMoney(montantTTC, "EUR")}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span>Montant total HT</span><span style={mono}>{formatMoney(Number(doc.montantTotalHT) || 0, currency)}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", color: inkSoft }}><span>TVA {doc.tva}%</span><span style={mono}>{formatMoney(montantTVA, currency)}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, marginTop: "3px" }}><span>Montant total TTC</span><span style={mono}>{formatMoney(montantTTC, currency)}</span></div>
+        {retenuePct > 0 && <div style={{ marginTop: "4px", color: inkSoft, fontSize: "8.5pt" }}>Retenue de garantie : {retenuePct} % du montant des travaux, libérée à l'expiration du délai d'un an après la réception (loi n° 71-584 du 16 juillet 1971).</div>}
       </div>
 
       {clause("Article 3 — Modalités de paiement", doc.modalitesPaiement)}
@@ -9417,12 +9453,17 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
       </div>
 
       {clause("Article 4 — Pénalités de retard", doc.penalitesRetard)}
-      {clause("Article 5 — Assurances", doc.assurances)}
+      {clause("Article 5 — Assurances", [doc.assurances, insurance ? `Assurance décennale et responsabilité civile professionnelle : ${insurance}.` : ""].filter(Boolean).join("\n"))}
       {clause("Article 6 — Résiliation", doc.clauseResiliation)}
-      {clause("Article 7 — Litiges", doc.clauseLitiges)}
+      {clause("Article 7 — Litiges", [doc.clauseLitiges, clientIsParticulier && (co.mediatorName || "").trim() ? `Médiateur de la consommation : ${co.mediatorName.trim()}${(co.mediatorContact || "").trim() ? ` — ${co.mediatorContact.trim()}` : ""} (art. L616-1 du Code de la consommation).` : ""].filter(Boolean).join("\n"))}
+      {clause("Article 8 — Réception et garanties", doc.clauseReception)}
+      {clientIsParticulier && doc.horsEtablissement === true && clause("Article 9 — Droit de rétractation", doc.clauseRetractation)}
       {doc.notes && clause("Notes complémentaires", doc.notes)}
 
-      <div style={{ display: "flex", gap: "24px", marginTop: "32px", position: "relative", zIndex: 1 }}>
+      {((doc.lieuSignature || "").trim() || doc.signatureClient?.date) && (
+        <div style={{ marginTop: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>Fait {(doc.lieuSignature || "").trim() ? `à ${doc.lieuSignature.trim()}, ` : ""}le {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : "…"}, en deux exemplaires originaux.</div>
+      )}
+      <div style={{ display: "flex", gap: "24px", marginTop: "12px", position: "relative", zIndex: 1 }}>
         <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le maître d'ouvrage</div>
           <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
@@ -9438,7 +9479,7 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
   );
 });
 
-function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
+function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -9524,6 +9565,9 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
     rows.push(["Entreprise", localDoc.company?.name || ""]);
     rows.push(["Maître d'ouvrage", localDoc.client?.name || ""]);
     rows.push(["Objet des travaux", localDoc.objetTravaux || ""]);
+    rows.push(["Lieu des travaux", localDoc.lieuTravaux || ""]);
+    if (localDoc.devisRef) rows.push(["Devis de référence", localDoc.devisRef]);
+    rows.push(["Devise", localDoc.currency || "EUR"]);
     rows.push(["Montant total HT", Number(localDoc.montantTotalHT) || 0]);
     rows.push(["TVA %", Number(localDoc.tva) || 0]);
     rows.push(["Début des travaux", localDoc.dateDebutTravaux ? fr(localDoc.dateDebutTravaux) : ""]);
@@ -9533,6 +9577,10 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
     rows.push(["Assurances", localDoc.assurances || ""]);
     rows.push(["Résiliation", localDoc.clauseResiliation || ""]);
     rows.push(["Litiges", localDoc.clauseLitiges || ""]);
+    rows.push(["Réception et garanties", localDoc.clauseReception ?? CONTRAT_CLAUSE_RECEPTION]);
+    if (Number(localDoc.retenueGarantiePct) > 0) rows.push(["Retenue de garantie (%)", Number(localDoc.retenueGarantiePct)]);
+    if (localDoc.client?.type === "particulier" && localDoc.horsEtablissement === true) rows.push(["Droit de rétractation", localDoc.clauseRetractation ?? CONTRAT_CLAUSE_RETRACTATION]);
+    if (localDoc.lieuSignature) rows.push(["Lieu de signature", localDoc.lieuSignature]);
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 26 }, { wch: 50 }];
     const wb = XLSX.utils.book_new();
@@ -9578,28 +9626,51 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
             </div>
           )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Contrat de chantier</h1>
+          <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires pour enregistrer le contrat.</p>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise *</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.company.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
               <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="SIRET" value={localDoc.company.siret} onChange={(e) => patchDeep("company", { siret: e.target.value })} />
             </div>
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Maître d'ouvrage (client)</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <label className="block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Maître d'ouvrage (client) *</label>
+                <div className="flex gap-1 rounded-md p-0.5" style={{ background: colors.surface }} title="Un particulier bénéficie du droit de rétractation hors établissement et du médiateur de la consommation">
+                  <button type="button" onClick={() => patchDeep("client", { type: "entreprise" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: (localDoc.client.type || "entreprise") !== "particulier" ? colors.ink : "transparent", color: (localDoc.client.type || "entreprise") !== "particulier" ? "white" : colors.inkSoft }}>Professionnel</button>
+                  <button type="button" onClick={() => patchDeep("client", { type: "particulier" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: localDoc.client.type === "particulier" ? colors.ink : "transparent", color: localDoc.client.type === "particulier" ? "white" : colors.inkSoft }}>Particulier</button>
+                </div>
+              </div>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+              {localDoc.client.type === "particulier" && (
+                <label className="mt-2 flex items-start gap-2 text-xs" style={{ color: colors.inkSoft }}>
+                  <input type="checkbox" className="mt-0.5" checked={localDoc.horsEtablissement === true} onChange={(e) => patch({ horsEtablissement: e.target.checked })} />
+                  <span>Contrat conclu hors établissement (au domicile du client, sur un salon…) : ajoute l'article sur le droit de rétractation de 14 jours (art. L221-18 du Code de la consommation).</span>
+                </label>
+              )}
             </div>
           </div>
 
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 1 — Objet des travaux</label>
-          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "4rem" }} value={localDoc.objetTravaux} onChange={(e) => patch({ objetTravaux: e.target.value })} />
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 1 — Objet des travaux *</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.objetTravaux || "").trim() ? colors.line : colors.brick}`, minHeight: "4rem" }} value={localDoc.objetTravaux} onChange={(e) => patch({ objetTravaux: e.target.value })} />
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Lieu des travaux *</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.lieuTravaux || "").trim() ? colors.line : colors.brick}` }} placeholder="Adresse du chantier" value={localDoc.lieuTravaux || ""} onChange={(e) => patch({ lieuTravaux: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Devis de référence (optionnel)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : DEV-014 — cité comme document contractuel" value={localDoc.devisRef || ""} onChange={(e) => patch({ devisRef: e.target.value })} />
+            </div>
+          </div>
 
           <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Montant total HT</label>
-              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.montantTotalHT} onChange={(e) => patch({ montantTotalHT: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Montant total HT ({currencyLabel(localDoc.currency || "EUR")}) *</label>
+              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(Number(localDoc.montantTotalHT) || 0) > 0 ? colors.line : colors.brick}` }} value={localDoc.montantTotalHT} onChange={(e) => patch({ montantTotalHT: e.target.value })} />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>TVA %</label>
@@ -9611,9 +9682,15 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
             </div>
           </div>
 
-          <div className="mb-4 max-w-xs">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Début des travaux prévu</label>
-            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateDebutTravaux || ""} onChange={(e) => patch({ dateDebutTravaux: e.target.value })} />
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Début des travaux prévu</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateDebutTravaux || ""} onChange={(e) => patch({ dateDebutTravaux: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Retenue de garantie (%, optionnel)</label>
+              <input type="number" step="0.5" min="0" max="5" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="5 au maximum (loi 71-584)" value={localDoc.retenueGarantiePct ?? ""} onChange={(e) => patch({ retenueGarantiePct: e.target.value })} />
+            </div>
           </div>
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 3 — Modalités de paiement</label>
@@ -9630,6 +9707,22 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 7 — Litiges</label>
           <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.clauseLitiges} onChange={(e) => patch({ clauseLitiges: e.target.value })} />
+          <p className="-mt-3 mb-4 text-xs" style={{ color: colors.inkSoft }}>Les coordonnées de l'assureur décennale (article 5) et du médiateur de la consommation (article 7, client particulier) sont reprises automatiquement de « Mon entreprise ».</p>
+
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 8 — Réception et garanties</label>
+          <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.clauseReception ?? CONTRAT_CLAUSE_RECEPTION} onChange={(e) => patch({ clauseReception: e.target.value })} />
+
+          {localDoc.client.type === "particulier" && localDoc.horsEtablissement === true && (
+            <>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 9 — Droit de rétractation (particulier, hors établissement)</label>
+              <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.clauseRetractation ?? CONTRAT_CLAUSE_RETRACTATION} onChange={(e) => patch({ clauseRetractation: e.target.value })} />
+            </>
+          )}
+
+          <div className="mb-4 max-w-xs">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Lieu de signature (optionnel)</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : Lyon" value={localDoc.lieuSignature || ""} onChange={(e) => patch({ lieuSignature: e.target.value })} />
+          </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
@@ -9649,8 +9742,8 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintContrat ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <PrintContrat ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} companyProfile={companyProfile} />
     </div>
   );
 }
@@ -17219,5 +17312,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
