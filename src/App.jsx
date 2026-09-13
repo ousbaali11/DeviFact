@@ -16069,7 +16069,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   </div>
                 )}
               </div>
-              {prestations.length > 0 && (
+              {products.length > 0 && (
                 <div className="relative">
                   <button
                     onClick={() => hasPro ? setLibraryOpen((v) => !v) : onGoToPricing()}
@@ -16348,3 +16348,14 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     </div>
   );
 }
+
+/* eslint-disable react/only-export-components -- exports réservés aux tests, voir ci-dessous */
+// Exports nommés réservés aux tests automatisés (src/*.test.jsx) : ils
+// permettent de rendre chaque éditeur hors du site, sans compte, pour
+// détecter une erreur de rendu avant la mise en ligne. Aucun effet sur
+// l'application, qui n'utilise que l'export par défaut.
+export {
+  Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
+  newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
+  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS,
+};
