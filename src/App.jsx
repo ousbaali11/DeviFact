@@ -244,7 +244,7 @@ function InstagramIcon({ size = 20 }) {
 // comme "Terminé" une fois cliqué. Reste discret et informatif une
 // fois déjà cliqué, plutôt que de disparaître (pour qu'on sache
 // toujours où on en est en revenant sur ce document plus tard).
-function FinalizeButton({ doc, onFinalize, siteSettings, errors = [] }) {
+function FinalizeButton({ doc, onFinalize, siteSettings, errors = [], hints = [] }) {
   const isDone = doc?.workStage === "termine";
   const isAdvanced = siteSettings?.landingPageVersion === "avancee";
   const blocked = errors.length > 0;
@@ -252,6 +252,7 @@ function FinalizeButton({ doc, onFinalize, siteSettings, errors = [] }) {
     <div className="no-print flex flex-wrap items-center justify-end gap-2 border-t px-6 py-4" style={{ borderColor: colors.line }}>
       {isDone && !blocked && <span className="text-xs" style={{ color: colors.inkSoft }}>Marqué comme terminé — modifie-le et enregistre à nouveau si besoin.</span>}
       {blocked && <span className="text-xs" style={{ color: colors.brick }} data-testid="required-missing">Champs obligatoires manquants : {errors.join(", ")}</span>}
+      {!blocked && hints.length > 0 && <span className="text-xs" style={{ color: colors.brassDark }} data-testid="required-hints" title="Document créé avant la mise à jour des champs : l'enregistrement reste possible">À compléter si possible : {hints.join(", ")}</span>}
       <button
         onClick={onFinalize}
         disabled={blocked}
@@ -561,6 +562,8 @@ const DEVIS_STATUSES = ["brouillon", "envoyé", "vu", "signé", "refusé", "expi
 const FACTURE_STATUSES = ["brouillon", "envoyée", "payée", "en retard"];
 // Règlement d'un avoir : imputation sur une facture à venir ou remboursement.
 const AVOIR_REGLEMENTS = ["Imputation sur la prochaine facture", "Remboursement par virement", "Remboursement par chèque", "Autre modalité convenue avec le client"];
+// Modes de règlement d'une facture (imprimés avec l'IBAN du profil).
+const PAYMENT_METHODS = ["Virement bancaire", "Chèque", "Espèces", "Carte bancaire", "Prélèvement", "Autre"];
 const PROFORMA_STATUSES = ["brouillon", "envoyée", "acceptée", "expirée"];
 
 const PLANS = [
@@ -1746,9 +1749,32 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
 // Champs obligatoires par type, contrôlés au clic sur « Enregistrer » /
 // « Terminé » (jamais pendant la saisie : l'enregistrement automatique du
 // brouillon continue). Chaque règle porte le libellé affiché à l'utilisateur.
+const DOCUMENT_SCHEMA_VERSION = 2;
+const isStrictDocument = (d) => Number(d?.schemaVersion) >= 2;
 const hasText = (v) => !!String(v ?? "").trim();
 const hasOneLine = (d) => Array.isArray(d.items) && d.items.some((it) => it.type === "line" && hasText(it.designation));
 const REQUIRED_FIELD_RULES = {
+  // Devis : mentions de l'arrêté du 24 janvier 2017 et de l'art. L111-1 du
+  // Code de la consommation (validité, début et durée des travaux).
+  devis: [
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+    { label: "Au moins une ligne avec une désignation", test: hasOneLine },
+    { label: "Validité (jours)", test: (d) => (Number(d.validityDays) || 0) > 0 },
+    { label: "Début des travaux", test: (d) => hasText(d.worksStartDate) },
+    { label: "Durée estimée des travaux", test: (d) => hasText(d.worksDuration) },
+  ],
+  // Facture : art. L441-9 C. com. et art. 242 nonies A ann. II CGI.
+  facture: [
+    { label: "Numéro", test: (d) => hasText(d.docNumber) },
+    { label: "Date d'émission", test: (d) => hasText(d.issueDate) },
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+    { label: "Ville du client", test: (d) => hasText(d.client?.city) },
+    { label: "Pays du client", test: (d) => hasText(d.client?.country) },
+    { label: "Date de la prestation", test: (d) => hasText(d.serviceDate) },
+    { label: "Au moins une ligne avec une désignation", test: hasOneLine },
+    { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
+    { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
+  ],
   // Avoir : facture rectificative, elle doit référencer la facture d'origine
   // et indiquer le motif (art. 289 du CGI).
   // Facture d'acompte : devis ou marché de référence, montant du marché et
@@ -1766,9 +1792,17 @@ const REQUIRED_FIELD_RULES = {
     { label: "Au moins une ligne avec une désignation", test: hasOneLine },
   ],
 };
-function documentValidationErrors(doc) {
+function documentFieldGaps(doc) {
   if (!doc) return [];
   return (REQUIRED_FIELD_RULES[doc.type] || []).filter((r) => !r.test(doc)).map((r) => r.label);
+}
+// Bloquant : documents créés avec la version courante du modèle.
+function documentValidationErrors(doc) {
+  return isStrictDocument(doc) ? documentFieldGaps(doc) : [];
+}
+// Invitation seulement : documents plus anciens, qui restent enregistrables.
+function documentSuggestedFields(doc) {
+  return isStrictDocument(doc) ? [] : documentFieldGaps(doc);
 }
 
 // Facture d'acompte : la ligne facturée est GÉNÉRÉE par le bloc acompte
@@ -1828,6 +1862,10 @@ function isDocumentEmpty(doc) {
 function newDocument(type, documents) {
   const base = {
     id: nextId("doc"),
+    // Version du modèle : les champs obligatoires ne bloquent l'enregistrement
+    // final que pour les documents créés avec cette version ou une plus
+    // récente ; les documents plus anciens reçoivent une simple invitation.
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
     type,
     docNumber: nextNumber(documents, type),
     issueDate: new Date().toISOString().slice(0, 10),
@@ -1868,11 +1906,16 @@ function newDocument(type, documents) {
   if (type === "facture") {
     // acompteVerse : acompte déjà réglé par un autre moyen, en montant TTC,
     // déduit du total (vide par défaut, toujours confirmé par l'artisan).
-    return { ...base, acompteVerse: "", isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "", remindersEnabled: true };
+    return { ...base, acompteVerse: "", serviceDate: "", serviceDateEnd: "", paymentMethod: "", sourceDevisNumber: "", isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "", remindersEnabled: true };
   }
   // Facture d'acompte : doit référencer le devis/marché d'origine et
   // savoir combien reste à facturer après cet acompte — sans ça, ce
   // n'est qu'une facture ordinaire mal nommée.
+  // Devis : date de début et durée estimée des travaux (art. L111-1 C. conso,
+  // arrêté du 24 janvier 2017), modalités de paiement, mention « Devis gratuit ».
+  if (type === "devis") {
+    return { ...base, worksStartDate: "", worksDuration: "", paymentTerms: "", freeQuote: true };
+  }
   if (type === "acompte") {
     return { ...base, sourceDevisRef: "", montantMarcheHT: "", acompteMode: "pourcentage", acomptePourcentage: 30, acompteMontantFixe: "", acompteTva: 20, notes: "", showValidity: false };
   }
@@ -2046,7 +2089,7 @@ const VAT_EXEMPTION_TEXTS = {
 // Champs du profil entreprise portant les mentions légales (audit des champs,
 // étape B) : lus sur la copie du profil enregistrée dans le document, sinon
 // sur le profil courant (documents créés avant l'étape A).
-const LEGAL_COMPANY_FIELDS = ["legalForm", "capital", "registration", "entrepreneurIndividuel", "insuranceName", "insurancePolicy", "insuranceZone", "mediatorName", "mediatorContact", "vatOnDebits"];
+const LEGAL_COMPANY_FIELDS = ["legalForm", "capital", "registration", "entrepreneurIndividuel", "insuranceName", "insurancePolicy", "insuranceZone", "mediatorName", "mediatorContact", "vatOnDebits", "iban", "bic"];
 function legalCompanyOf(docCompany, companyProfile) {
   const out = { ...(docCompany || {}) };
   for (const f of LEGAL_COMPANY_FIELDS) {
@@ -2091,6 +2134,14 @@ function legalMentionLines(doc, companyProfile) {
   const zeroRated = (doc.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) === 0);
   if (zeroRated && VAT_EXEMPTION_TEXTS[doc.vatExemptionReason]) lines.push(VAT_EXEMPTION_TEXTS[doc.vatExemptionReason]);
   if ((isInvoice || doc.type === "avoir") && co.vatOnDebits) lines.push("TVA acquittée d'après les débits.");
+  // Mode de règlement et coordonnées bancaires (facultatif, mais l'IBAN
+  // imprimé évite les erreurs de virement).
+  if (isInvoice) {
+    const method = (doc.paymentMethod || "").trim();
+    const iban = (co.iban || "").trim();
+    if (method || iban) lines.push(`Règlement${method ? ` : ${method}` : ""}${iban ? ` — IBAN ${iban}${(co.bic || "").trim() ? ` · BIC ${co.bic.trim()}` : ""}` : ""}.`);
+  }
+  if (doc.type === "devis" && doc.freeQuote === true) lines.push("Devis gratuit.");
   if (!clientIsPro && (co.mediatorName || "").trim()) {
     lines.push(`Médiateur de la consommation : ${co.mediatorName.trim()}${(co.mediatorContact || "").trim() ? ` — ${co.mediatorContact.trim()}` : ""} (art. L616-1 du Code de la consommation).`);
   }
@@ -2145,6 +2196,15 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
             <span style={mono}>{doc.docNumber || "—"}/{new Date(doc.issueDate).getFullYear()}</span>
           </div>
           <div style={{ fontSize: "9.5pt", color: inkSoft, marginTop: "4px" }}>Date d'émission : {frLong(doc.issueDate)}</div>
+          {doc.type === "facture" && doc.serviceDate && (
+            <div style={{ fontSize: "9.5pt", color: inkSoft }}>{doc.serviceDateEnd ? `Prestation réalisée du ${frLong(doc.serviceDate)} au ${frLong(doc.serviceDateEnd)}` : `Prestation réalisée le ${frLong(doc.serviceDate)}`}</div>
+          )}
+          {doc.type === "facture" && doc.sourceDevisNumber && (
+            <div style={{ fontSize: "9.5pt", color: inkSoft }}>D'après le devis N° {doc.sourceDevisNumber}</div>
+          )}
+          {doc.type === "devis" && (doc.worksStartDate || (doc.worksDuration || "").trim()) && (
+            <div style={{ fontSize: "9.5pt", color: inkSoft }}>{[doc.worksStartDate ? `Début des travaux : ${frLong(doc.worksStartDate)}` : "", (doc.worksDuration || "").trim() ? `Durée estimée : ${doc.worksDuration.trim()}` : ""].filter(Boolean).join(" — ")}</div>
+          )}
           {(isInvoiceLike || (doc.type !== "avoir" && doc.showValidity !== false)) && (
             <div style={{ fontSize: "9.5pt", color: inkSoft }}>{!isInvoiceLike ? `Valable jusqu'au ${frLong(validityDate)}` : `Échéance : ${frLong(dueDate)}`}</div>
           )}
@@ -2176,6 +2236,9 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
           {(doc.client.postalCode || doc.client.city) && <div>{[doc.client.postalCode, doc.client.city].filter(Boolean).join(" ")}</div>}
           {doc.client.email && <div>{doc.client.email}</div>}
           {doc.client.phone && <div>{doc.client.phone}</div>}
+          {(doc.type === "devis" || doc.type === "facture") && (doc.deliveryAddress || doc.deliveryCity) && (
+            <div style={{ marginTop: "4px", fontSize: "9pt", color: inkSoft }}>Chantier : {[doc.deliveryAddress, [doc.deliveryPostalCode, doc.deliveryCity].filter(Boolean).join(" ")].filter(Boolean).join(", ")}</div>
+          )}
         </div>
       </div>
 
@@ -2318,11 +2381,14 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPl
               <div style={{ color: inkSoft, whiteSpace: "pre-wrap" }}>{renderMarkup(doc.notes)}</div>
             </>
           )}
+          {doc.type === "devis" && (doc.paymentTerms || "").trim() && (
+            <div style={{ marginTop: "6px" }}>Modalités de paiement : {doc.paymentTerms.trim()}</div>
+          )}
           {showAcompteDemande && (
             <div style={{ marginTop: "6px" }}>Acompte de {doc.acompte}% à la commande : <strong style={mono}>{formatMoney(acompteAmount, doc.currency)}</strong></div>
           )}
           {legalLines.length > 0 && (
-            <div className="print-legal" style={{ marginTop: doc.notes || showAcompteDemande ? "10px" : 0, fontSize: "7.5pt", lineHeight: 1.35, color: inkSoft }}>
+            <div className="print-legal" style={{ marginTop: doc.notes || showAcompteDemande || (doc.type === "devis" && (doc.paymentTerms || "").trim()) ? "10px" : 0, fontSize: "7.5pt", lineHeight: 1.35, color: inkSoft }}>
               {legalLines.map((l, i) => <div key={i} style={{ marginBottom: "2px" }}>{l}</div>)}
             </div>
           )}
@@ -3629,6 +3695,10 @@ function DeviFactAppInner() {
           status: "brouillon",
           workStage: "brouillon",
           linkedDevisId: updatedOriginal.id,
+          sourceDevisNumber: updatedOriginal.docNumber || "",
+          schemaVersion: DOCUMENT_SCHEMA_VERSION,
+          acompte: 0,
+          serviceDate: "", serviceDateEnd: "", paymentMethod: "",
           acompteVerse: "",
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -3728,6 +3798,12 @@ function DeviFactAppInner() {
       issueDate: new Date().toISOString().slice(0, 10),
       status: "brouillon",
       linkedDevisId: original.id,
+      sourceDevisNumber: original.docNumber || "",
+      schemaVersion: DOCUMENT_SCHEMA_VERSION,
+      // Acompte demandé (en %) : notion de devis, sans objet sur la facture
+      // (Factur-X le lirait comme un acompte payé).
+      acompte: 0,
+      serviceDate: "", serviceDateEnd: "", paymentMethod: "",
       // Acompte déjà versé : laissé vide, même si le devis demandait un
       // acompte — c'est à l'artisan de confirmer le montant réellement reçu.
       acompteVerse: "",
@@ -15862,6 +15938,14 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     if (invoiceLikeXls || (localDoc.type !== "avoir" && localDoc.showValidity !== false)) {
       rows.push([!invoiceLikeXls ? "Valable jusqu'au" : "Échéance", frLong(!invoiceLikeXls ? validityDate : dueDate)]);
     }
+    if (localDoc.type === "facture" && localDoc.serviceDate) rows.push(["Prestation réalisée", localDoc.serviceDateEnd ? `du ${frLong(localDoc.serviceDate)} au ${frLong(localDoc.serviceDateEnd)}` : frLong(localDoc.serviceDate)]);
+    if (localDoc.type === "facture" && localDoc.sourceDevisNumber) rows.push(["Devis d'origine", localDoc.sourceDevisNumber]);
+    if (localDoc.type === "facture" && localDoc.paymentMethod) rows.push(["Mode de règlement", localDoc.paymentMethod]);
+    if (localDoc.type === "devis") {
+      if (localDoc.worksStartDate) rows.push(["Début des travaux", frLong(localDoc.worksStartDate)]);
+      if ((localDoc.worksDuration || "").trim()) rows.push(["Durée estimée", localDoc.worksDuration.trim()]);
+      if ((localDoc.paymentTerms || "").trim()) rows.push(["Modalités de paiement", localDoc.paymentTerms.trim()]);
+    }
     rows.push(["Devise", localDoc.currency || "EUR"]);
     rows.push([]);
     rows.push(["Émetteur", localDoc.company.name]);
@@ -16081,6 +16165,27 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   <input type="number" className="df-input df-mono rounded-md px-2 py-1" style={inputStyle} value={localDoc.dueDays} onChange={(e) => patch({ dueDays: Number(e.target.value) || 0 })} />
                 </>
               )}
+              {localDoc.type === "facture" && (
+                <>
+                  <label className="self-center text-right" style={{ color: colors.inkSoft }} title="Date de la vente ou de la prestation (mention obligatoire, art. 242 nonies A du CGI)">Prestation réalisée le *</label>
+                  <input type="date" className="df-input df-mono rounded-md px-2 py-1" style={{ ...inputStyle, borderColor: localDoc.serviceDate ? colors.line : colors.brick }} value={localDoc.serviceDate || ""} onChange={(e) => patch({ serviceDate: e.target.value })} />
+                  <label className="self-center text-right" style={{ color: colors.inkSoft }}>jusqu'au (si période)</label>
+                  <input type="date" className="df-input df-mono rounded-md px-2 py-1" style={inputStyle} value={localDoc.serviceDateEnd || ""} onChange={(e) => patch({ serviceDateEnd: e.target.value })} />
+                </>
+              )}
+              {localDoc.type === "devis" && (
+                <>
+                  <label className="self-center text-right" style={{ color: colors.inkSoft }} title="Date de début ou délai d'exécution des travaux (art. L111-1 C. conso, arrêté du 24 janvier 2017)">Début des travaux *</label>
+                  <input type="date" className="df-input df-mono rounded-md px-2 py-1" style={{ ...inputStyle, borderColor: localDoc.worksStartDate ? colors.line : colors.brick }} value={localDoc.worksStartDate || ""} onChange={(e) => patch({ worksStartDate: e.target.value })} />
+                  <label className="self-center text-right" style={{ color: colors.inkSoft }}>Durée estimée *</label>
+                  <input className="df-input rounded-md px-2 py-1" style={{ ...inputStyle, borderColor: (localDoc.worksDuration || "").trim() ? colors.line : colors.brick }} placeholder="ex : 3 semaines" value={localDoc.worksDuration || ""} onChange={(e) => patch({ worksDuration: e.target.value })} />
+                  <span></span>
+                  <label className="flex items-center gap-1.5 text-xs" style={{ color: colors.inkSoft }}>
+                    <input type="checkbox" checked={localDoc.freeQuote === true} onChange={(e) => patch({ freeQuote: e.target.checked })} style={{ accentColor: colors.brass }} />
+                    Mentionner « Devis gratuit » sur le document
+                  </label>
+                </>
+              )}
               <div className="col-span-2 text-right text-xs" style={{ color: colors.inkSoft }}>
                 {localDoc.type !== "facture" ? (localDoc.showValidity !== false ? `Valable jusqu'au ${frLong(validityDate)}` : null) : `Paiement attendu avant le ${frLong(dueDate)}`}
               </div>
@@ -16186,7 +16291,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             </div>
             <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}`, background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : "transparent" }}>
               <div className="mb-2 flex items-center justify-between">
-                <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>{localDoc.type === "commande" ? "Fournisseur" : "Client"}</div>
+                <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>{localDoc.type === "commande" ? "Fournisseur" : ["devis", "facture", "acompte", "avoir"].includes(localDoc.type) ? "Client *" : "Client"}</div>
                 <div className="no-print flex gap-1 rounded-md p-0.5" style={{ background: colors.paper }}>
                   <button onClick={() => patchDeep("client", { type: "entreprise" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: (localDoc.client.type || "entreprise") === "entreprise" ? colors.ink : "transparent", color: (localDoc.client.type || "entreprise") === "entreprise" ? "white" : colors.inkSoft }}>Entreprise</button>
                   <button onClick={() => patchDeep("client", { type: "particulier" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: localDoc.client.type === "particulier" ? colors.ink : "transparent", color: localDoc.client.type === "particulier" ? "white" : colors.inkSoft }}>Particulier</button>
@@ -16226,6 +16331,9 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     <input className="df-input w-1/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Code postal" title="Code postal (facturation électronique)" value={localDoc.client.postalCode || ""} onChange={(e) => patchDeep("client", { postalCode: e.target.value })} />
                     <input className="df-input w-2/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Ville" title="Ville (facturation électronique)" value={localDoc.client.city || ""} onChange={(e) => patchDeep("client", { city: e.target.value })} />
                   </div>
+                  <div className="mb-2" title="Pays du client (obligatoire sur la facture et pour Factur-X)">
+                    <CountrySelect value={localDoc.client.country || ""} onChange={(v) => patchDeep("client", { country: v })} placeholder={localDoc.type === "facture" ? "Pays du client *" : "Pays du client"} />
+                  </div>
                   {(localDoc.client.type || "entreprise") !== "particulier" && (
                     <div className="mb-2 flex gap-2">
                       <input className="df-input w-1/2 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="SIRET du client (14 chiffres)" title="SIRET du client — son SIREN (9 premiers chiffres) est obligatoire sur les factures électroniques" value={localDoc.client.siret || ""} onChange={(e) => patchDeep("client", { siret: e.target.value })} />
@@ -16251,7 +16359,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               <div className="df-display mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
                 <FileText size={13} /> Facturation électronique (Factur-X)
               </div>
-              <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Nouvelles mentions obligatoires de la réforme 2026-2027 — nécessaires pour l'export au format Factur-X, sans effet sur le PDF classique.</p>
+              <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>{localDoc.type === "devis" ? "Préparé pour la facture : ces informations seront reprises telles quelles quand ce devis sera converti en facture (réforme 2026-2027, export Factur-X). L'adresse du chantier s'imprime sur le devis." : "Nouvelles mentions obligatoires de la réforme 2026-2027 — nécessaires pour l'export au format Factur-X, sans effet sur le PDF classique."}</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-xs" style={{ color: colors.inkSoft }}>
                   Catégorie d'opération
@@ -16759,6 +16867,21 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   <input type="number" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.acompte} onChange={(e) => patch({ acompte: e.target.value })} />
                 </label>
               )}
+              {localDoc.type === "devis" && (
+                <label className="text-sm">
+                  <div className="mb-1" style={{ color: colors.inkSoft }}>Modalités de paiement</div>
+                  <input className="df-input w-64 rounded-md px-2 py-1.5" style={inputStyle} placeholder="ex : 30 % à la commande, solde à réception" value={localDoc.paymentTerms || ""} onChange={(e) => patch({ paymentTerms: e.target.value })} />
+                </label>
+              )}
+              {localDoc.type === "facture" && (
+                <label className="text-sm">
+                  <div className="mb-1" style={{ color: colors.inkSoft }}>Mode de règlement</div>
+                  <select className="df-select w-48 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.paymentMethod || ""} onChange={(e) => patch({ paymentMethod: e.target.value })}>
+                    <option value="">— Non précisé —</option>
+                    {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
 
             <div className="flex items-center gap-8">
@@ -16863,7 +16986,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           </div>
         </div>
       </div>
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
       <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
 
       {presentationMode && (
@@ -16889,5 +17012,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, legalMentionLines, computeTotals, documentValidationErrors, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

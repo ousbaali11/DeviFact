@@ -42,9 +42,10 @@ describe("mentions légales sur le PDF (étape B)", () => {
     expect(avoir).toHaveLength(2);
     expect(avoir.join(" ")).not.toContain(PENALITES);
   });
-  it("devis : identité et assurance, pas de mentions de paiement ; médiateur si particulier", () => {
+  it("devis : identité, assurance et « Devis gratuit », pas de mentions de paiement ; médiateur si particulier", () => {
     const pro = legalMentionLines(doc("devis"));
-    expect(pro).toHaveLength(2);
+    expect(pro).toHaveLength(3);
+    expect(pro[2]).toBe("Devis gratuit.");
     const d = doc("devis"); d.client.type = "particulier";
     expect(legalMentionLines(d).join(" ")).toContain("Médiateur");
   });
@@ -73,7 +74,7 @@ describe("mentions légales sur le PDF (étape B)", () => {
   it("rien n'est imprimé sur les autres types, ni sans aucune donnée légale et client particulier", () => {
     expect(legalMentionLines(doc("commande"))).toEqual([]);
     expect(legalMentionLines(doc("livraison"))).toEqual([]);
-    const d = doc("devis", {}, { type: "entreprise", name: "X" }); d.client.type = "particulier";
+    const d = doc("devis", { freeQuote: false }, { type: "entreprise", name: "X" }); d.client.type = "particulier";
     expect(legalMentionLines(d)).toEqual([]);
     expect(html(d)).not.toContain('class="print-legal"');
   });

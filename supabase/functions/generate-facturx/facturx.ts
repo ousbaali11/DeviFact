@@ -285,8 +285,11 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   // Livraison intracommunautaire : la norme exige une date de livraison
   // (BT-72) ou une période de facturation (BR-IC-11) — la facture du
   // site n'en a pas, on reprend la date d'émission en le signalant.
-  const deliveryDate = hasExempt && exemption.category === "K" ? issueDate : null;
-  if (deliveryDate) warnings.push("Livraison intracommunautaire : date de livraison supposée égale à la date d'émission (la norme exige une date de livraison)");
+  // Date de la vente ou de la prestation saisie sur la facture (BT-72) ;
+  // à défaut, pour une livraison intracommunautaire, la date d'émission.
+  const serviceDate = /^\d{4}-\d{2}-\d{2}$/.test(clean(doc.serviceDate)) ? clean(doc.serviceDate) : "";
+  const deliveryDate = serviceDate || (hasExempt && exemption.category === "K" ? issueDate : null);
+  if (!serviceDate && deliveryDate) warnings.push("Livraison intracommunautaire : date de livraison supposée égale à la date d'émission (la norme exige une date de livraison)");
 
   const lineTotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
   const taxTotal = round2(vat.reduce((s, g) => s + g.amount, 0));
@@ -319,6 +322,8 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   const noteText = stripMarkup(clean(doc.notes));
   if (noteText && noteText.toLowerCase() !== "merci de votre confiance.") notes.push(noteText);
   if (clean(doc.chantier)) notes.push(`Chantier : ${clean(doc.chantier)}`);
+  if (serviceDate && /^\d{4}-\d{2}-\d{2}$/.test(clean(doc.serviceDateEnd))) notes.push(`Période de la prestation : du ${serviceDate} au ${clean(doc.serviceDateEnd)}`);
+  if (clean(doc.sourceDevisNumber)) notes.push(`D'après le devis n° ${clean(doc.sourceDevisNumber)}`);
   if (vatOnDebits) notes.push("Option pour le paiement de la TVA d'après les débits");
 
   if (missing.length) return { model: null, missing, warnings };

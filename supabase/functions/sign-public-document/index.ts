@@ -88,6 +88,12 @@ serve(async (req) => {
         status: "brouillon",
         workStage: "brouillon",
         linkedDevisId: documents[docIndex].id,
+        sourceDevisNumber: documents[docIndex].docNumber || "",
+        // Même modèle que la conversion côté site : version courante des
+        // champs, acompte demandé (notion de devis) remis à zéro.
+        schemaVersion: 2,
+        acompte: 0,
+        serviceDate: "", serviceDateEnd: "", paymentMethod: "",
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };

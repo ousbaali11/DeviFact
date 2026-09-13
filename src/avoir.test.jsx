@@ -45,9 +45,9 @@ describe("avoir — modèle et validation", () => {
     expect(documentValidationErrors({ ...fullAvoir(), items: [{ ...line, designation: "" }] })).toEqual(["Au moins une ligne avec une désignation"]);
     expect(documentValidationErrors(newDocument("avoir", []))).toHaveLength(4);
   });
-  it("les autres types ne sont pas concernés par ces règles", () => {
-    expect(documentValidationErrors(newDocument("devis", []))).toEqual([]);
-    expect(documentValidationErrors(newDocument("facture", []))).toEqual([]);
+  it("les types sans règle ne sont pas concernés", () => {
+    expect(documentValidationErrors(newDocument("commande", []))).toEqual([]);
+    expect(documentValidationErrors(newDocument("livraison", []))).toEqual([]);
   });
   it("un avoir rempli seulement avec sa référence et son motif n'est plus considéré vide", () => {
     expect(isDocumentEmpty({ ...newDocument("avoir", []), factureOrigineRef: "FAC-014" })).toBe(false);
@@ -79,7 +79,6 @@ describe("avoir — éditeur", () => {
     const devis = await renderOnce(<Editor {...common} doc={newDocument("devis", [])} />);
     expect(devis.text).toContain("Validité (jours)");
     expect(devis.text).toContain("Acompte demandé (%)");
-    expect(devis.html).not.toContain('data-testid="required-missing"');
   });
   it("bouton partagé : sans erreurs, comportement inchangé", () => {
     const html = renderToStaticMarkup(<FinalizeButton doc={{ workStage: "brouillon" }} onFinalize={noop} siteSettings={siteSettings} />);
