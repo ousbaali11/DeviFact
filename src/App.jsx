@@ -1413,7 +1413,7 @@ function computePvGaranties(doc) {
 // diagnostic et un compte-rendu de visite, pas une facture. La durée
 // se calcule automatiquement à partir des heures d'arrivée/départ.
 function emptyMaterielUtilise() {
-  return { id: nextId("mu"), designation: "", quantite: 1 };
+  return { id: nextId("mu"), designation: "", quantite: 1, prixUnitaireHT: "" };
 }
 
 function newRapportInterventionDocument(documents) {
@@ -1421,8 +1421,11 @@ function newRapportInterventionDocument(documents) {
   return {
     id: nextId("doc"),
     type: "rapport",
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "rapport"),
     issueDate: today,
+    // Devise des fournitures à facturer (prix unitaire facultatif sur le matériel).
+    currency: geoDefaults().currency || "EUR",
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
     clientId: null,
@@ -1439,11 +1442,16 @@ function newRapportInterventionDocument(documents) {
     photos: [],
     prochaineInterventionDate: "",
     signatureClient: { name: "", date: today },
+    signatureTechnicien: { name: "", date: today },
     notes: "",
     status: "brouillon",
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
+}
+// Total HT des fournitures dont un prix unitaire est renseigné (report sur facture).
+function computeMaterielTotal(doc) {
+  return (doc?.materielsUtilises || []).reduce((sum, m) => sum + (Number(m.prixUnitaireHT) > 0 ? (Number(m.quantite) || 0) * Number(m.prixUnitaireHT) : 0), 0);
 }
 
 function computeInterventionDuree(doc) {
@@ -1863,6 +1871,12 @@ const REQUIRED_FIELD_RULES = {
     { label: "Au moins une ligne avec une désignation", test: hasOneLine },
     { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
     { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
+  ],
+  // Rapport d'intervention : client, technicien, et un contenu (motif ou travaux).
+  rapport: [
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+    { label: "Technicien", test: (d) => hasText(d.technicien) },
+    { label: "Motif de l'appel ou travaux réalisés", test: (d) => hasText(d.motifAppel) || hasText(d.travauxRealises) },
   ],
   // PV de réception : parties, objet, date de réception (point de départ des
   // garanties, art. 1792-6 C. civ.), et des réserves si la réception en comporte.
@@ -4054,6 +4068,7 @@ function DeviFactAppInner() {
           rows.push(["Diagnostic", doc.diagnostic || ""]);
           rows.push(["Travaux réalisés", doc.travauxRealises || ""]);
           rows.push(["Statut", (STATUTS_RESOLUTION[doc.statutResolution] || {}).label || ""]);
+          rows.push(["Prochaine intervention recommandée", doc.prochaineInterventionDate ? fr(doc.prochaineInterventionDate) : ""]);
         } else if (type === "contrat") {
           rows.push(["CONTRAT DE CHANTIER", doc.docNumber]);
           rows.push(["Date", fr(doc.issueDate)]);
@@ -9018,6 +9033,9 @@ const TYPES_INTERVENTION = { depannage: "Dépannage urgent", entretien: "Entreti
 const STATUTS_RESOLUTION = { resolu: { label: "Problème résolu", color: "#2F6B4F" }, partiel: { label: "Partiellement résolu", color: "#B8763E" }, nouvelle_intervention: { label: "Nouvelle intervention nécessaire", color: "#A33B2A" } };
 
 const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ doc, siteSettings, watermarkEnabled = true, photoUrls = {} }, ref) {
+  const materielTotal = computeMaterielTotal(doc);
+  const hasPrices = materielTotal > 0;
+  const currency = doc.currency || "EUR";
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
@@ -9048,11 +9066,14 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
       <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
         <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
           <div style={{ fontWeight: 700, marginBottom: "3px" }}>{doc.company.name || "—"}</div>
+          {doc.company.address && <div>{doc.company.address}</div>}
           {doc.company.phone && <div>Tél. {doc.company.phone}</div>}
+          {doc.company.email && <div>{doc.company.email}</div>}
         </div>
         <div style={{ flex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
           {doc.client.name && <div style={{ fontWeight: 600 }}>{doc.client.name}</div>}
           <div>{doc.adresseIntervention || doc.client.address}</div>
+          {(doc.client.phone || doc.client.email) && <div style={{ color: inkSoft }}>{[doc.client.phone, doc.client.email].filter(Boolean).join(" · ")}</div>}
         </div>
       </div>
 
@@ -9083,15 +9104,23 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
 
       {(doc.materielsUtilises || []).length > 0 && (
         <div style={{ marginTop: "16px", position: "relative", zIndex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "4px" }}>Matériel utilisé</div>
+          <div style={{ fontWeight: 700, fontSize: "9.5pt", marginBottom: "4px" }}>{hasPrices ? "Matériel utilisé et fournitures à facturer" : "Matériel utilisé"}</div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt" }}>
             <tbody>
               {doc.materielsUtilises.map((m) => (
                 <tr key={m.id} style={{ borderBottom: `1px solid ${line}` }}>
                   <td style={{ padding: "4px 4px" }}>{m.designation}</td>
                   <td style={{ padding: "4px 4px", textAlign: "right", width: "80px" }}>× {m.quantite}</td>
+                  {hasPrices && <td style={{ padding: "4px 4px", textAlign: "right", width: "90px" }}>{Number(m.prixUnitaireHT) > 0 ? formatMoney(Number(m.prixUnitaireHT), currency) : ""}</td>}
+                  {hasPrices && <td style={{ padding: "4px 4px", textAlign: "right", width: "100px", fontWeight: 600 }}>{Number(m.prixUnitaireHT) > 0 ? formatMoney((Number(m.quantite) || 0) * Number(m.prixUnitaireHT), currency) : ""}</td>}
                 </tr>
               ))}
+              {hasPrices && (
+                <tr>
+                  <td colSpan={3} style={{ padding: "5px 4px", textAlign: "right", fontWeight: 700 }}>Total fournitures HT (à reporter sur la facture)</td>
+                  <td style={{ padding: "5px 4px", textAlign: "right", fontWeight: 700 }}>{formatMoney(materielTotal, currency)}</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -9113,12 +9142,19 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
 
       {doc.notes && <div style={{ marginTop: "16px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
 
-      <div style={{ marginTop: "32px", position: "relative", zIndex: 1, width: "260px" }}>
-        <div style={{ borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+      <div style={{ display: "flex", gap: "24px", marginTop: "32px", position: "relative", zIndex: 1 }}>
+        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>Signature du client</div>
           <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Atteste de la réalisation de cette intervention — {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureClient?.name && <div style={{ marginTop: "16px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
         </div>
+        {(doc.signatureTechnicien?.name || "").trim() && (
+          <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+            <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le technicien</div>
+            <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureTechnicien?.date ? new Date(doc.signatureTechnicien.date).toLocaleDateString("fr-FR") : ""}</div>
+            <div style={{ marginTop: "16px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureTechnicien.name.trim()}</div>
+          </div>
+        )}
       </div>
       {/* Photos de chantier — grille en fin de document */}
       {(doc.photos || []).some((p) => photoUrls[p.path]) && (
@@ -9275,10 +9311,14 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
     rows.push(["Travaux réalisés", localDoc.travauxRealises || ""]);
     rows.push(["Statut", STATUTS_RESOLUTION[localDoc.statutResolution]?.label || ""]);
     rows.push(["Recommandations", localDoc.recommandations || ""]);
+    rows.push(["Prochaine intervention recommandée", localDoc.prochaineInterventionDate ? fr(localDoc.prochaineInterventionDate) : ""]);
+    if ((localDoc.signatureTechnicien?.name || "").trim()) rows.push(["Technicien signataire", localDoc.signatureTechnicien.name.trim()]);
     if ((localDoc.materielsUtilises || []).length) {
+      const withPrices = computeMaterielTotal(localDoc) > 0;
       rows.push([]);
-      rows.push(["Matériel utilisé", "Quantité"]);
-      localDoc.materielsUtilises.forEach((m) => rows.push([m.designation, m.quantite]));
+      rows.push(withPrices ? ["Matériel utilisé", "Quantité", "PU HT", "Total HT"] : ["Matériel utilisé", "Quantité"]);
+      localDoc.materielsUtilises.forEach((m) => rows.push(withPrices ? [m.designation, m.quantite, Number(m.prixUnitaireHT) || "", Number(m.prixUnitaireHT) > 0 ? Number(((Number(m.quantite) || 0) * Number(m.prixUnitaireHT)).toFixed(2)) : ""] : [m.designation, m.quantite]));
+      if (withPrices) rows.push(["", "", "Total fournitures HT", Number(computeMaterielTotal(localDoc).toFixed(2))]);
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 26 }, { wch: 40 }];
@@ -9327,8 +9367,9 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Technicien</label>
-              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.technicien || ""} onChange={(e) => patch({ technicien: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Technicien *</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.technicien || "").trim() ? colors.line : colors.brick}` }} value={localDoc.technicien || ""} onChange={(e) => patch({ technicien: e.target.value })} />
+              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires ; le motif de l'appel ou les travaux réalisés doivent aussi être renseignés.</p>
             </div>
           </div>
 
@@ -9351,9 +9392,13 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
-              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse de facturation" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client *</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse de facturation" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
+              <div className="flex gap-1">
+                <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Téléphone" value={localDoc.client.phone || ""} onChange={(e) => patchDeep("client", { phone: e.target.value })} />
+                <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Email" value={localDoc.client.email || ""} onChange={(e) => patchDeep("client", { email: e.target.value })} />
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Adresse d'intervention (si différente)</label>
@@ -9380,10 +9425,12 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
                 <div key={m.id} className="flex items-center gap-2">
                   <input className="df-input grow rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder="Désignation" value={m.designation} onChange={(e) => patchMateriel(m.id, { designation: e.target.value })} />
                   <input type="number" className="df-input df-mono w-20 rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.quantite} onChange={(e) => patchMateriel(m.id, { quantite: e.target.value })} />
+                  <input type="number" min="0" step="0.01" className="df-input df-mono w-28 rounded-md px-2 py-1.5 text-xs" style={{ border: `1px solid ${colors.line}` }} placeholder={`PU HT (${currencyLabel(localDoc.currency || "EUR")})`} title="Prix unitaire HT (optionnel) : les fournitures chiffrées sont totalisées pour report sur la facture" value={m.prixUnitaireHT ?? ""} onChange={(e) => patchMateriel(m.id, { prixUnitaireHT: e.target.value })} />
                   <button onClick={() => removeMateriel(m.id)} title="Supprimer ce matériel" style={{ color: colors.brick }}><Trash2 size={14} /></button>
                 </div>
               ))}
             </div>
+            {computeMaterielTotal(localDoc) > 0 && <div className="mt-2 text-right text-xs" style={{ color: colors.inkSoft }}>Total fournitures HT (à reporter sur la facture) : <span className="df-mono font-semibold" style={{ color: colors.ink }}>{formatMoney(computeMaterielTotal(localDoc), localDoc.currency)}</span></div>}
           </div>
 
           <div className="mb-6">
@@ -9405,10 +9452,17 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
             <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.prochaineInterventionDate || ""} onChange={(e) => patch({ prochaineInterventionDate: e.target.value })} />
           </div>
 
-          <div className="mb-6 rounded-lg p-3" style={{ background: colors.paper }}>
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="rounded-lg p-3" style={{ background: colors.paper }}>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Signature du client (atteste de l'intervention)</label>
             <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom (vaut signature)" value={localDoc.signatureClient?.name || ""} onChange={(e) => patchDeep("signatureClient", { name: e.target.value })} />
             <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.signatureClient?.date || ""} onChange={(e) => patchDeep("signatureClient", { date: e.target.value })} />
+          </div>
+          <div className="rounded-lg p-3" style={{ background: colors.paper }}>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Signature du technicien (optionnel)</label>
+            <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom (vaut signature)" value={localDoc.signatureTechnicien?.name || ""} onChange={(e) => patchDeep("signatureTechnicien", { name: e.target.value })} />
+            <input type="date" className="df-input df-mono w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.signatureTechnicien?.date || ""} onChange={(e) => patchDeep("signatureTechnicien", { date: e.target.value })} />
+          </div>
           </div>
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Note</label>
@@ -9417,7 +9471,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
       <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
     </div>
   );
@@ -17359,5 +17413,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
