@@ -67,7 +67,7 @@ serve(async (req) => {
     documents[docIndex] = {
       ...original,
       status: "signé",
-      signature: { mode: signatureDrawing ? "dessin" : "texte", name: signatureName || "", drawing: signatureDrawing || null, signedRemotely: true, ...(secondName ? { secondName } : {}) },
+      signature: { mode: signatureDrawing ? "dessin" : "texte", name: signatureName || "", drawing: signatureDrawing || null, ...(secondName ? { secondName } : {}) },
       updatedAt: Date.now(),
     };
 

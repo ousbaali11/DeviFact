@@ -841,6 +841,24 @@ function withGeoCountry(profile) {
   const { country } = geoDefaults();
   return country ? { ...profile, country } : profile;
 }
+// Copie du profil entreprise enregistrée dans chaque nouveau document :
+// tout ce que les PDF et Factur-X lisent (identité, coordonnées, IBAN, BIC,
+// option débits, mentions légales), sans les réglages propres à
+// l'application qui n'ont rien à faire dans un document.
+const COMPANY_SNAPSHOT_EXCLUDED = ["googleReviewUrl", "fiscalStartMonth", "accounting"];
+function companySnapshotOf(profile) {
+  const out = { ...(profile || {}) };
+  for (const k of COMPANY_SNAPSHOT_EXCLUDED) delete out[k];
+  return out;
+}
+// Client enregistré dont le nom correspond (sans tenir compte de la casse ni
+// des espaces) : sert à lier automatiquement les documents des éditeurs
+// spécialisés, qui n'ont pas de sélecteur de client.
+function findClientByName(clients, name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return null;
+  return (clients || []).find((c) => String(c?.name || "").trim().toLowerCase() === n) || null;
+}
 function emptyCompanyProfile() {
   return {
     type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "", fiscalStartMonth: 1,
@@ -2327,7 +2345,7 @@ function legalMentionLines(doc, companyProfile) {
   return lines;
 }
 
-const PrintDocument = forwardRef(function PrintDocument({ doc, totals, accountPlan, siteSettings, watermarkEnabled = true, publicQr = null, companyProfile = null }, ref) {
+const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSettings, watermarkEnabled = true, publicQr = null, companyProfile = null }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const hasGlobalDiscount = (totals.globalDiscountPct || 0) > 0 && (totals.globalDiscountAmount || 0) > 0;
   const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
@@ -3820,7 +3838,7 @@ function DeviFactAppInner() {
       return;
     }
     const doc = type === "situation" ? newSituationDocument(documents) : type === "pv_reception" ? newPvReceptionDocument(documents) : type === "rapport" ? newRapportInterventionDocument(documents) : type === "contrat" ? newContratChantierDocument(documents) : type === "relance" ? newRelanceFormelleDocument(documents) : type === "planning" ? newPlanningChantierDocument(documents) : newDocument(type, documents);
-    if (companyProfile.name) doc.company = { ...companyProfile };
+    if (companyProfile.name) doc.company = companySnapshotOf(companyProfile);
     doc.workStage = "brouillon";
     // N'enregistre PAS encore ce document — reste seulement en mémoire
     // (pendingDoc) tant qu'il est vide. Il ne rejoint la vraie liste
@@ -3851,7 +3869,7 @@ function DeviFactAppInner() {
       return;
     }
     const doc = newRevisionDocument(sector, country, documents);
-    if (companyProfile.name) doc.company = { ...companyProfile };
+    if (companyProfile.name) doc.company = companySnapshotOf(companyProfile);
     persist([doc, ...documents]);
     setActiveId(doc.id);
     setView("revision-editor");
@@ -4039,7 +4057,6 @@ function DeviFactAppInner() {
       clientId: base.clientId,
       items: mergedItems,
       notes: `Document fusionné à partir de ${docs.map((d) => d.docNumber).join(", ")}.`,
-      mergedFrom: ids,
     };
     persist([merged, ...documents]);
     setSelectedIds([]);
@@ -4481,6 +4498,7 @@ function DeviFactAppInner() {
     return (
       <SituationEditor
         doc={activeDoc}
+        clients={clients}
         companyProfile={companyProfile}
         documents={documents}
         saving={saving}
@@ -4502,6 +4520,7 @@ function DeviFactAppInner() {
     return (
       <PvReceptionEditor
         doc={activeDoc}
+        clients={clients}
         saving={saving}
         account={account}
         plans={plans}
@@ -4520,6 +4539,7 @@ function DeviFactAppInner() {
     return (
       <RapportInterventionEditor
         doc={activeDoc}
+        clients={clients}
         saving={saving}
         account={account}
         plans={plans}
@@ -4538,6 +4558,7 @@ function DeviFactAppInner() {
     return (
       <ContratChantierEditor
         doc={activeDoc}
+        clients={clients}
         companyProfile={companyProfile}
         saving={saving}
         account={account}
@@ -4557,6 +4578,7 @@ function DeviFactAppInner() {
     return (
       <RelanceFormelleEditor
         doc={activeDoc}
+        clients={clients}
         companyProfile={companyProfile}
         saving={saving}
         account={account}
@@ -4576,6 +4598,7 @@ function DeviFactAppInner() {
     return (
       <PlanningChantierEditor
         doc={activeDoc}
+        clients={clients}
         saving={saving}
         account={account}
         plans={plans}
@@ -4802,7 +4825,7 @@ function DeviFactAppInner() {
             if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           })()}
         </div>
       </AtelierShell>
@@ -5318,7 +5341,7 @@ function DeviFactAppInner() {
           if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
         })()}
       </div>
     </div>
@@ -7613,6 +7636,16 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       if (merged) onChange(merged);
     }, 400);
   }
+  // Suggestion des clients existants sur le champ « Nom » et liaison
+  // automatique (clientId) quand le nom correspond à un client enregistré ;
+  // les coordonnées vides sont complétées depuis la fiche client.
+  const clientListId = `df-clients-${localDoc.id}`;
+  function setClientName(name) {
+    const match = findClientByName(clients, name);
+    const cur = localDoc.client || {};
+    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
+    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
+  }
   function patchDeep(field, p) {
     patch({ [field]: { ...localDoc[field], ...p } });
   }
@@ -7906,7 +7939,8 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Maître d'ouvrage (client)</label>
-              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du service ou du client" value={localDoc.client?.name || ""} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du service ou du client" value={localDoc.client?.name || ""} list={clientListId} onChange={(e) => setClientName(e.target.value)} />
+              <datalist id={clientListId}>{(clients || []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
             </div>
           </div>
 
@@ -8305,7 +8339,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   );
 });
 
-function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null }) {
+function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null, clients = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -8341,6 +8375,16 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
       saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
       if (merged) onChange(merged);
     }, 400);
+  }
+  // Suggestion des clients existants sur le champ « Nom » et liaison
+  // automatique (clientId) quand le nom correspond à un client enregistré ;
+  // les coordonnées vides sont complétées depuis la fiche client.
+  const clientListId = `df-clients-${localDoc.id}`;
+  function setClientName(name) {
+    const match = findClientByName(clients, name);
+    const cur = localDoc.client || {};
+    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
+    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function patchLine(id, p) { patch({ items: localDoc.items.map((l) => (l.id === id ? { ...l, ...p } : l)) }); }
@@ -8579,7 +8623,8 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
             </div>
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client *</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} list={clientListId} onChange={(e) => setClientName(e.target.value)} />
+              <datalist id={clientListId}>{(clients || []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
             </div>
           </div>
@@ -8780,7 +8825,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
   );
 });
 
-function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
+function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -8816,6 +8861,16 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
       saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
       if (merged) onChange(merged);
     }, 400);
+  }
+  // Suggestion des clients existants sur le champ « Nom » et liaison
+  // automatique (clientId) quand le nom correspond à un client enregistré ;
+  // les coordonnées vides sont complétées depuis la fiche client.
+  const clientListId = `df-clients-${localDoc.id}`;
+  function setClientName(name) {
+    const match = findClientByName(clients, name);
+    const cur = localDoc.client || {};
+    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
+    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addReserve() { patch({ reserves: [...(localDoc.reserves || []), emptyReserve()] }); }
@@ -9001,7 +9056,8 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
             </div>
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client *</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} list={clientListId} onChange={(e) => setClientName(e.target.value)} />
+              <datalist id={clientListId}>{(clients || []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
             </div>
           </div>
@@ -9227,7 +9283,7 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
   );
 });
 
-function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
+function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -9263,6 +9319,16 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
       saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
       if (merged) onChange(merged);
     }, 400);
+  }
+  // Suggestion des clients existants sur le champ « Nom » et liaison
+  // automatique (clientId) quand le nom correspond à un client enregistré ;
+  // les coordonnées vides sont complétées depuis la fiche client.
+  const clientListId = `df-clients-${localDoc.id}`;
+  function setClientName(name) {
+    const match = findClientByName(clients, name);
+    const cur = localDoc.client || {};
+    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
+    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addMateriel() { patch({ materielsUtilises: [...(localDoc.materielsUtilises || []), emptyMaterielUtilise()] }); }
@@ -9447,7 +9513,8 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client *</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} list={clientListId} onChange={(e) => setClientName(e.target.value)} />
+              <datalist id={clientListId}>{(clients || []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
               <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse de facturation" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
               <div className="flex gap-1">
                 <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Téléphone" value={localDoc.client.phone || ""} onChange={(e) => patchDeep("client", { phone: e.target.value })} />
@@ -9634,7 +9701,7 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
   );
 });
 
-function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null }) {
+function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null, clients = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -9670,6 +9737,16 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
       saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
       if (merged) onChange(merged);
     }, 400);
+  }
+  // Suggestion des clients existants sur le champ « Nom » et liaison
+  // automatique (clientId) quand le nom correspond à un client enregistré ;
+  // les coordonnées vides sont complétées depuis la fiche client.
+  const clientListId = `df-clients-${localDoc.id}`;
+  function setClientName(name) {
+    const match = findClientByName(clients, name);
+    const cur = localDoc.client || {};
+    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
+    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
 
@@ -9798,7 +9875,8 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
                   <button type="button" onClick={() => patchDeep("client", { type: "particulier" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: localDoc.client.type === "particulier" ? colors.ink : "transparent", color: localDoc.client.type === "particulier" ? "white" : colors.inkSoft }}>Particulier</button>
                 </div>
               </div>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} list={clientListId} onChange={(e) => setClientName(e.target.value)} />
+              <datalist id={clientListId}>{(clients || []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
               {localDoc.client.type === "particulier" && (
                 <label className="mt-2 flex items-start gap-2 text-xs" style={{ color: colors.inkSoft }}>
@@ -9988,7 +10066,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
   );
 });
 
-function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null }) {
+function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null, clients = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -10024,6 +10102,16 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
       saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
       if (merged) onChange(merged);
     }, 400);
+  }
+  // Suggestion des clients existants sur le champ « Nom » et liaison
+  // automatique (clientId) quand le nom correspond à un client enregistré ;
+  // les coordonnées vides sont complétées depuis la fiche client.
+  const clientListId = `df-clients-${localDoc.id}`;
+  function setClientName(name) {
+    const match = findClientByName(clients, name);
+    const cur = localDoc.client || {};
+    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
+    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
 
@@ -10161,7 +10249,8 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
                   <button type="button" onClick={() => patchDeep("client", { type: "particulier" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: localDoc.client.type === "particulier" ? colors.ink : "transparent", color: localDoc.client.type === "particulier" ? "white" : colors.inkSoft }}>Particulier</button>
                 </div>
               </div>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} list={clientListId} onChange={(e) => setClientName(e.target.value)} />
+              <datalist id={clientListId}>{(clients || []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
             </div>
           </div>
@@ -10336,7 +10425,7 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
   );
 });
 
-function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
+function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -10372,6 +10461,16 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
       saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
       if (merged) onChange(merged);
     }, 400);
+  }
+  // Suggestion des clients existants sur le champ « Nom » et liaison
+  // automatique (clientId) quand le nom correspond à un client enregistré ;
+  // les coordonnées vides sont complétées depuis la fiche client.
+  const clientListId = `df-clients-${localDoc.id}`;
+  function setClientName(name) {
+    const match = findClientByName(clients, name);
+    const cur = localDoc.client || {};
+    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
+    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addTache() { patch({ taches: [...(localDoc.taches || []), emptyTachePlanning((localDoc.taches || []).length)] }); }
@@ -10480,7 +10579,8 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
             </div>
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client (optionnel)</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} list={clientListId} onChange={(e) => setClientName(e.target.value)} />
+              <datalist id={clientListId}>{(clients || []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
             </div>
           </div>
@@ -12397,8 +12497,9 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
     return (c.name || "").toLowerCase().includes(s) || (c.email || "").toLowerCase().includes(s);
   });
 
-  function countDocs(clientId) {
-    return documents.filter((d) => d.clientId === clientId).length;
+  function countDocs(client) {
+    const name = String(client?.name || "").trim().toLowerCase();
+    return documents.filter((d) => d.clientId === client.id || (!d.clientId && name && String(d.client?.name || "").trim().toLowerCase() === name)).length;
   }
   function startNew() { if (!isLocked) { setEditing(emptyClient()); setNameError(false); } }
   function startEdit(c) { if (!isLocked) { setEditing({ ...c }); setNameError(false); } }
@@ -12479,7 +12580,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
               <div className="truncate text-sm font-semibold">{c.name}</div>
               <div className="truncate text-xs" style={{ color: colors.inkSoft }}>{c.email || "—"}</div>
               <div className="text-xs" style={{ color: colors.inkSoft }}>{c.phone || "—"}</div>
-              <div className="df-mono mt-1 text-xs" style={{ color: colors.brassDark }}>{countDocs(c.id)} document(s)</div>
+              <div className="df-mono mt-1 text-xs" style={{ color: colors.brassDark }}>{countDocs(c)} document(s)</div>
             </div>
           ))}
         </div>
@@ -12490,7 +12591,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
               <div className="min-w-0 grow basis-40 truncate text-sm font-medium">{c.name}</div>
               <div className="min-w-0 grow basis-40 truncate text-xs" style={{ color: colors.inkSoft }}>{c.email || "—"}</div>
               <div className="w-28 shrink-0 text-xs" style={{ color: colors.inkSoft }}>{c.phone || "—"}</div>
-              <div className="w-24 shrink-0 df-mono text-xs" style={{ color: colors.inkSoft }}>{countDocs(c.id)} document(s)</div>
+              <div className="w-24 shrink-0 df-mono text-xs" style={{ color: colors.inkSoft }}>{countDocs(c)} document(s)</div>
               <div className="flex shrink-0 gap-2">
                 <button onClick={() => startEdit(c)} disabled={isLocked} style={{ color: isLocked ? colors.line : colors.slate, cursor: isLocked ? "not-allowed" : "pointer" }}><Pencil size={15} /></button>
                 <button onClick={() => onDelete(c.id)} disabled={isLocked} title="Supprimer le client" style={{ color: isLocked ? colors.line : colors.brick, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
@@ -17497,7 +17598,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         </div>
       </div>
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
-      <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+      <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
 
       {presentationMode && (
         <div className="df-presentation no-print" style={{ background: colors.ink }}>
@@ -17505,7 +17606,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <Minimize2 size={15} /> Quitter
           </button>
           <div style={{ padding: "24px 12px 48px", zoom: presentationZoom }}>
-            <PrintDocument doc={localDoc} totals={totals} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+            <PrintDocument doc={localDoc} totals={totals} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
           </div>
         </div>
       )}
@@ -17522,5 +17623,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
