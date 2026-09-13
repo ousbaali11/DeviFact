@@ -1039,7 +1039,7 @@ function emptyMois() {
 }
 
 function emptyDecompte() {
-  return { id: nextId("dc"), label: "", dateDecompte: new Date().toISOString().slice(0, 10), montantTotal: "", mois: [emptyMois()], isFinal: false };
+  return { id: nextId("dc"), label: "", dateDecompte: new Date().toISOString().slice(0, 10), montantTotal: "", mois: [emptyMois()] };
 }
 
 function newRevisionDocument(sector, country, documents) {
@@ -1047,6 +1047,7 @@ function newRevisionDocument(sector, country, documents) {
   return {
     id: nextId("doc"),
     type: "revision",
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "revision"),
     issueDate: new Date().toISOString().slice(0, 10),
     currency: info.currency || "EUR",
@@ -1320,8 +1321,14 @@ function createNextSituation(sourceDoc, documents) {
 function accountingExportRow(d) {
   const head = [docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client?.name || "", d.status];
   if (d.type === "revision") {
-    const r = computeRevision(d);
-    return [...head, Number((r.montantInitialTotal || 0).toFixed(2)), Number(r.ecartMontant.toFixed(2)), Number(r.montantRevise.toFixed(2))];
+    // Montant de la révision (écart) HT par secteur, sa TVA au taux du
+    // secteur, et le TTC — les totaux imprimés sur la note de calcul.
+    let ht = 0, tva = 0;
+    getRevisionSectors(d).forEach((sec) => {
+      const r = computeRevisionLine(sec);
+      if (r.valid) { ht += r.ecartMontant; tva += r.ecartMontant * Number(sec.tvaRate ?? 0.2); }
+    });
+    return [...head, Number(ht.toFixed(2)), Number(tva.toFixed(2)), Number((ht + tva).toFixed(2))];
   }
   if (d.type === "situation") {
     const sit = computeSituation(d);
@@ -1678,6 +1685,7 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
   r++;
   labelRow(`STE : ${doc.company.name || ""}`, nCols);
   r++;
+  kvRow("Date de la note :", [doc.issueDate ? fr(doc.issueDate) : ""]);
   kvRow("Date de soumission :", [sec.dateBase ? fr(sec.dateBase) : ""]);
   kvRow("Symbole d'index:", terms.map((t) => up(t.symbole || "")));
   kvRow("Index de base:", terms.map((t) => Number(t.indexBase) || ""));
@@ -1703,7 +1711,7 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
   r++;
 
   let totalHT = 0;
-  (sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d) => {
+  (sec.useDecomptes && sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d) => {
     if (d.isBlank) {
       ws.mergeCells(r, 1, r, nCols);
       const c = ws.getCell(r, 1);
@@ -1713,10 +1721,10 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
       r++;
       return;
     }
-    if (d.label) {
+    if (d.label || d.dateDecompte) {
       ws.mergeCells(r, 1, r, nCols);
       const c = ws.getCell(r, 1);
-      c.value = up(d.label);
+      c.value = up(d.label || "Décompte") + (d.dateDecompte ? ` — ${fr(d.dateDecompte)}` : "");
       fillCell(c, COL.dpLabel, { bold: true, align: "center" });
       r++;
     }
@@ -1796,11 +1804,11 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
   r++;
   ws.mergeCells(r, 1, r, Math.floor(nCols / 2));
   const ent = ws.getCell(r, 1);
-  ent.value = "ENTREPRISE";
+  ent.value = "ENTREPRISE" + (doc.company?.name ? ` — ${up(doc.company.name)}` : "");
   fillCell(ent, COL.label, { bold: true, align: "center" });
   ws.mergeCells(r, Math.floor(nCols / 2) + 1, r, nCols);
   const srv = ws.getCell(r, Math.floor(nCols / 2) + 1);
-  srv.value = "SERVICE / MAÎTRE D'OUVRAGE";
+  srv.value = "SERVICE / MAÎTRE D'OUVRAGE" + (doc.client?.name ? ` — ${up(doc.client.name)}` : "");
   fillCell(srv, COL.label, { bold: true, align: "center" });
 }
 
@@ -1834,6 +1842,12 @@ const REQUIRED_FIELD_RULES = {
     { label: "Au moins une ligne avec une désignation", test: hasOneLine },
     { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
     { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
+  ],
+  // Révision de prix : référence du marché, entreprise, et un montant à réviser.
+  revision: [
+    { label: "Marché N°", test: (d) => hasText(d.marcheNumero) },
+    { label: "Nom de l'entreprise", test: (d) => hasText(d.company?.name) },
+    { label: "Montant à réviser (montant initial ou décompte)", test: (d) => getRevisionSectors(d).some((sec) => Number(sec.montantInitialHT) > 0 || (sec.useDecomptes && (sec.decomptes || []).some((x) => Number(x.montantTotal) > 0))) },
   ],
   // Situation de travaux : période couverte, client et au moins un poste.
   situation: [
@@ -1914,6 +1928,7 @@ function isDocumentEmpty(doc) {
   // vérifiés ci-dessus pour tous les types.
   const specificFields = {
     situation: ["objet", "marcheNumero", "periodeDebut", "chantier", "paymentTerms", "visaMaitreOeuvre"],
+    revision: ["objet", "marcheNumero", "dateDemarrage"],
     pv_reception: ["objet", "marcheNumero"],
     rapport: ["motifAppel", "diagnostic", "travauxRealises", "adresseIntervention", "technicien"],
     contrat: ["objetTravaux", "montantTotalHT"],
@@ -1925,6 +1940,7 @@ function isDocumentEmpty(doc) {
   if ((specificFields[doc.type] || []).some((f) => String(doc[f] || "").trim())) return false;
 
   if (doc.type === "planning" && Array.isArray(doc.taches) && doc.taches.some((t) => (t.designation || "").trim())) return false;
+  if (doc.type === "revision" && getRevisionSectors(doc).some((sec) => Number(sec.montantInitialHT) > 0 || (sec.decomptes || []).some((x) => Number(x.montantTotal) > 0) || (sec.terms || []).some((t) => String(t.indexBase ?? "").trim()))) return false;
   if (doc.type === "pv_reception" && Array.isArray(doc.reserves) && doc.reserves.length > 0) return false;
 
   // Les notes par défaut ("Merci de votre confiance." ou vide) ne
@@ -7295,13 +7311,13 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
 
         let totalHT = 0;
         const bodyRows = [];
-        (sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d, dIdx) => {
+        (sec.useDecomptes && sec.decomptes && sec.decomptes.length ? sec.decomptes : []).forEach((d, dIdx) => {
           if (d.isBlank) {
             bodyRows.push(<tr key={`blank-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.blank, height: "10px" }}></td></tr>);
             return;
           }
-          if (d.label) {
-            bodyRows.push(<tr key={`lbl-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.dpLabel, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(d.label)}</td></tr>);
+          if (d.label || d.dateDecompte) {
+            bodyRows.push(<tr key={`lbl-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.dpLabel, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(d.label || "DÉCOMPTE")}{d.dateDecompte ? ` — ${new Date(d.dateDecompte).toLocaleDateString("fr-FR")}` : ""}</td></tr>);
           }
           const dr = computeDecompteRevision(sec, d);
           const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
@@ -7368,6 +7384,10 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
                 {doc.objet && <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, textAlign: "center", whiteSpace: "normal" }}>{upx(doc.objet)}</td></tr>}
                 <tr><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(`STE : ${doc.company.name || ""}`)}</td></tr>
                 <tr>
+                  <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>DATE DE LA NOTE :</td>
+                  <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{doc.issueDate ? fr(doc.issueDate) : ""}</td>
+                </tr>
+                <tr>
                   <td colSpan={2} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "left", whiteSpace: "nowrap" }}>DATE DE SOUMISSION :</td>
                   <td colSpan={nCols - 2} style={{ ...cellStyle, background: REV_COL.label, textAlign: "left", whiteSpace: "nowrap" }}>{sec.dateBase ? fr(sec.dateBase) : ""}</td>
                 </tr>
@@ -7416,8 +7436,8 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
                   <td colSpan={2} style={{ ...cellStyle, background: REV_COL.revision, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{formatMoney(totalHT * (1 + tvaRate), doc.currency)}</td>
                 </tr>
                 <tr>
-                  <td colSpan={Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>ENTREPRISE</td>
-                  <td colSpan={nCols - Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>SERVICE / MAÎTRE D'OUVRAGE</td>
+                  <td colSpan={Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>ENTREPRISE{doc.company?.name ? ` — ${upx(doc.company.name)}` : ""}</td>
+                  <td colSpan={nCols - Math.floor(nCols / 2)} style={{ ...cellStyle, background: REV_COL.label, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>SERVICE / MAÎTRE D'OUVRAGE{doc.client?.name ? ` — ${upx(doc.client.name)}` : ""}</td>
                 </tr>
               </tbody>
             </table>
@@ -7741,20 +7761,31 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
               {localDoc.country && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>{localDoc.country}</span>}
               <span className="ml-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.slate}18`, color: colors.slate }}>{sectorLines.length} secteur{sectorLines.length > 1 ? "s" : ""}</span>
             </div>
-            <div className="text-right">
-              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>N°</label>
-              <input className="df-input df-mono w-28 rounded-md px-2 py-1 text-right text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
+            <div className="flex gap-3 text-right">
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>N°</label>
+                <input className="df-input df-mono w-28 rounded-md px-2 py-1 text-right text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Date de la note</label>
+                <input type="date" className="df-input df-mono w-36 rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.issueDate || ""} onChange={(e) => patch({ issueDate: e.target.value })} />
+              </div>
             </div>
           </div>
 
-          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires pour enregistrer la note ; un montant à réviser (montant initial ou décompte) l'est aussi.</p>
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Marché N°</label>
-              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex: TA 23/2020" value={localDoc.marcheNumero || ""} onChange={(e) => patch({ marcheNumero: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Marché N° *</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.marcheNumero || "").trim() ? colors.line : colors.brick}` }} placeholder="ex: TA 23/2020" value={localDoc.marcheNumero || ""} onChange={(e) => patch({ marcheNumero: e.target.value })} />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
-              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom de l'entreprise" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise *</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.company.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom de l'entreprise" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Maître d'ouvrage (client)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du service ou du client" value={localDoc.client?.name || ""} onChange={(e) => patchDeep("client", { name: e.target.value })} />
             </div>
           </div>
 
@@ -8024,7 +8055,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
       <PrintRevision ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -17188,5 +17219,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
