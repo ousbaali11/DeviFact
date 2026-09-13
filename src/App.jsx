@@ -560,6 +560,15 @@ const UNIT_OPTIONS = ["", ...UNITS];
 const unitLabel = (u) => u || "— (non précisé)";
 const DEVIS_STATUSES = ["brouillon", "envoyé", "vu", "signé", "refusé", "expiré"];
 const FACTURE_STATUSES = ["brouillon", "envoyée", "payée", "en retard"];
+// Version du modèle des documents : les règles de champs obligatoires ne
+// bloquent l'enregistrement final que pour les documents créés avec cette
+// version ou une plus récente (voir REQUIRED_FIELD_RULES).
+const DOCUMENT_SCHEMA_VERSION = 2;
+// Niveaux d'une relance de paiement : la mise en demeure (envoi recommandé,
+// art. 1344 C. civ.) est le dernier niveau.
+const RELANCE_NIVEAUX = [["relance1", "Première relance"], ["relance2", "Deuxième relance"], ["mise_en_demeure", "Mise en demeure"]];
+const relanceNiveauOf = (doc) => (RELANCE_NIVEAUX.some(([id]) => id === doc?.niveau) ? doc.niveau : "mise_en_demeure");
+const relanceNiveauLabel = (doc) => RELANCE_NIVEAUX.find(([id]) => id === relanceNiveauOf(doc))[1];
 // Règlement d'un avoir : imputation sur une facture à venir ou remboursement.
 const AVOIR_REGLEMENTS = ["Imputation sur la prochaine facture", "Remboursement par virement", "Remboursement par chèque", "Autre modalité convenue avec le client"];
 // Modes de règlement d'une facture (imprimés avec l'IBAN du profil).
@@ -1435,8 +1444,14 @@ function newRelanceFormelleDocument(documents) {
   return {
     id: nextId("doc"),
     type: "relance",
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "relance"),
     issueDate: today,
+    // Niveau du courrier (première relance, deuxième relance, mise en demeure),
+    // signataire, et devise des montants (auparavant absente, EUR supposé).
+    niveau: "mise_en_demeure",
+    signataire: "",
+    currency: geoDefaults().currency || "EUR",
     factureRef: "",
     factureDate: "",
     montantDu: "",
@@ -1749,7 +1764,6 @@ function buildMarocRevisionSheet(workbook, doc, sec, namePrefix = "") {
 // Champs obligatoires par type, contrôlés au clic sur « Enregistrer » /
 // « Terminé » (jamais pendant la saisie : l'enregistrement automatique du
 // brouillon continue). Chaque règle porte le libellé affiché à l'utilisateur.
-const DOCUMENT_SCHEMA_VERSION = 2;
 const isStrictDocument = (d) => Number(d?.schemaVersion) >= 2;
 const hasText = (v) => !!String(v ?? "").trim();
 const hasOneLine = (d) => Array.isArray(d.items) && d.items.some((it) => it.type === "line" && hasText(it.designation));
@@ -1774,6 +1788,15 @@ const REQUIRED_FIELD_RULES = {
     { label: "Au moins une ligne avec une désignation", test: hasOneLine },
     { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
     { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
+  ],
+  // Relance / mise en demeure : sans facture, montant et débiteur identifiés,
+  // le courrier n'a pas d'objet.
+  relance: [
+    { label: "Facture concernée (référence)", test: (d) => hasText(d.factureRef) },
+    { label: "Montant dû", test: (d) => (Number(d.montantDu) || 0) > 0 },
+    { label: "Nom du client débiteur", test: (d) => hasText(d.client?.name) },
+    { label: "Nom de l'entreprise", test: (d) => hasText(d.company?.name) },
+    { label: "Date d'émission", test: (d) => hasText(d.issueDate) },
   ],
   // Avoir : facture rectificative, elle doit référencer la facture d'origine
   // et indiquer le motif (art. 289 du CGI).
@@ -1841,7 +1864,7 @@ function isDocumentEmpty(doc) {
     pv_reception: ["objet", "marcheNumero"],
     rapport: ["motifAppel", "diagnostic", "travauxRealises", "adresseIntervention", "technicien"],
     contrat: ["objetTravaux", "montantTotalHT"],
-    relance: ["factureRef", "montantDu"],
+    relance: ["factureRef", "montantDu", "signataire"],
     planning: ["objet", "marcheNumero"],
     avoir: ["factureOrigineRef", "factureOrigineDate", "motifAvoir", "modeRemboursement"],
     acompte: ["sourceDevisRef", "montantMarcheHT", "acompteMontantFixe"],
@@ -4367,6 +4390,7 @@ function DeviFactAppInner() {
     return (
       <RelanceFormelleEditor
         doc={activeDoc}
+        companyProfile={companyProfile}
         saving={saving}
         account={account}
         plans={plans}
@@ -4609,7 +4633,7 @@ function DeviFactAppInner() {
             if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           })()}
@@ -5125,7 +5149,7 @@ function DeviFactAppInner() {
           if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} accountPlan={account?.plan} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
         })()}
@@ -9492,7 +9516,16 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
   );
 }
 
-const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, watermarkEnabled = true }, ref) {
+const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, watermarkEnabled = true, companyProfile = null }, ref) {
+  const niveau = relanceNiveauOf(doc);
+  const isMiseEnDemeure = niveau === "mise_en_demeure";
+  // L'indemnité forfaitaire de 40 € et les pénalités de l'art. L441-10 du
+  // Code de commerce ne s'appliquent qu'entre professionnels ; pour un
+  // particulier, seuls les intérêts au taux légal (art. 1231-6 C. civ.).
+  const clientIsPro = doc.client?.type !== "particulier";
+  const co = legalCompanyOf(doc.company, companyProfile);
+  const iban = (co.iban || "").trim();
+  const currency = doc.currency || "EUR";
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
@@ -9516,7 +9549,10 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
           {doc.company.name && <div style={{ fontWeight: 700 }}>{doc.company.name}</div>}
           {doc.company.address && <div style={{ fontSize: "9pt", color: inkSoft }}>{doc.company.address}</div>}
         </div>
-        <div style={{ textAlign: "right", fontSize: "9pt", color: inkSoft }}>{new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+        <div style={{ textAlign: "right", fontSize: "9pt", color: inkSoft }}>
+          {doc.docNumber && <div>Réf. {doc.docNumber}</div>}
+          <div>{new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+        </div>
       </div>
 
       <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
@@ -9524,23 +9560,30 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
         {doc.client.address && <div>{doc.client.address}</div>}
       </div>
 
-      <div style={{ marginTop: "10px", fontSize: "8pt", color: inkSoft, fontStyle: "italic", position: "relative", zIndex: 1 }}>Envoyé par lettre recommandée avec accusé de réception</div>
+      {isMiseEnDemeure && <div style={{ marginTop: "10px", fontSize: "8pt", color: inkSoft, fontStyle: "italic", position: "relative", zIndex: 1 }}>Envoyé par lettre recommandée avec accusé de réception</div>}
 
       <div style={{ marginTop: "24px", textAlign: "center", fontWeight: 700, fontSize: "13pt", letterSpacing: "0.03em", position: "relative", zIndex: 1 }}>
-        MISE EN DEMEURE DE PAYER
+        {isMiseEnDemeure ? "MISE EN DEMEURE DE PAYER" : niveau === "relance1" ? "PREMIÈRE RELANCE — FACTURE IMPAYÉE" : "DEUXIÈME RELANCE — FACTURE IMPAYÉE"}
       </div>
 
       <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
         <p>Madame, Monsieur,</p>
         <p style={{ marginTop: "10px" }}>
-          Malgré nos relances précédentes, nous constatons que la facture {doc.factureRef ? <strong>n° {doc.factureRef}</strong> : ""}{doc.factureDate ? ` du ${new Date(doc.factureDate).toLocaleDateString("fr-FR")}` : ""}, d'un montant de <strong>{formatMoney(Number(doc.montantDu) || 0, doc.currency || "EUR")}</strong>{doc.dateEcheanceOrigine ? `, échue depuis le ${new Date(doc.dateEcheanceOrigine).toLocaleDateString("fr-FR")}` : ""}, demeure impayée à ce jour.
+          {isMiseEnDemeure ? "Malgré nos relances précédentes, nous constatons" : niveau === "relance1" ? "Sauf erreur ou omission de notre part, nous constatons" : "Malgré notre première relance, nous constatons"} que la facture {doc.factureRef ? <strong>n° {doc.factureRef}</strong> : ""}{doc.factureDate ? ` du ${new Date(doc.factureDate).toLocaleDateString("fr-FR")}` : ""}, d'un montant de <strong>{formatMoney(Number(doc.montantDu) || 0, currency)}</strong>{doc.dateEcheanceOrigine ? `, échue depuis le ${new Date(doc.dateEcheanceOrigine).toLocaleDateString("fr-FR")}` : ""}, demeure impayée à ce jour.
         </p>
         <p style={{ marginTop: "10px" }}>
-          Par la présente, nous vous <strong>mettons en demeure</strong> de régler l'intégralité de cette somme dans un délai de <strong>{doc.delaiPaiementJours} jours</strong> à compter de la réception de ce courrier{dateLimite ? `, soit au plus tard le ${dateLimite.toLocaleDateString("fr-FR")}` : ""}.
+          {isMiseEnDemeure ? <>Par la présente, nous vous <strong>mettons en demeure</strong> (art. 1344 du Code civil) de régler l'intégralité de cette somme</> : <>Nous vous remercions de bien vouloir régler cette somme</>} dans un délai de <strong>{doc.delaiPaiementJours} jours</strong> à compter de la réception de ce courrier{dateLimite ? `, soit au plus tard le ${dateLimite.toLocaleDateString("fr-FR")}` : ""}.
         </p>
         <p style={{ marginTop: "10px" }}>
-          À défaut de règlement dans ce délai, des pénalités de retard au taux de {doc.tauxInteretRetard} seront appliquées, ainsi qu'une indemnité forfaitaire pour frais de recouvrement de {formatMoney(Number(doc.indemniteForfaitaire) || 40, doc.currency || "EUR")}, conformément aux dispositions du Code de commerce. Nous nous réservons également le droit d'engager toute action, y compris judiciaire, pour obtenir le recouvrement de cette créance.
+          {isMiseEnDemeure ? (
+            clientIsPro
+              ? <>À défaut de règlement dans ce délai, des pénalités de retard au taux de {doc.tauxInteretRetard} seront appliquées (art. L441-10 du Code de commerce), ainsi qu'une indemnité forfaitaire pour frais de recouvrement de {formatMoney(Number(doc.indemniteForfaitaire) || 40, currency)} (art. D441-5 du Code de commerce). Nous nous réservons également le droit d'engager toute action, y compris judiciaire, pour obtenir le recouvrement de cette créance.</>
+              : <>À défaut de règlement dans ce délai, des intérêts de retard au taux de {doc.tauxInteretRetard} courront à compter de la présente mise en demeure (art. 1231-6 et 1344 du Code civil). Nous nous réservons également le droit d'engager toute action, y compris judiciaire, pour obtenir le recouvrement de cette créance.</>
+          ) : (
+            <>À défaut de règlement dans ce délai, nous serions contraints de vous adresser une mise en demeure{clientIsPro ? ", avec application des pénalités de retard et de l'indemnité forfaitaire pour frais de recouvrement prévues par le Code de commerce" : ", avec application des intérêts de retard prévus par le Code civil"}.</>
+          )}
         </p>
+        {iban && <p style={{ marginTop: "10px" }}>Règlement par virement bancaire : IBAN {iban}{(co.bic || "").trim() ? ` — BIC ${co.bic.trim()}` : ""}.</p>}
         {doc.notes && <p style={{ marginTop: "10px", whiteSpace: "pre-wrap" }}>{doc.notes}</p>}
         <p style={{ marginTop: "10px" }}>Nous restons à votre disposition pour tout règlement amiable de cette situation.</p>
         <p style={{ marginTop: "10px" }}>Veuillez agréer, Madame, Monsieur, l'expression de nos salutations distinguées.</p>
@@ -9548,16 +9591,17 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
 
       <div style={{ marginTop: "40px", textAlign: "right", position: "relative", zIndex: 1 }}>
         <div>{doc.company.name}</div>
+        {(doc.signataire || "").trim() && <div style={{ fontSize: "9pt", color: inkSoft }}>{doc.signataire.trim()}</div>}
       </div>
 
       <div style={{ marginTop: "30px", padding: "10px 14px", borderRadius: "4px", background: box, fontSize: "8pt", color: inkSoft, position: "relative", zIndex: 1 }}>
-        Rappel des montants dus : {formatMoney(Number(doc.montantDu) || 0, doc.currency || "EUR")} — Date limite de paiement : {dateLimite ? dateLimite.toLocaleDateString("fr-FR") : "—"}
+        Rappel des montants dus : {formatMoney(Number(doc.montantDu) || 0, currency)} — Date limite de paiement : {dateLimite ? dateLimite.toLocaleDateString("fr-FR") : "—"}
       </div>
     </div>
   );
 });
 
-function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
+function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -9639,10 +9683,12 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
 
   function exportExcel() {
     const rows = [];
-    rows.push(["MISE EN DEMEURE", localDoc.docNumber]);
+    rows.push([relanceNiveauLabel(localDoc).toUpperCase(), localDoc.docNumber]);
     rows.push(["Date d'émission", fr(localDoc.issueDate)]);
     rows.push(["Entreprise", localDoc.company?.name || ""]);
+    if ((localDoc.signataire || "").trim()) rows.push(["Signataire", localDoc.signataire.trim()]);
     rows.push(["Client débiteur", localDoc.client?.name || ""]);
+    rows.push(["Type de client", localDoc.client?.type === "particulier" ? "Particulier" : "Professionnel"]);
     rows.push(["Facture concernée", localDoc.factureRef || ""]);
     rows.push(["Date de la facture", localDoc.factureDate ? fr(localDoc.factureDate) : ""]);
     rows.push(["Montant dû", Number(localDoc.montantDu) || 0]);
@@ -9650,7 +9696,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
     rows.push(["Délai accordé (jours)", localDoc.delaiPaiementJours || ""]);
     rows.push(["Date limite de paiement", dateLimite ? dateLimite.toLocaleDateString("fr-FR") : ""]);
     rows.push(["Taux d'intérêt de retard", localDoc.tauxInteretRetard || ""]);
-    rows.push(["Indemnité forfaitaire", Number(localDoc.indemniteForfaitaire) || 0]);
+    rows.push(["Indemnité forfaitaire", localDoc.client?.type === "particulier" ? "Sans objet (particulier)" : Number(localDoc.indemniteForfaitaire) || 0]);
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 26 }, { wch: 40 }];
     const wb = XLSX.utils.book_new();
@@ -9695,30 +9741,48 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
               <AlertTriangle size={17} />
             </div>
           )}
-          <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Mise en demeure de payer</h1>
+          <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>{relanceNiveauLabel(localDoc)}{relanceNiveauOf(localDoc) === "mise_en_demeure" ? " de payer" : " de paiement"}</h1>
+          <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires pour enregistrer ce courrier.</p>
 
-          <div className="mb-6 max-w-xs">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date d'émission de ce courrier</label>
-            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.issueDate || ""} onChange={(e) => patch({ issueDate: e.target.value })} />
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Niveau du courrier</label>
+              <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={relanceNiveauOf(localDoc)} onChange={(e) => patch({ niveau: e.target.value })}>
+                {RELANCE_NIVEAUX.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select>
+              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Les relances sont des rappels amiables ; la mise en demeure (envoi recommandé) fait courir les intérêts et ouvre la voie judiciaire.</p>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date d'émission de ce courrier *</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.issueDate || ""} onChange={(e) => patch({ issueDate: e.target.value })} />
+              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Référence du courrier : <span className="df-mono">{localDoc.docNumber}</span> (imprimée en haut à droite).</p>
+            </div>
           </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
-              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Entreprise *</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.company.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.company.name} onChange={(e) => patchDeep("company", { name: e.target.value })} />
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
+              <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Signataire (nom et qualité, ex : Jean Dupont, gérant)" value={localDoc.signataire || ""} onChange={(e) => patch({ signataire: e.target.value })} />
             </div>
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client débiteur</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <label className="block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client débiteur *</label>
+                <div className="flex gap-1 rounded-md p-0.5" style={{ background: colors.surface }} title="Un particulier ne doit ni l'indemnité forfaitaire de 40 € ni les pénalités de l'art. L441-10 du Code de commerce, réservés aux professionnels">
+                  <button type="button" onClick={() => patchDeep("client", { type: "entreprise" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: (localDoc.client.type || "entreprise") !== "particulier" ? colors.ink : "transparent", color: (localDoc.client.type || "entreprise") !== "particulier" ? "white" : colors.inkSoft }}>Professionnel</button>
+                  <button type="button" onClick={() => patchDeep("client", { type: "particulier" })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: localDoc.client.type === "particulier" ? colors.ink : "transparent", color: localDoc.client.type === "particulier" ? "white" : colors.inkSoft }}>Particulier</button>
+                </div>
+              </div>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
             </div>
           </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Facture concernée (référence)</label>
-              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : FAC-014" value={localDoc.factureRef || ""} onChange={(e) => patch({ factureRef: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Facture concernée (référence) *</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.factureRef || "").trim() ? colors.line : colors.brick}` }} placeholder="ex : FAC-014" value={localDoc.factureRef || ""} onChange={(e) => patch({ factureRef: e.target.value })} />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Date de la facture</label>
@@ -9728,8 +9792,8 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Montant dû</label>
-              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.montantDu} onChange={(e) => patch({ montantDu: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Montant dû ({currencyLabel(localDoc.currency || "EUR")}) *</label>
+              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(Number(localDoc.montantDu) || 0) > 0 ? colors.line : colors.brick}` }} value={localDoc.montantDu} onChange={(e) => patch({ montantDu: e.target.value })} />
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Échéance d'origine</label>
@@ -9748,7 +9812,11 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Indemnité forfaitaire</label>
-              <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indemniteForfaitaire} onChange={(e) => patch({ indemniteForfaitaire: e.target.value })} />
+              {localDoc.client.type === "particulier" ? (
+                <p className="rounded-md px-3 py-2 text-xs" style={{ background: colors.paper, color: colors.inkSoft }} data-testid="indemnite-sans-objet">Sans objet pour un particulier : l'indemnité de 40 € (art. L441-10 et D441-5 du Code de commerce) ne concerne que les professionnels.</p>
+              ) : (
+                <input type="number" className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.indemniteForfaitaire} onChange={(e) => patch({ indemniteForfaitaire: e.target.value })} />
+              )}
             </div>
           </div>
 
@@ -9766,8 +9834,8 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintRelance ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <PrintRelance ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} companyProfile={companyProfile} />
     </div>
   );
 }
@@ -17012,5 +17080,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
