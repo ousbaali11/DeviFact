@@ -59,6 +59,23 @@ describe("éditeur générique (devis, facture, proforma, acompte, avoir, comman
   }
 });
 
+describe("avertissement prix saisi < prix de référence (étape 5)", () => {
+  const withLine = (unitPrice) => ({ ...newDocument("devis", []), items: [{ id: "l1", type: "line", productId: "p1", designation: "Carrelage", qty: 1, unit: "m²", unitPrice, tva: 20, discount: 0, details: [] }] });
+  const render = (doc) => renderOnce(
+    <Editor {...common} doc={doc} clients={[]} products={products} stockByProduct={{ p1: 4 }} companyProfile={emptyCompanyProfile()} onConvert={noop} onSaveClient={noop} onSaveProduct={noop} onSplit={noop} splitNotice={null} onOpenSplitDoc={noop} onDismissSplitNotice={noop} />,
+  );
+  it("S < P : message non bloquant avec les deux montants", async () => {
+    const html = await render(withLine(20));
+    expect(html).toContain('data-testid="price-warning"');
+    expect(html).toContain("Prix saisi 20,00");
+    expect(html).toContain("prix de référence 25,00");
+  });
+  it("S = P et S > P : aucun message", async () => {
+    expect(await render(withLine(25))).not.toContain('data-testid="price-warning"');
+    expect(await render(withLine(30))).not.toContain('data-testid="price-warning"');
+  });
+});
+
 describe("éditeurs spécialisés", () => {
   it("révision de prix", async () => {
     const html = await renderOnce(<RevisionEditor {...common} doc={newRevisionDocument(REVISION_SECTORS[0], "🇫🇷 FR", [])} clients={[]} onSaveClient={noop} />);

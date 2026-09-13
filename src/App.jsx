@@ -5,6 +5,7 @@ import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
 import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults } from "./accounting.js";
+import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
 import * as XLSX from "xlsx";
@@ -15315,6 +15316,10 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     setLibraryQuery("");
   }
   // Produits proposés : actifs, et en stock si la restriction de quantité est activée.
+  // Étape 5 : avertissement non bloquant quand le prix saisi d'une ligne liée à
+  // un produit est inférieur au prix de vente HT de référence du produit.
+  const productById = useMemo(() => new Map((products || []).map((p) => [p.id, p])), [products]);
+  const lineWarnings = useMemo(() => priceWarnings(localDoc.items, productById), [localDoc.items, productById]);
   const libraryProducts = (products || []).filter((p) => p.is_active && (!p.quantity_restricted || Number(stockByProduct[p.id] ?? 0) > 0));
   function saveLineAsPrestation(it) {
     if (!it.designation.trim()) { alert("Renseigne d'abord une désignation pour cette ligne avant de l'enregistrer."); return; }
@@ -16395,6 +16400,9 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   </div>
                 </div>
 
+                {lineWarnings.has(it.id) && (
+                  <p className="no-print mt-1 ml-6 flex items-center gap-1 text-xs" style={{ color: colors.brick }} data-testid="price-warning"><AlertTriangle size={12} className="shrink-0" /> {priceWarningMessage(lineWarnings.get(it.id), (n) => formatMoney(n, localDoc.currency))}</p>
+                )}
                 {(openDetailsFor.includes(it.id) || (it.details || []).length > 0) && (
                   <div className="mt-2 ml-6 space-y-1 rounded-md p-2" style={{ background: "rgba(27,42,51,0.03)" }}>
                     {(it.details || []).map((d, dIdx) => (
