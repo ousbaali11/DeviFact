@@ -1209,7 +1209,7 @@ function computeRevisionLine(line) {
 function emptySituationLine() {
   return {
     id: nextId("sl"), type: "line",
-    designation: "", unit: "", qty: 1, unitPrice: 0, tva: 20,
+    designation: "", qty: 1, unitPrice: 0, tva: 20,
     avancementPct: 0, montantCumulePrecedent: 0,
   };
 }
@@ -1218,10 +1218,21 @@ function newSituationDocument(documents) {
   return {
     id: nextId("doc"),
     type: "situation",
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "situation"),
     issueDate: new Date().toISOString().slice(0, 10),
     currency: "EUR",
     numeroSituation: 1,
+    // Période couverte par la situation (du … au …), obligatoire pour les
+    // nouvelles situations ; « vaut facture » active l'échéance et le bloc
+    // de mentions légales de facture ; conditions de paiement et visa du
+    // maître d'œuvre facultatifs.
+    periodeDebut: "",
+    periodeFin: "",
+    vautFacture: false,
+    dueDays: 30,
+    paymentTerms: "",
+    visaMaitreOeuvre: "",
     photos: [],
     previousSituationId: null,
     marcheNumero: "",
@@ -1277,7 +1288,7 @@ function createNextSituation(sourceDoc, documents) {
   const computed = computeSituation(sourceDoc);
   const newItems = computed.lines.map((l) => ({
     id: nextId("sl"), type: "line",
-    designation: l.designation, unit: l.unit, qty: l.qty, unitPrice: l.unitPrice, tva: l.tva,
+    designation: l.designation, qty: l.qty, unitPrice: l.unitPrice, tva: l.tva,
     avancementPct: l.avancementPct,
     montantCumulePrecedent: Number(l.montantCumuleActuel.toFixed(2)),
   }));
@@ -1294,7 +1305,42 @@ function createNextSituation(sourceDoc, documents) {
     items: newItems,
     retenueGarantiePct: sourceDoc.retenueGarantiePct,
     currency: sourceDoc.currency,
+    chantier: sourceDoc.chantier || "",
+    vautFacture: sourceDoc.vautFacture === true,
+    dueDays: sourceDoc.dueDays ?? 30,
+    paymentTerms: sourceDoc.paymentTerms || "",
+    visaMaitreOeuvre: sourceDoc.visaMaitreOeuvre || "",
   };
+}
+
+// Export comptable (tableau de bord) : une ligne par document, huit colonnes
+// partagées par tous les types. Fonction pure, testée. Pour une situation,
+// le montant TTC est le NET À PAYER (après retenue de garantie et acompte),
+// comme partout ailleurs dans l'application — auparavant le TTC brut.
+function accountingExportRow(d) {
+  const head = [docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client?.name || "", d.status];
+  if (d.type === "revision") {
+    const r = computeRevision(d);
+    return [...head, Number((r.montantInitialTotal || 0).toFixed(2)), Number(r.ecartMontant.toFixed(2)), Number(r.montantRevise.toFixed(2))];
+  }
+  if (d.type === "situation") {
+    const sit = computeSituation(d);
+    return [...head, Number(sit.subtotalHT.toFixed(2)), Number(sit.totalTVA.toFixed(2)), Number(sit.netAPayer.toFixed(2))];
+  }
+  if (d.type === "contrat") {
+    const ht = Number(d.montantTotalHT) || 0;
+    const tva = ht * (Number(d.tva) || 0) / 100;
+    return [...head, Number(ht.toFixed(2)), Number(tva.toFixed(2)), Number((ht + tva).toFixed(2))];
+  }
+  if (d.type === "relance") return [...head, "", "", Number((Number(d.montantDu) || 0).toFixed(2))];
+  const t = computeTotals(d);
+  return [...head, Number(t.subtotalHT.toFixed(2)), Number(t.totalTVA.toFixed(2)), Number(t.totalTTC.toFixed(2))];
+}
+// Lignes { productId, totalHT, tva } servant aux écritures comptables :
+// pour une situation, le montant de cette situation par poste.
+function accountingLinesOf(d) {
+  if (d.type === "situation") return computeSituation(d).lines.map((l) => ({ productId: l.productId, totalHT: l.montantCetteSituation, tva: l.tva }));
+  return computeTotals(d).computedLines;
 }
 // ================= fin Situation de travaux =================
 
@@ -1789,6 +1835,13 @@ const REQUIRED_FIELD_RULES = {
     { label: "SIRET de l'émetteur", test: (d) => d.company?.type === "particulier" || hasText(d.company?.siret) },
     { label: "N° de TVA de l'émetteur (une ligne porte de la TVA)", test: (d) => d.company?.type === "particulier" || !(d.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) > 0) || hasText(d.company?.tva) },
   ],
+  // Situation de travaux : période couverte, client et au moins un poste.
+  situation: [
+    { label: "Nom du client", test: (d) => hasText(d.client?.name) },
+    { label: "Au moins un poste avec une désignation", test: hasOneLine },
+    { label: "Période couverte (du)", test: (d) => hasText(d.periodeDebut) },
+    { label: "Période couverte (au)", test: (d) => hasText(d.periodeFin) },
+  ],
   // Relance / mise en demeure : sans facture, montant et débiteur identifiés,
   // le courrier n'a pas d'objet.
   relance: [
@@ -1860,7 +1913,7 @@ function isDocumentEmpty(doc) {
   // Champs propres à certains types, en plus de client/items déjà
   // vérifiés ci-dessus pour tous les types.
   const specificFields = {
-    situation: ["objet", "marcheNumero"],
+    situation: ["objet", "marcheNumero", "periodeDebut", "chantier", "paymentTerms", "visaMaitreOeuvre"],
     pv_reception: ["objet", "marcheNumero"],
     rapport: ["motifAppel", "diagnostic", "travauxRealises", "adresseIntervention", "technicien"],
     contrat: ["objetTravaux", "montantTotalHT"],
@@ -3732,7 +3785,7 @@ function DeviFactAppInner() {
       }
       // Facture qui vient de passer à "payée" : propose (sans jamais
       // l'envoyer seul) un email de demande d'avis Google au client.
-      if (original && original.type === "facture" && patch.status === "payée" && original.status !== "payée") {
+      if (original && (original.type === "facture" || (original.type === "situation" && original.vautFacture === true)) && patch.status === "payée" && original.status !== "payée") {
         const updated = { ...original, ...patch };
         const reviewUrl = (companyProfile?.googleReviewUrl || "").trim();
         const clientEmail = (updated.client?.email || "").trim();
@@ -3900,6 +3953,8 @@ function DeviFactAppInner() {
         rows.push(["SITUATION DE TRAVAUX", `N° ${doc.numeroSituation || 1}`]);
         rows.push(["Référence", doc.docNumber]);
         rows.push(["Marché N°", doc.marcheNumero || ""]);
+        if (doc.periodeDebut || doc.periodeFin) rows.push(["Période couverte", [doc.periodeDebut ? `du ${fr(doc.periodeDebut)}` : "", doc.periodeFin ? `au ${fr(doc.periodeFin)}` : ""].filter(Boolean).join(" ")]);
+        rows.push(["Vaut facture", doc.vautFacture === true ? "Oui" : "Non"]);
         rows.push(["Avancement global", `${s.avancementGlobalPct.toFixed(1)}%`]);
         rows.push([]);
         rows.push(["Désignation", "Montant marché", "% cumulé", "Cumul atteint", "Déjà facturé", "Cette situation"]);
@@ -4131,33 +4186,7 @@ function DeviFactAppInner() {
     documents
       .slice()
       .sort((a, b) => new Date(a.issueDate) - new Date(b.issueDate))
-      .forEach((d) => {
-        if (d.type === "revision") {
-          const r = computeRevision(d);
-          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number((r.montantInitialTotal || 0).toFixed(2)), Number(r.ecartMontant.toFixed(2)), Number(r.montantRevise.toFixed(2))]);
-          return;
-        }
-        if (d.type === "situation") {
-          const s = computeSituation(d);
-          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number(s.subtotalHT.toFixed(2)), Number(s.totalTVA.toFixed(2)), Number(s.totalTTCBrut.toFixed(2))]);
-          return;
-        }
-        if (d.type === "contrat") {
-          const ht = Number(d.montantTotalHT) || 0;
-          const tva = ht * (Number(d.tva) || 0) / 100;
-          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, Number(ht.toFixed(2)), Number(tva.toFixed(2)), Number((ht + tva).toFixed(2))]);
-          return;
-        }
-        if (d.type === "relance") {
-          rows.push([docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "", d.status, "", "", Number((Number(d.montantDu) || 0).toFixed(2))]);
-          return;
-        }
-        const t = computeTotals(d);
-        rows.push([
-          docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client.name || "",
-          d.status, Number(t.subtotalHT.toFixed(2)), Number(t.totalTVA.toFixed(2)), Number(t.totalTTC.toFixed(2)),
-        ]);
-      });
+      .forEach((d) => { rows.push(accountingExportRow(d)); });
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
@@ -4171,7 +4200,7 @@ function DeviFactAppInner() {
       const productById = new Map(products.map((p) => [p.id, p]));
       const defaults = accountingDefaults(companyProfile?.accounting);
       const entries = [
-        ...buildSalesEntries(documents, { productById, defaults, computeLines: (d) => computeTotals(d).computedLines }),
+        ...buildSalesEntries(documents, { productById, defaults, computeLines: accountingLinesOf }),
         ...buildStockEntries(mvts, { productById, defaults }).entries,
       ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
       const entryRows = [["Date", "Journal", "Pièce", "Libellé", "Compte", "Débit", "Crédit", "Code activité", "Source"]];
@@ -4316,6 +4345,7 @@ function DeviFactAppInner() {
     return (
       <SituationEditor
         doc={activeDoc}
+        companyProfile={companyProfile}
         documents={documents}
         saving={saving}
         account={account}
@@ -4629,7 +4659,7 @@ function DeviFactAppInner() {
           {batchExportDoc && (() => {
             const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
             if (batchExportDoc.type === "revision") return <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+            if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
             if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
             if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
@@ -5145,7 +5175,7 @@ function DeviFactAppInner() {
         {batchExportDoc && (() => {
           const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
           if (batchExportDoc.type === "revision") return <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
@@ -8000,8 +8030,14 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   );
 }
 
-const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, watermarkEnabled = true, photoUrls = {} }, ref) {
+const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, watermarkEnabled = true, photoUrls = {}, companyProfile = null }, ref) {
   const s = computeSituation(doc);
+  // « Cette situation vaut facture » : échéance et mentions légales de facture
+  // (mêmes règles que PrintDocument, sur la copie du profil ou le profil courant).
+  const vautFacture = doc.vautFacture === true;
+  const dueDate = vautFacture ? new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 30) * 86400000) : null;
+  const legalLines = vautFacture ? legalMentionLines({ ...doc, type: "facture" }, companyProfile) : [];
+  const periode = doc.periodeDebut || doc.periodeFin ? [doc.periodeDebut ? `du ${new Date(doc.periodeDebut).toLocaleDateString("fr-FR")}` : "", doc.periodeFin ? `au ${new Date(doc.periodeFin).toLocaleDateString("fr-FR")}` : ""].filter(Boolean).join(" ") : "";
   const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
@@ -8021,9 +8057,12 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: "14pt" }}>SITUATION DE TRAVAUX N° {doc.numeroSituation || 1}</div>
-          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          <div style={{ fontWeight: 700, fontSize: "14pt" }}>{vautFacture ? "FACTURE DE SITUATION" : "SITUATION DE TRAVAUX"} N° {doc.numeroSituation || 1}</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}{dueDate ? ` — Échéance : ${dueDate.toLocaleDateString("fr-FR")}` : ""}</div>
+          {periode && <div style={{ color: inkSoft }}>Période : {periode}</div>}
           {doc.marcheNumero && <div style={{ color: inkSoft }}>Marché N° : {doc.marcheNumero}</div>}
+          {doc.chantier && <div style={{ color: inkSoft }}>Chantier : {doc.chantier}</div>}
+          {doc.dateDebut && <div style={{ color: inkSoft }}>Début des travaux : {new Date(doc.dateDebut).toLocaleDateString("fr-FR")}</div>}
         </div>
         {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
       </div>
@@ -8082,6 +8121,20 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
         </div>
       </div>
 
+      {(doc.paymentTerms || "").trim() && <div style={{ marginTop: "12px", fontSize: "8.5pt", position: "relative", zIndex: 1 }}>Conditions de paiement : {doc.paymentTerms.trim()}</div>}
+      {legalLines.length > 0 && (
+        <div className="print-legal" style={{ marginTop: "10px", fontSize: "7.5pt", lineHeight: 1.35, color: inkSoft, position: "relative", zIndex: 1 }}>
+          {legalLines.map((l, i) => <div key={i} style={{ marginBottom: "2px" }}>{l}</div>)}
+        </div>
+      )}
+      {(doc.visaMaitreOeuvre || "").trim() && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px", position: "relative", zIndex: 1 }}>
+          <div style={{ width: "260px", border: `1px solid ${line}`, borderRadius: "4px", padding: "8px 12px", minHeight: "60px", fontSize: "8.5pt" }}>
+            <div style={{ fontWeight: 600 }}>Visa du maître d'œuvre</div>
+            <div style={{ color: inkSoft }}>{doc.visaMaitreOeuvre.trim()}</div>
+          </div>
+        </div>
+      )}
       {doc.notes && <div style={{ marginTop: "20px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
       {/* Photos de chantier — grille en fin de document */}
       {(doc.photos || []).some((p) => photoUrls[p.path]) && (
@@ -8100,7 +8153,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   );
 });
 
-function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing }) {
+function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -8230,6 +8283,13 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
     rows.push(["Référence", localDoc.docNumber]);
     rows.push(["Marché N°", localDoc.marcheNumero || ""]);
     rows.push(["Objet", localDoc.objet || ""]);
+    if (localDoc.chantier) rows.push(["Chantier", localDoc.chantier]);
+    if (localDoc.periodeDebut || localDoc.periodeFin) rows.push(["Période couverte", [localDoc.periodeDebut ? `du ${fr(localDoc.periodeDebut)}` : "", localDoc.periodeFin ? `au ${fr(localDoc.periodeFin)}` : ""].filter(Boolean).join(" ")]);
+    if (localDoc.dateDebut) rows.push(["Début des travaux", fr(localDoc.dateDebut)]);
+    rows.push(["Vaut facture", localDoc.vautFacture === true ? "Oui" : "Non"]);
+    if (localDoc.vautFacture === true) rows.push(["Échéance", fr(new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 30) * 86400000))]);
+    if ((localDoc.paymentTerms || "").trim()) rows.push(["Conditions de paiement", localDoc.paymentTerms.trim()]);
+    if ((localDoc.visaMaitreOeuvre || "").trim()) rows.push(["Visa du maître d'œuvre", localDoc.visaMaitreOeuvre.trim()]);
     rows.push(["Avancement global", `${s.avancementGlobalPct.toFixed(1)}%`]);
     rows.push([]);
     rows.push(["Désignation", "Qté", "PU", "Montant marché", "% cumulé", "Cumul atteint", "Déjà facturé", "Cette situation"]);
@@ -8290,9 +8350,15 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
               <h1 className="df-display text-xl font-semibold">Situation de travaux N° {localDoc.numeroSituation || 1}</h1>
               {localDoc.previousSituationId && <span className="text-xs" style={{ color: colors.inkSoft }}>Suite de la situation précédente — cumul repris automatiquement</span>}
             </div>
-            <div className="text-right">
-              <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Réf.</label>
-              <input className="df-input df-mono w-28 rounded-md px-2 py-1 text-right text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
+            <div className="flex gap-3 text-right">
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Réf.</label>
+                <input className="df-input df-mono w-28 rounded-md px-2 py-1 text-right text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Date</label>
+                <input type="date" className="df-input df-mono w-36 rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.issueDate || ""} onChange={(e) => patch({ issueDate: e.target.value })} />
+              </div>
             </div>
           </div>
 
@@ -8306,9 +8372,51 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
               <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateDebut || ""} onChange={(e) => patch({ dateDebut: e.target.value })} />
             </div>
           </div>
-          <div className="mb-6">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet</label>
-            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Objet</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Chantier (regroupement)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Ex : Rénovation cuisine Dupont" value={localDoc.chantier || ""} onChange={(e) => patch({ chantier: e.target.value })} />
+            </div>
+          </div>
+          <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires pour enregistrer la situation.</p>
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Période couverte : du *</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${localDoc.periodeDebut ? colors.line : colors.brick}` }} value={localDoc.periodeDebut || ""} onChange={(e) => patch({ periodeDebut: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>au *</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${localDoc.periodeFin ? colors.line : colors.brick}` }} value={localDoc.periodeFin || ""} onChange={(e) => patch({ periodeFin: e.target.value })} />
+            </div>
+          </div>
+          <div className="mb-6 rounded-lg p-3" style={{ background: colors.paper }}>
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-0.5" checked={localDoc.vautFacture === true} onChange={(e) => patch({ vautFacture: e.target.checked })} style={{ accentColor: colors.brass }} />
+              <span>
+                <span className="font-medium">Cette situation vaut facture</span>
+                <span className="block text-xs" style={{ color: colors.inkSoft }}>Cochée : le PDF s'intitule « Facture de situation », affiche l'échéance et le bloc complet de mentions légales de facture, et la situation compte dans la comptabilité et les indicateurs comme une facture. Décochée : simple document d'avancement, facturé séparément.</span>
+              </span>
+            </label>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {localDoc.vautFacture === true && (
+                <div>
+                  <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Échéance de paiement (jours)</label>
+                  <input type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dueDays ?? 30} onChange={(e) => patch({ dueDays: Number(e.target.value) || 0 })} />
+                </div>
+              )}
+              <div className={localDoc.vautFacture === true ? "" : "sm:col-span-2"}>
+                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Conditions de paiement (optionnel)</label>
+                <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : 30 jours fin de mois" value={localDoc.paymentTerms || ""} onChange={(e) => patch({ paymentTerms: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Visa du maître d'œuvre (optionnel)</label>
+                <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du maître d'œuvre" value={localDoc.visaMaitreOeuvre || ""} onChange={(e) => patch({ visaMaitreOeuvre: e.target.value })} />
+              </div>
+            </div>
           </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -8318,8 +8426,8 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
             </div>
             <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client</label>
-              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Client *</label>
+              <input className="df-input mb-1 w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${(localDoc.client.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom" value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
               <input className="df-input w-full rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
             </div>
           </div>
@@ -8390,8 +8498,8 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} />
-      <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} companyProfile={companyProfile} />
     </div>
   );
 }
@@ -12673,7 +12781,7 @@ function ComptabiliteView({ documents, products, movements, movementsLoading, co
 
   const defaults = useMemo(() => accountingDefaults(companyProfile?.accounting), [companyProfile?.accounting]);
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
-  const salesEntries = useMemo(() => buildSalesEntries(documents, { productById, defaults, computeLines: (d) => computeTotals(d).computedLines }), [documents, productById, defaults]);
+  const salesEntries = useMemo(() => buildSalesEntries(documents, { productById, defaults, computeLines: accountingLinesOf }), [documents, productById, defaults]);
   const stock = useMemo(() => buildStockEntries(movements, { productById, defaults }), [movements, productById, defaults]);
   const consumption = useMemo(() => valuedStockMovements(movements, { productById }).filter((m) => (!from || m.date >= from) && (!to || m.date <= to)), [movements, productById, from, to]);
   const allEntries = useMemo(() => [...salesEntries, ...stock.entries].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)), [salesEntries, stock.entries]);
@@ -17080,5 +17188,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

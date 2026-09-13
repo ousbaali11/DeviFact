@@ -43,8 +43,11 @@ export function accountingDefaults(custom) {
 
 // Documents de vente pris en compte : factures, factures d'acompte, avoirs
 // émis (tout statut sauf brouillon).
+// Documents de vente pris en compte : factures, factures d'acompte, avoirs
+// émis (tout statut sauf brouillon), et situations de travaux « vaut facture ».
 export function isSalesDocument(doc) {
-  return !!doc && ["facture", "acompte", "avoir"].includes(doc.type) && doc.status !== "brouillon";
+  if (!doc || doc.status === "brouillon") return false;
+  return ["facture", "acompte", "avoir"].includes(doc.type) || (doc.type === "situation" && doc.vautFacture === true);
 }
 
 function entry(base, account, debit, credit) {
@@ -82,7 +85,7 @@ export function buildSalesEntries(documents, { productById = new Map(), defaults
       totalHT += ht; totalTVA += tva;
     }
     if (lines.length === 0) continue;
-    const base = { date: doc.issueDate, journal, piece: doc.docNumber, label: `${doc.type === "avoir" ? "Avoir" : "Facture"} ${doc.docNumber}${doc.client?.name ? ` - ${doc.client.name}` : ""}`, source: "vente", documentId: doc.id, activity: "" };
+    const base = { date: doc.issueDate, journal, piece: doc.docNumber, label: `${doc.type === "avoir" ? "Avoir" : doc.type === "situation" ? "Facture de situation" : "Facture"} ${doc.docNumber}${doc.client?.name ? ` - ${doc.client.name}` : ""}`, source: "vente", documentId: doc.id, activity: "" };
     const ttc = r2(totalHT + totalTVA);
     // Client : débit TTC (crédit pour un avoir)
     entries.push(entry(base, acc.customer, sign > 0 ? ttc : 0, sign > 0 ? 0 : ttc));
