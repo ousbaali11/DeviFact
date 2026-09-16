@@ -2697,6 +2697,57 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   );
 });
 
+// ---------------------------------------------------------------------------
+// Paramètres du site (version d'interface, thème, nom, couleurs des PDF…) :
+// la dernière valeur connue est gardée sur l'appareil pour démarrer
+// directement dans la bonne version (Classique, Avancée ou Atelier), sans
+// jamais afficher une autre version le temps du chargement, y compris
+// quand le serveur ne répond pas au premier essai. Réécrite à chaque
+// chargement réussi et à chaque modification depuis Admin.
+// ---------------------------------------------------------------------------
+const SITE_SETTINGS_CACHE_KEY = "devifact_site_settings";
+const DEFAULT_SITE_SETTINGS = { name: "Chantiflow", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" };
+function readCachedSiteSettings() {
+  try {
+    const raw = localStorage.getItem(SITE_SETTINGS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch { return null; }
+}
+function writeCachedSiteSettings(settings) {
+  try { localStorage.setItem(SITE_SETTINGS_CACHE_KEY, JSON.stringify(settings)); } catch { /* stockage local indisponible : sans conséquence */ }
+}
+function siteSettingsFromRow(data) {
+  return {
+    name: data.name || "Chantiflow", logo: data.logo_url || null, logoWidth: data.logo_width || 36, logoHeight: data.logo_height || 36,
+    pdfBackground: data.pdf_background || "#FBF7EF",
+    pdfHeaderColor: data.pdf_header_color || "#1B2A33",
+    pdfBlockColor: data.pdf_block_color || "#F1F0EA",
+    visibleServices: data.visible_services || null,
+    contactEmail: data.contact_email || "contact@chantiflow.fr",
+    theme: data.theme || "classique",
+    desktopAppUrlWindows: data.desktop_app_url_windows || "",
+    desktopAppUrlMac: data.desktop_app_url_mac || "",
+    desktopAppEnabled: data.desktop_app_enabled || false,
+    contactInstagramUrl: data.contact_instagram_url || "",
+    landingPageVersion: data.landing_page_version || "classique",
+    // Informations légales saisies dans Admin (colonne jsonb legal_info).
+    legalInfo: data.legal_info && typeof data.legal_info === "object" && !Array.isArray(data.legal_info) ? data.legal_info : {},
+  };
+}
+// Classe df-atelier sur le corps de page et variables du thème posées dès le
+// chargement du script, avant le premier rendu : l'écran de chargement
+// lui-même est déjà dans la bonne version.
+function applyCachedSiteAppearance() {
+  if (typeof document === "undefined") return;
+  const cached = readCachedSiteSettings();
+  if (!cached) return;
+  document.body.classList.toggle("df-atelier", cached.landingPageVersion === "atelier");
+  applyTheme(cached.theme || "classique");
+}
+applyCachedSiteAppearance();
+
 function DeviFactAppInner() {
   // Repère de diagnostic temporaire : affiche dans la console (F12)
   // l'heure exacte à laquelle l'application démarre. Si cette ligne
@@ -2825,7 +2876,9 @@ function DeviFactAppInner() {
   const [splitNotice, setSplitNotice] = useState(null);
   const [savingPlanSettings, setSavingPlanSettings] = useState(false);
   const [preAuthView, setPreAuthView] = useState("landing"); // landing | auth
-  const [siteSettings, setSiteSettings] = useState({ name: "Chantiflow", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" });
+  // Démarre sur la dernière version connue de l'appareil (jamais sur la
+  // version par défaut si une autre a déjà été vue) ; voir readCachedSiteSettings.
+  const [siteSettings, setSiteSettings] = useState(() => ({ ...DEFAULT_SITE_SETTINGS, ...(readCachedSiteSettings() || {}) }));
   // IMPORTANT : ce calcul doit impérativement rester ICI — après TOUS
   // les useState dont il dépend (notamment siteSettings, juste
   // au-dessus), mais avant tout "return" conditionnel plus bas (écran
@@ -3128,27 +3181,23 @@ function DeviFactAppInner() {
   }
 
   async function loadSiteSettings() {
-    const { data, error } = await db.from("site_settings").select("*").eq("id", 1).maybeSingle();
-    if (error || !data) {
-      console.error("Erreur de chargement des paramètres du site (état précédent conservé)", error);
-      return;
+    // Jusqu'à trois tentatives (réseau qui se réveille, session en cours de
+    // rafraîchissement) ; en cas d'échec, la dernière version connue sur
+    // l'appareil reste appliquée — auparavant, un seul échec silencieux
+    // laissait le site dans la version par défaut jusqu'au rechargement.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      let data = null, error = null;
+      try { ({ data, error } = await db.from("site_settings").select("*").eq("id", 1).maybeSingle()); } catch (err) { error = err; }
+      if (!error && data) {
+        const next = siteSettingsFromRow(data);
+        writeCachedSiteSettings(next);
+        setSiteSettings(next);
+        return;
+      }
+      console.error(`Paramètres du site indisponibles (tentative ${attempt}/3)`, error);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 400 * attempt));
     }
-    setSiteSettings({
-      name: data.name || "Chantiflow", logo: data.logo_url || null, logoWidth: data.logo_width || 36, logoHeight: data.logo_height || 36,
-      pdfBackground: data.pdf_background || "#FBF7EF",
-      pdfHeaderColor: data.pdf_header_color || "#1B2A33",
-      pdfBlockColor: data.pdf_block_color || "#F1F0EA",
-      visibleServices: data.visible_services || null,
-      contactEmail: data.contact_email || "contact@chantiflow.fr",
-      theme: data.theme || "classique",
-      desktopAppUrlWindows: data.desktop_app_url_windows || "",
-      desktopAppUrlMac: data.desktop_app_url_mac || "",
-      desktopAppEnabled: data.desktop_app_enabled || false,
-      contactInstagramUrl: data.contact_instagram_url || "",
-      landingPageVersion: data.landing_page_version || "classique",
-      // Informations légales saisies dans Admin (colonne jsonb legal_info).
-      legalInfo: data.legal_info && typeof data.legal_info === "object" && !Array.isArray(data.legal_info) ? data.legal_info : {},
-    });
+    console.error("Paramètres du site indisponibles : dernière version connue conservée.");
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
@@ -17653,5 +17702,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
