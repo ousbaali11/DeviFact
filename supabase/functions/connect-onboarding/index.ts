@@ -86,7 +86,7 @@ serve(async (req) => {
 
     const { organizationId, action } = await req.json();
     if (!organizationId) return json({ error: "Organisation manquante" }, 400);
-    if (action !== "status" && action !== "start") return json({ error: "Action inconnue" }, 400);
+    if (action !== "status" && action !== "start" && action !== "reset") return json({ error: "Action inconnue" }, 400);
 
     // Propriétaire PRÉCISÉMENT de cette organisation (une personne peut
     // appartenir à plusieurs organisations avec des rôles différents).
@@ -129,6 +129,25 @@ serve(async (req) => {
     }
 
     if (action === "status") return json(statusOf(account));
+
+    // action "reset" : repartir de zéro avec un compte inachevé (mauvais
+    // e-mail, parcours bloqué…). Refusé si les paiements sont déjà actifs
+    // — on ne détache jamais un compte qui encaisse. Le compte Stripe est
+    // supprimé si Stripe l'accepte, sinon simplement détaché ; le prochain
+    // clic crée un compte neuf, pré-rempli depuis Mon entreprise (corrigé).
+    if (action === "reset") {
+      if (!account) return json({ connected: false });
+      if (account.charges_enabled) return json({ error: "Ce compte encaisse déjà des paiements : il ne peut pas être détaché. Contacte le support si tu dois le changer." }, 400);
+      try { await stripe.accounts.del(account.id); } catch (err) { console.warn("Compte connecté inachevé non supprimé chez Stripe (détaché seulement) :", err); }
+      const { error } = await dbAdmin.from("organizations").update({
+        stripe_account_id: null, stripe_charges_enabled: false, stripe_payouts_enabled: false, stripe_details_submitted: false, stripe_connect_updated_at: new Date().toISOString(),
+      }).eq("id", org.id);
+      if (error) {
+        console.error("Erreur de détachement du compte connecté :", error.message);
+        return json({ error: "Impossible de détacher ce compte pour l'instant. Réessaie dans un instant." }, 500);
+      }
+      return json({ connected: false, reset: true });
+    }
 
     // action "start" : création du compte si besoin, puis lien d'inscription.
     if (!account) {

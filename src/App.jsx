@@ -14841,6 +14841,23 @@ function StripeConnectCard({ account, siteSettings = null, profile = null, onRed
     load();
   }, [isOwner, organizationId]);
 
+  // Repart d'un compte neuf (compte inachevé : mauvais e-mail, parcours
+  // bloqué…) ; les infos corrigées dans Mon entreprise seront pré-remplies.
+  async function reset() {
+    if (!window.confirm("Repartir de zéro ? Le compte Stripe inachevé sera détaché et un nouveau sera créé au prochain clic, pré-rempli avec les informations de Mon entreprise.")) return;
+    setBusy(true);
+    setError("");
+    try {
+      await callConnectOnboarding(organizationId, "reset");
+      setStatus(null);
+      await load();
+    } catch (err) {
+      console.error("Réinitialisation Stripe impossible", err);
+      setError(err.message || "Impossible de repartir de zéro pour l'instant.");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function start() {
     setBusy(true);
     setError("");
@@ -14906,7 +14923,11 @@ function StripeConnectCard({ account, siteSettings = null, profile = null, onRed
           )}
           <a href={STRIPE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className="rounded-lg px-3 py-2 text-xs font-medium" style={secondary}>Ouvrir mon tableau de bord Stripe</a>
           <button onClick={load} className="rounded-lg px-3 py-2 text-xs font-medium" style={secondary}>Actualiser</button>
+          {!status.chargesEnabled && (
+            <button onClick={reset} disabled={busy} className="rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.brick}66`, color: colors.brick }} title="Détache le compte inachevé et repart d'un compte neuf (par exemple après une erreur d'e-mail)">Recommencer à zéro</button>
+          )}
         </div>
+        {!active && !status.chargesEnabled && <p className="text-xs" style={{ color: colors.inkSoft }}>Une erreur dans les informations envoyées (e-mail, nom…) ? Corrige-la dans Mon entreprise, puis « Recommencer à zéro » : rien n'est perdu, aucun paiement n'a encore transité.</p>}
       </div>
     );
   }

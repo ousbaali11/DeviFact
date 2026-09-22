@@ -16,6 +16,7 @@ vi.mock("./client.js", () => ({
         if (state.fail) return { data: { error: state.fail }, error: null };
         if (opts?.body?.action === "status") return { data: state.status, error: null };
         if (opts?.body?.action === "start") return { data: { url: state.startUrl }, error: null };
+        if (opts?.body?.action === "reset") return { data: { connected: false, reset: true }, error: null };
         return { data: { error: "action inconnue" }, error: null };
       },
     },
@@ -150,5 +151,26 @@ describe("carte Connecter mon compte bancaire", () => {
     await click(buttonByText(container, "Enregistrer"));
     expect(saved).toMatchObject({ name: "Chantiflow", connectFeePercent: 1.5 });
     await unmount();
+  }, 30000);
+  it("compte inachevé : « Recommencer à zéro » détache le compte (après confirmation) et relit l'état ; absent quand les paiements sont actifs", async () => {
+    state.status = { connected: true, chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false, requirementsDue: 6, disabledReason: "requirements.past_due" };
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
+    expect(buttonByText(container, "Recommencer à zéro")).toBeTruthy();
+    expect(container.textContent).toContain("Corrige-la dans Mon entreprise, puis « Recommencer à zéro »");
+    const confirmSpy = vi.spyOn(window, "confirm").mockImplementation(() => false);
+    await click(buttonByText(container, "Recommencer à zéro"));
+    expect(calls.filter((c) => c.body.action === "reset")).toHaveLength(0); // refus : rien ne part
+    confirmSpy.mockImplementation(() => true);
+    state.status = { connected: false };
+    await click(buttonByText(container, "Recommencer à zéro"));
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(calls.map((c) => c.body.action)).toEqual(["status", "reset", "status"]);
+    expect(buttonByText(container, "Connecter avec Stripe")).toBeTruthy(); // repart de zéro
+    confirmSpy.mockRestore();
+    await unmount();
+    state.status = { connected: true, chargesEnabled: true, payoutsEnabled: false, detailsSubmitted: true, requirementsDue: 1, disabledReason: null };
+    const active = await mount(<StripeConnectCard account={owner} />);
+    expect(buttonByText(active.container, "Recommencer à zéro")).toBeUndefined();
+    await active.unmount();
   }, 30000);
 });
