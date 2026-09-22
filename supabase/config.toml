@@ -39,6 +39,11 @@ verify_jwt = false
 [functions.stripe-connect-webhook]
 verify_jwt = false
 
+# API de lecture (forfait Entreprise) : authentifiée par clé API « dfk_… »,
+# pas par jeton de session — la passerelle ne doit pas exiger de JWT.
+[functions.api]
+verify_jwt = false
+
 # Génération Factur-X : les polices (PDF/A exige des polices embarquées)
 # et le profil couleur sRGB doivent être déployés avec la fonction.
 [functions.generate-facturx]

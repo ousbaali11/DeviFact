@@ -58,26 +58,6 @@ serve(async (req) => {
     if (link.paid_at) {
       return new Response(JSON.stringify({ error: "Cette facture a déjà été payée." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-    // Empêche deux paiements d'être lancés en même temps (par exemple
-    // si le client ouvre le lien dans deux onglets) — une mise à jour
-    // conditionnelle, qui échoue silencieusement si un paiement vient
-    // déjà d'être lancé il y a moins de 15 minutes.
-    // Vraiment conditionnelle : la mise à jour ne touche la ligne que si
-    // aucun paiement n'a été lancé depuis moins de 15 minutes — vérifié
-    // et posé en une seule opération côté base, pour que deux appels
-    // strictement simultanés ne puissent pas passer tous les deux.
-    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
-    const { data: locked } = await dbAdmin
-      .from("public_document_links")
-      .update({ payment_pending_at: new Date().toISOString() })
-      .eq("id", link.id)
-      .is("paid_at", null)
-      .or(`payment_pending_at.is.null,payment_pending_at.lt.${cutoff}`)
-      .select("id");
-    if (!locked || locked.length === 0) {
-      return new Response(JSON.stringify({ error: "Un paiement est déjà en cours pour cette facture — patiente quelques minutes, ou vérifie l'autre onglet ouvert." }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
     const { data: docsRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", link.organization_id).eq("key", "documents").eq("shared", false).maybeSingle();
     const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
     const doc = documents.find((d: any) => d.id === link.document_id);
@@ -100,6 +80,26 @@ serve(async (req) => {
     const amount = Math.min(due, requested);
     const label = doc.type === "situation" ? `Situation n° ${doc.numeroSituation || 1} — ${doc.docNumber}` : `Facture ${doc.docNumber}`;
 
+    // Empêche deux paiements d'être lancés en même temps (par exemple
+    // si le client ouvre le lien dans deux onglets) — une mise à jour
+    // conditionnelle, qui échoue silencieusement si un paiement vient
+    // déjà d'être lancé il y a moins de 15 minutes.
+    // Vraiment conditionnelle : la mise à jour ne touche la ligne que si
+    // aucun paiement n'a été lancé depuis moins de 15 minutes — vérifié
+    // et posé en une seule opération côté base, pour que deux appels
+    // strictement simultanés ne puissent pas passer tous les deux.
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const { data: locked } = await dbAdmin
+      .from("public_document_links")
+      .update({ payment_pending_at: new Date().toISOString() })
+      .eq("id", link.id)
+      .is("paid_at", null)
+      .or(`payment_pending_at.is.null,payment_pending_at.lt.${cutoff}`)
+      .select("id");
+    if (!locked || locked.length === 0) {
+      return new Response(JSON.stringify({ error: "Un paiement est déjà en cours pour cette facture — patiente quelques minutes, ou vérifie l'autre onglet ouvert." }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // Commission de la plateforme (réglage Admin, 0 par défaut). Si la
     // colonne n'existe pas encore : 0.
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("connect_fee_percent").eq("id", 1).maybeSingle();
@@ -111,27 +111,36 @@ serve(async (req) => {
     // affiche la confirmation en attendant que le webhook marque la facture
     // payée ; en cas d'abandon, simple retour sur la page.
     const publicPage = `${origin}/?voir-document=${encodeURIComponent(token)}`;
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
-      line_items: [{
-        price_data: {
-          currency: (doc.currency || "EUR").toLowerCase(),
-          product_data: { name: label },
-          unit_amount: amountCents,
-        },
-        quantity: 1,
-      }],
-      ...(feeCents > 0 ? { payment_intent_data: { application_fee_amount: feeCents } } : {}),
-      // Repères pour stripe-connect-webhook (kind distingue ce paiement
-      // d'un paiement d'abonnement — jamais confondre les deux).
-      metadata: { kind: "invoice_payment", linkId: link.id, organizationId: link.organization_id, documentId: link.document_id },
-      success_url: `${publicPage}&paiement=ok`,
-      cancel_url: publicPage,
-    }, {
-      // Paiement direct : la session est créée SUR le compte connecté.
-      stripeAccount: org.stripe_account_id,
-    });
+    // Verrou libéré si Stripe refuse la session : le client peut réessayer
+    // tout de suite au lieu d'attendre quinze minutes.
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        line_items: [{
+          price_data: {
+            currency: (doc.currency || "EUR").toLowerCase(),
+            product_data: { name: label },
+            unit_amount: amountCents,
+          },
+          quantity: 1,
+        }],
+        ...(feeCents > 0 ? { payment_intent_data: { application_fee_amount: feeCents } } : {}),
+        // Repères pour stripe-connect-webhook (kind distingue ce paiement
+        // d'un paiement d'abonnement — jamais confondre les deux).
+        metadata: { kind: "invoice_payment", linkId: link.id, organizationId: link.organization_id, documentId: link.document_id },
+        success_url: `${publicPage}&paiement=ok`,
+        cancel_url: publicPage,
+      }, {
+        // Paiement direct : la session est créée SUR le compte connecté.
+        stripeAccount: org.stripe_account_id,
+      });
+  
+    } catch (err) {
+      await dbAdmin.from("public_document_links").update({ payment_pending_at: null }).eq("id", link.id);
+      throw err;
+    }
 
     return new Response(JSON.stringify({ url: session.url }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

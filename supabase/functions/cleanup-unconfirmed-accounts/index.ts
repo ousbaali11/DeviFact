@@ -34,13 +34,29 @@ serve(async (req) => {
   try {
     const eightWeeksAgo = new Date(Date.now() - 8 * 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: expired, error: selectError } = await dbAdmin
+    const { data: candidates, error: selectError } = await dbAdmin
       .from("profiles")
       .select("id, email")
       .is("confirmed_at", null)
       .lt("created_at", eightWeeksAgo);
 
     if (selectError) throw selectError;
+    // Un membre invité dans une organisation (éditeur, lecteur, comptable,
+    // ou propriétaire de plusieurs espaces) n'a jamais reçu notre e-mail de
+    // confirmation : il travaille, il n'est pas « non confirmé ». Seuls les
+    // comptes qui n'ont que leur propre espace, jamais confirmés, sont retirés.
+    const ids = (candidates || []).map((p: any) => p.id);
+    const { data: memberships } = ids.length
+      ? await dbAdmin.from("organization_members").select("user_id, role").in("user_id", ids).eq("status", "active")
+      : { data: [] as any[] };
+    const keep = new Set<string>();
+    const count = new Map<string, number>();
+    for (const m of memberships || []) {
+      if (m.role !== "owner") keep.add(m.user_id);
+      count.set(m.user_id, (count.get(m.user_id) || 0) + 1);
+      if ((count.get(m.user_id) || 0) > 1) keep.add(m.user_id);
+    }
+    const expired = (candidates || []).filter((p: any) => !keep.has(p.id));
     if (!expired || !expired.length) {
       return new Response(JSON.stringify({ success: true, deleted: 0 }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -62,6 +78,6 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, deleted, total: expired.length, errors }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("Erreur cleanup-unconfirmed-accounts :", err);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: "Erreur serveur" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

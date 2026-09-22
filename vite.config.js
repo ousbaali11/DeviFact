@@ -3,7 +3,10 @@ import { defineConfig } from 'vite'
    import tailwindcss from '@tailwindcss/vite'
    import { VitePWA } from 'vite-plugin-pwa'
 
-   export default defineConfig({
+   export default defineConfig(({ mode }) => ({
+     // Production : plus aucun console.* dans le code livré (les journaux de
+     // développement peuvent contenir des données personnelles ou des jetons).
+     esbuild: mode === "production" ? { drop: ["console", "debugger"] } : {},
      plugins: [
        react(),
        tailwindcss(),
@@ -28,4 +31,4 @@ import { defineConfig } from 'vite'
          }
        })
      ],
-   })
+   }))

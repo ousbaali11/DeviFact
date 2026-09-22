@@ -20,6 +20,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { addOnlinePayment } from "../_shared/totals.ts";
+import { updateKvValue } from "../_shared/kv.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const webhookSecret = Deno.env.get("STRIPE_CONNECT_WEBHOOK_SECRET")!;
@@ -33,20 +34,18 @@ const dbAdmin = createClient(
 // plateforme dans stripe-webhook : statut « payée », paidAt = date de la
 // vente pour les indicateurs, lien public clôturé).
 async function markInvoicePaid(organizationId: string, documentId: string, linkId: string | undefined, sessionId: string, amountCents: number) {
-  const { data: docsRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", "documents").eq("shared", false).maybeSingle();
-  const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
-  const docIndex = documents.findIndex((d: any) => d.id === documentId);
+  // Paiement ajouté à la liste des paiements reçus de la facture ;
+  // « payée » (avec paidAt) quand le total est couvert. Écriture rejouée
+  // sur la version fraîche de la liste (voir _shared/kv.ts).
   let fullyPaid = false;
-  if (docIndex !== -1) {
-    // Paiement ajouté à la liste des paiements reçus de la facture ;
-    // « payée » (avec paidAt) quand le total est couvert.
-    documents[docIndex] = addOnlinePayment(documents[docIndex], sessionId, amountCents, new Date().toISOString());
-    fullyPaid = documents[docIndex].status === "payée";
-    const { error } = await dbAdmin.from("kv_store").update({ value: documents, updated_at: new Date().toISOString() }).eq("organization_id", organizationId).eq("key", "documents").eq("shared", false);
-    if (error) console.error("Erreur de mise à jour de la facture payée :", error.message);
-  } else {
-    console.error("Facture payée introuvable :", organizationId, documentId);
-  }
+  const result = await updateKvValue<any[]>(dbAdmin, organizationId, "documents", (list) => {
+    const idx = list.findIndex((d: any) => d.id === documentId);
+    if (idx === -1) return null;
+    list[idx] = addOnlinePayment(list[idx], sessionId, amountCents, new Date().toISOString());
+    fullyPaid = list[idx].status === "payée";
+    return list;
+  });
+  if (!result.ok) console.error("Facture payée non enregistrée :", result.reason, organizationId, documentId);
   // Lien public clôturé seulement une fois tout réglé ; verrou levé pour
   // permettre un paiement suivant (règlement en plusieurs fois).
   if (linkId) await dbAdmin.from("public_document_links").update({ payment_pending_at: null, ...(fullyPaid ? { paid_at: new Date().toISOString() } : {}) }).eq("id", linkId);

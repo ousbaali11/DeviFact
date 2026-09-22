@@ -11,6 +11,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computeDocTotals, formatAmount } from "../_shared/totals.ts";
+import { updateKvValue } from "../_shared/kv.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -50,6 +51,7 @@ serve(async (req) => {
         .select("organization_id, value")
         .eq("key", "documents")
         .eq("shared", false)
+        .order("organization_id")
         .range(page * pageSize, page * pageSize + pageSize - 1);
 
       if (error) { console.error("Erreur de lecture", error); break; }
@@ -69,7 +71,7 @@ serve(async (req) => {
           if (!doc.client?.email) continue;
 
           const dueDate = doc.issueDate ? new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 30) * 86400000) : null;
-          if (!dueDate || dueDate.toISOString().slice(0, 10) > todayStr) continue; // pas encore en retard
+          if (!dueDate || Number.isNaN(dueDate.getTime()) || dueDate.toISOString().slice(0, 10) > todayStr) continue; // pas encore en retard, ou date invalide
 
           // Jamais plus d'une relance par semaine pour la même facture.
           if (doc.lastReminderSentAt && Date.now() - doc.lastReminderSentAt < 7 * 86400000) continue;
@@ -107,7 +109,11 @@ serve(async (req) => {
         }
 
         if (changed) {
-          await dbAdmin.from("kv_store").update({ value: documents, updated_at: new Date().toISOString() }).eq("organization_id", row.organization_id).eq("key", "documents").eq("shared", false);
+          // Seules les dates de relance sont reportées sur la version fraîche
+          // de la liste : rien d'autre n'est écrasé.
+          const sentAt = new Map(documents.filter((d: any) => d.lastReminderSentAt).map((d: any) => [d.id, d.lastReminderSentAt]));
+          const result = await updateKvValue<any[]>(dbAdmin, row.organization_id, "documents", (list) => list.map((d: any) => (sentAt.has(d.id) ? { ...d, lastReminderSentAt: sentAt.get(d.id) } : d)));
+          if (!result.ok) console.error(`Dates de relance non enregistrées pour ${row.organization_id} : ${result.reason}`);
         }
       }
 

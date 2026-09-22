@@ -752,21 +752,27 @@ async function detectGeoCountry() {
       if (detectedGeo) return;
     }
   } catch { /* stockage local indisponible : on détecte à chaque fois */ }
+  // Détection locale, sans envoyer l'adresse IP à un service tiers (le
+  // site promet de ne rien transmettre) : fuseau horaire de l'appareil,
+  // puis région de la langue du navigateur (ex. « fr-MA »).
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch("https://get.geojs.io/v1/ip/country.json", { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) return;
-    const data = await res.json();
-    const geo = geoFromCode(data?.country);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    const region = String(navigator.language || "").split("-")[1] || "";
+    const geo = geoFromCode(GEO_TIMEZONE_COUNTRIES[tz] || region);
     if (!geo) return;
     detectedGeo = geo;
     try { localStorage.setItem(GEO_STORAGE_KEY, JSON.stringify({ code: geo.code, at: Date.now() })); } catch { /* ignoré */ }
   } catch {
-    // Service indisponible ou trop lent : valeurs par défaut, sans bruit.
+    // Appareil sans ces informations : valeurs par défaut, sans bruit.
   }
 }
+// Fuseaux horaires → pays, pour les pays proposés par le site.
+const GEO_TIMEZONE_COUNTRIES = {
+  "Europe/Paris": "FR", "Africa/Casablanca": "MA", "Africa/El_Aaiun": "MA", "Europe/Brussels": "BE", "Europe/Zurich": "CH",
+  "Europe/Luxembourg": "LU", "Europe/Monaco": "MC", "Africa/Algiers": "DZ", "Africa/Tunis": "TN", "America/Montreal": "CA",
+  "America/Toronto": "CA", "Indian/Reunion": "RE", "America/Martinique": "MQ", "America/Guadeloupe": "GP", "America/Cayenne": "GF",
+  "Indian/Mayotte": "YT", "Pacific/Noumea": "NC", "Pacific/Tahiti": "PF", "Europe/Andorra": "AD", "Africa/Dakar": "SN", "Africa/Abidjan": "CI",
+};
 const fr = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
 // Format court pour la colonne "Situation" des révisions de prix :
 // jour + mois sur 3 lettres, en majuscules, sans année (ex: "21 FEV").
@@ -3038,6 +3044,9 @@ function DeviFactAppInner() {
     return initialView();
   });
   const [documents, setDocuments] = useState([]);
+  // Échec d'enregistrement (réseau, droits, session) : { message, retry, dismiss }.
+  const [saveError, setSaveError] = useState(null);
+  const saveFailure = (what, retry) => setSaveError({ message: `Impossible d'enregistrer ${what}. Tes dernières modifications ne sont pas sauvegardées.`, retry: () => { setSaveError(null); retry(); }, dismiss: () => setSaveError(null) });
   // Toujours la liste la plus récente, y compris depuis une fonction
   // appelée en différé (enregistrement automatique des éditeurs, 400ms
   // après la frappe) — sans ça, une telle fonction repartait d'une
@@ -3559,8 +3568,11 @@ function DeviFactAppInner() {
     if (typeof window !== "undefined") {
       localStorage.removeItem("devifact_lastView");
       localStorage.removeItem("devifact_lastActiveId");
-      const orgId = getActiveOrganization();
-      if (orgId) localStorage.removeItem(`devifact_offline_cache_${orgId}`);
+      // Toutes les organisations, pas seulement celle affichée : une copie
+      // hors ligne contient clients, documents et coordonnées bancaires.
+      try {
+        Object.keys(localStorage).filter((k) => k.startsWith("devifact_offline_cache_")).forEach((k) => localStorage.removeItem(k));
+      } catch { /* stockage local indisponible */ }
     }
   }
 
@@ -3717,11 +3729,9 @@ function DeviFactAppInner() {
   // session). Voir migration_confirmation_8_semaines.sql.
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("confirm");
-    console.log("[Confirmation email] Token détecté dans l'adresse :", token);
     if (!token) return;
     (async () => {
       const { data: ok, error } = await db.rpc("confirm_account", { token });
-      console.log("[Confirmation email] Réponse de confirm_account — ok:", ok, "error:", error);
       if (error || !ok) {
         alert("Ce lien de confirmation n'est plus valide (déjà utilisé, ou expiré).");
       } else {
@@ -3917,9 +3927,20 @@ function DeviFactAppInner() {
     setDocuments(next);
     setSaving(true);
     try {
-      await window.storage.set("documents", JSON.stringify(next), false);
+      const res = await window.storage.set("documents", JSON.stringify(next), false);
+      // Un autre membre (ou un autre onglet) a enregistré entre-temps : la
+      // liste enregistrée est la fusion des deux (voir storage-adapter.js).
+      // On l'affiche, sauf si une modification locale plus récente est déjà
+      // partie (elle sera fusionnée à son tour).
+      if (res?.merged && documentsRef.current === next) {
+        const merged = JSON.parse(res.value);
+        documentsRef.current = merged;
+        setDocuments(merged);
+      }
+      setSaveError(null);
     } catch (e) {
       console.error("Erreur d'enregistrement", e);
+      saveFailure("les documents", () => persist(documentsRef.current));
     } finally {
       setSaving(false);
     }
@@ -3928,9 +3949,12 @@ function DeviFactAppInner() {
     setClients(next);
     setSavingClients(true);
     try {
-      await window.storage.set("clients", JSON.stringify(next), false);
+      const res = await window.storage.set("clients", JSON.stringify(next), false);
+      if (res?.merged) setClients(JSON.parse(res.value)); // fusion avec les changements d'un autre membre
+      setSaveError(null);
     } catch (e) {
       console.error("Erreur d'enregistrement clients", e);
+      saveFailure("les clients", () => persistClients(next));
     } finally {
       setSavingClients(false);
     }
@@ -3941,8 +3965,10 @@ function DeviFactAppInner() {
     setSavingCompany(true);
     try {
       await window.storage.set("company-profile", JSON.stringify(next), false);
+      setSaveError(null);
     } catch (e) {
       console.error("Erreur d'enregistrement profil entreprise", e);
+      saveFailure("Mon entreprise", () => persistCompanyProfile(next));
     } finally {
       setSavingCompany(false);
     }
@@ -4947,7 +4973,7 @@ function DeviFactAppInner() {
     }
   }
 
-  const navProps = { view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode };
+  const navProps = { saveError, view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode };
 
   // Pages de la Gestion de stock (mêmes composants dans les trois
   // versions) — réservées aux forfaits Pro et Entreprise.
@@ -5119,6 +5145,7 @@ function DeviFactAppInner() {
         view={view}
         setView={setView}
         account={account}
+        saveError={saveError}
         siteSettings={siteSettings}
         darkMode={darkMode}
         setDarkMode={setDarkMode}
@@ -7024,24 +7051,11 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
 
     setBusy(true);
     try {
-      // Vérifie d'abord si un compte existe pour cet email — décision
-      // assumée de révéler cette information (voir la migration SQL
-      // pour le compromis de sécurité que ça représente).
-      const { data: exists, error: checkError } = await db.rpc("email_has_account", { check_email: cleanEmail });
-      if (checkError) {
-        console.error("Erreur de vérification de l'email", checkError);
-        setError(checkError.message || "Une erreur est survenue. Réessaie.");
-        setBusy(false);
-        return;
-      }
-      if (!exists) {
-        setError("Aucun compte n'est associé à cette adresse email.");
-        setBusy(false);
-        return;
-      }
+      // Même réponse qu'un compte existe ou non pour cette adresse : le
+      // formulaire ne sert pas à découvrir qui a un compte.
       const { error: resetError } = await db.auth.resetPasswordForEmail(cleanEmail, { redirectTo: window.location.origin });
-      if (resetError) { setError(resetError.message); setBusy(false); return; }
-      setInfo("Un lien de réinitialisation vient d'être envoyé à cette adresse. Vérifie ta boîte mail (et les spams).");
+      if (resetError) console.error("Erreur d'envoi du lien de réinitialisation", resetError);
+      setInfo("Si un compte existe pour cette adresse, un lien de réinitialisation vient d'y être envoyé. Vérifie ta boîte mail (et les spams).");
       setBusy(false);
     } catch (err) {
       console.error(err);
@@ -7064,7 +7078,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
     setBusy(true);
     try {
       if (mode === "signup") {
-        if (password.length < 6) { setError("Le mot de passe doit faire au moins 6 caractères."); setBusy(false); return; }
+        if (password.length < PASSWORD_MIN_LENGTH) { setError(`Le mot de passe doit faire au moins ${PASSWORD_MIN_LENGTH} caractères.`); setBusy(false); return; }
         const { data, error: signUpError } = await db.auth.signUp({ email: cleanEmail, password });
         if (signUpError) { setError(signUpError.message); setBusy(false); return; }
 
@@ -7073,7 +7087,9 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
         // dans ce cas — c'est le seul moyen fiable de détecter la situation.
         const alreadyExists = data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0;
         if (alreadyExists) {
-          setError("Un compte existe déjà avec cet email. Connecte-toi plutôt, ou utilise \"Mot de passe oublié ?\" si besoin.");
+          // Sans révéler si l'adresse est déjà connue : même message dans
+          // les deux cas, et retour à la connexion.
+          setInfo("Si cette adresse est nouvelle, ton compte est créé et un e-mail de confirmation arrive. Si elle est déjà utilisée, connecte-toi ou utilise « Mot de passe oublié ? ».");
           setMode("login");
           setBusy(false);
           return;
@@ -7312,7 +7328,26 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
   );
 }
 
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode }) {
+// Longueur minimale d'un mot de passe (inscription et changement).
+const PASSWORD_MIN_LENGTH = 10;
+
+// Enregistrement impossible (réseau, droits, session expirée) : bandeau
+// persistant avec nouvel essai — avant, l'échec n'était visible que dans
+// la console et l'interface affichait « enregistré ».
+function SaveErrorBanner({ error }) {
+  if (!error) return null;
+  return (
+    <div className="no-print fixed inset-x-4 bottom-4 z-[70] mx-auto flex max-w-xl flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 shadow-lg" role="alert" style={{ background: colors.brick, color: "white" }}>
+      <span className="flex items-center gap-2 text-sm font-medium"><AlertTriangle size={16} /> {error.message}</span>
+      <span className="flex gap-2">
+        {error.retry && <button onClick={error.retry} className="rounded-md px-3 py-1.5 text-xs font-semibold" style={{ background: "white", color: colors.brick }}>Réessayer</button>}
+        {error.dismiss && <button onClick={error.dismiss} className="rounded-md px-2 py-1.5 text-xs" style={{ color: "rgba(255,255,255,0.85)" }}>Fermer</button>}
+      </span>
+    </div>
+  );
+}
+
+function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode, saveError = null }) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -7401,6 +7436,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
 
     return (
       <>
+        <SaveErrorBanner error={saveError} />
         {/* ───── Barre latérale — grand écran uniquement ───── */}
         <div className="df-sidebar-nav hidden lg:flex" style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: "264px", background: navBg, borderRight: `1px solid ${navLine}`, flexDirection: "column", zIndex: 30 }}>
           <HomeLink setView={setView} className="flex items-center gap-2.5 px-5 py-5">
@@ -7570,6 +7606,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   }
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: navBg }}>
+      <SaveErrorBanner error={saveError} />
       <div className="flex min-w-0 grow items-center gap-6">
         <HomeLink setView={setView} className="flex shrink-0 items-center gap-3">
           {siteSettings?.logo ? (
@@ -11642,7 +11679,7 @@ function AtelierCreateSheet({ open, onClose, visibleServices, onCreate, darkMode
 // Coque Atelier : barre haute (ordinateur et tablette) ou barre
 // d'onglets en bas (téléphone), bouton « Créer » toujours visible,
 // menu « Plus » pour le reste. Aucune barre latérale fixe.
-function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkMode, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, onOpenCreate, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, children }) {
+function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkMode, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, onOpenCreate, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, saveError = null, children }) {
   const tone = atelierTone(darkMode);
   const [moreOpen, setMoreOpen] = useState(false);
   // Volet « Gestion de stock » de la barre du bas (téléphone).
@@ -11744,6 +11781,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   return (
     <div className="df-root df-at-bottom-pad min-h-full w-full" style={{ backgroundColor: tone.paper, color: tone.ink }}>
       <GlobalStyle />
+      <SaveErrorBanner error={saveError} />
       {/* Barre haute — ordinateur et tablette */}
       {/* z-40 (au-dessus de la barre du bas, z-30) : le menu avatar est
           rendu à l'intérieur de cet en-tête, donc dans son contexte
@@ -13226,7 +13264,21 @@ async function syncLegacyPrestations(organizationId, prestations) {
 function sanitizeFileName(name) {
   return String(name || "fichier").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "fichier";
 }
+// Types acceptés pour une pièce jointe de produit (fiche technique, photo…)
+// et taille maximale — contrôlés ici avant l'envoi, en plus des réglages du
+// bucket. Renvoie un message d'erreur, ou "" si le fichier est accepté.
+const PRODUCT_FILE_MAX_BYTES = 10 * 1024 * 1024;
+const PRODUCT_FILE_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "webp", "gif", "doc", "docx", "xls", "xlsx", "csv", "txt"];
+function productFileProblem(file) {
+  if (!file) return "Aucun fichier.";
+  const ext = String(file.name || "").split(".").pop().toLowerCase();
+  if (!PRODUCT_FILE_EXTENSIONS.includes(ext)) return "Ce type de fichier n'est pas accepté (PDF, image, Word, Excel ou texte).";
+  if ((Number(file.size) || 0) > PRODUCT_FILE_MAX_BYTES) return "Fichier trop lourd : 10 Mo maximum.";
+  return "";
+}
 async function uploadProductFile(organizationId, productId, file) {
+  const problem = productFileProblem(file);
+  if (problem) throw new Error(problem);
   const path = `${organizationId}/${productId}/${Date.now()}-${sanitizeFileName(file.name)}`;
   const { error } = await db.storage.from(PRODUCT_FILES_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
   if (error) throw new Error(/mime|type/i.test(error.message || "") ? "Ce type de fichier n'est pas accepté (PDF, image, Word, Excel ou texte, 10 Mo max)." : "Impossible d'envoyer ce fichier pour l'instant.");
@@ -18524,5 +18576,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

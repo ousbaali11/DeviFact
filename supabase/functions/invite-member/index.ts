@@ -73,7 +73,7 @@ serve(async (req) => {
     const { data: existingProfile } = await dbAdmin
       .from("profiles")
       .select("id")
-      .ilike("email", cleanEmail)
+      .ilike("email", cleanEmail.replace(/[\\%_]/g, (c) => "\\" + c))
       .maybeSingle();
 
     let memberUserId = existingProfile?.id;

@@ -80,6 +80,12 @@ serve(async (req) => {
     if (!parsedUrl || (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:")) {
       return json({ error: "Le lien d'avis Google renseigné dans Mon entreprise n'est pas une adresse valide." }, 400);
     }
+    // Uniquement une adresse Google : cet e-mail part au nom de la
+    // plateforme, il ne doit jamais servir à envoyer un lien arbitraire.
+    const host = parsedUrl.hostname.toLowerCase();
+    if (!/(^|\.)google\.[a-z.]+$|(^|\.)g\.page$|(^|\.)goo\.gl$/.test(host)) {
+      return json({ error: "Le lien d'avis doit être une adresse Google (g.page, google.com, maps.app.goo.gl)." }, 400);
+    }
 
     const clientEmail = String(doc.client?.email || "").trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) return json({ error: "Le client de cette facture n'a pas d'adresse email valide." }, 400);

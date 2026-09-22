@@ -23,5 +23,6 @@ export function recurringInvoiceCopy(doc: any, docNumber: string, today: string,
   };
   delete copy.paidAt;
   delete copy.signature;
+  delete copy.lastReminderSentAt;
   return copy;
 }

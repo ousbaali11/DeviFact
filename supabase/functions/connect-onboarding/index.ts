@@ -24,6 +24,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { buildConnectAccountParams, withoutBankAccount } from "../_shared/connect.ts";
+import { safeOrigin } from "../_shared/stripe.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const dbAdmin = createClient(
@@ -158,7 +159,8 @@ serve(async (req) => {
       // les vérifications ; la plateforme ne paie rien.
       const { data: profileRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", org.id).eq("key", "company-profile").eq("shared", false).maybeSingle();
       const rawProfile = profileRow?.value;
-      const companyProfile = typeof rawProfile === "string" ? JSON.parse(rawProfile) : (rawProfile || {});
+      let companyProfile: any = {};
+      try { companyProfile = typeof rawProfile === "string" ? JSON.parse(rawProfile) : (rawProfile || {}); } catch { companyProfile = {}; }
       const { data: userRow } = await dbAdmin.from("profiles").select("first_name, last_name").eq("id", user.id).maybeSingle();
       const params = buildConnectAccountParams({ profile: companyProfile, email: user.email, firstName: userRow?.first_name, lastName: userRow?.last_name, organizationId: org.id, organizationName: org.name });
       try {
@@ -167,13 +169,13 @@ serve(async (req) => {
         // IBAN refusé par Stripe (format, titulaire…) : compte créé sans
         // coordonnées bancaires, Stripe les demandera sur sa page.
         if (!params.external_account) throw err;
-        console.warn("Compte connecté : IBAN pré-rempli refusé, nouvel essai sans", err);
+        console.warn("Compte connecté : IBAN pré-rempli refusé, nouvel essai sans :", (err as Error)?.message || "erreur");
         account = await stripe.accounts.create(withoutBankAccount(params));
       }
       await saveAccountState(org.id, account);
     }
 
-    const origin = req.headers.get("origin") || "https://www.chantiflow.fr";
+    const origin = safeOrigin(req.headers.get("origin"));
     const link = await stripe.accountLinks.create({
       account: account.id,
       type: "account_onboarding",

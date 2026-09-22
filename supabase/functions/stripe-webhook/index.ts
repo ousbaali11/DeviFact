@@ -15,6 +15,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { addOnlinePayment } from "../_shared/totals.ts";
+import { updateKvValue } from "../_shared/kv.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET")!;
@@ -64,17 +65,21 @@ serve(async (req) => {
       // juste en dessous, jamais mélangé.
       if (session.metadata?.kind === "invoice_payment") {
         const { organizationId, documentId, linkId } = session.metadata;
-        const { data: docsRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", "documents").eq("shared", false).maybeSingle();
-        const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
-        const docIndex = documents.findIndex((d: any) => d.id === documentId);
-        let fullyPaid = false;
-        if (docIndex !== -1) {
-          // Paiement ajouté à la liste des paiements reçus ; « payée » (avec
-          // paidAt, date de la vente pour les indicateurs) si le total est couvert.
-          documents[docIndex] = addOnlinePayment(documents[docIndex], session.id, Number(session.amount_total) || 0, new Date().toISOString());
-          fullyPaid = documents[docIndex].status === "payée";
-          await dbAdmin.from("kv_store").update({ value: documents, updated_at: new Date().toISOString() }).eq("organization_id", organizationId).eq("key", "documents").eq("shared", false);
+        if (session.payment_status !== "paid") {
+          return new Response(JSON.stringify({ received: true, ignored: "unpaid" }), { headers: { "Content-Type": "application/json" } });
         }
+        // Paiement ajouté à la liste des paiements reçus ; « payée » (avec
+        // paidAt, date de la vente pour les indicateurs) si le total est
+        // couvert. Écriture rejouée sur la version fraîche (voir _shared/kv.ts).
+        let fullyPaid = false;
+        const result = await updateKvValue<any[]>(dbAdmin, organizationId, "documents", (list) => {
+          const idx = list.findIndex((d: any) => d.id === documentId);
+          if (idx === -1) return null;
+          list[idx] = addOnlinePayment(list[idx], session.id, Number(session.amount_total) || 0, new Date().toISOString());
+          fullyPaid = list[idx].status === "payée";
+          return list;
+        });
+        if (!result.ok) console.error("Paiement de facture non enregistré :", result.reason, organizationId, documentId);
         if (linkId) await dbAdmin.from("public_document_links").update({ payment_pending_at: null, ...(fullyPaid ? { paid_at: new Date().toISOString() } : {}) }).eq("id", linkId);
         return new Response(JSON.stringify({ received: true }), { headers: { "Content-Type": "application/json" } });
       }

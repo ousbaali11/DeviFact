@@ -51,6 +51,14 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Ce document n'existe plus." }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Le client reçoit le document sans ce qui ne le concerne pas :
+    // photos de chantier, images de signature, suivi interne des relances,
+    // réglages de récurrence.
+    const { photos: _photos, lastReminderSentAt: _lr, remindersEnabled: _re, isRecurring: _ir, recurrenceInterval: _ri, recurrenceEndDate: _rd, nextRecurrenceDate: _nd, ...publicDoc } = doc;
+    if (publicDoc.signature && typeof publicDoc.signature === "object") {
+      const { drawing: _drawing, image: _image, ...sig } = publicDoc.signature;
+      publicDoc.signature = sig;
+    }
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name, logo_url").limit(1).maybeSingle();
 
     // Paiement en ligne : uniquement si l'organisation a un compte Stripe
@@ -61,7 +69,7 @@ serve(async (req) => {
     const onlinePaymentEnabled = isPayableDoc(doc) && !!orgRow?.stripe_account_id && orgRow?.stripe_charges_enabled === true;
 
     return new Response(
-      JSON.stringify({ document: doc, signedAt: link.signed_at, paidAt: link.paid_at, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled }),
+      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt: link.paid_at, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {

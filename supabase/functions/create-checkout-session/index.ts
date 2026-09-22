@@ -11,6 +11,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
+import { safeOrigin } from "../_shared/stripe.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 
@@ -40,7 +41,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Non connecté" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { planId, billingCycle, organizationId, successUrl, cancelUrl } = await req.json();
+    const { planId, billingCycle, organizationId } = await req.json();
     if (!planId || !billingCycle || !organizationId) {
       return new Response(JSON.stringify({ error: "Paramètres manquants" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -58,6 +59,13 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Seul le propriétaire de cette organisation peut souscrire un forfait" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Un abonnement Stripe déjà actif : jamais un second en parallèle (le
+    // premier continuerait d'être facturé sans moyen de le résilier ici).
+    const { data: currentOrg } = await dbAdmin.from("organizations").select("stripe_subscription_id, payment_status, subscription_cancelled").eq("id", organizationId).maybeSingle();
+    if (currentOrg?.stripe_subscription_id && currentOrg.payment_status === "payé" && !currentOrg.subscription_cancelled) {
+      return new Response(JSON.stringify({ error: "Un abonnement est déjà actif pour cette organisation. Résilie-le d'abord pour en changer." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const { data: plan, error: planError } = await dbAdmin.from("plans").select("*").eq("id", planId).maybeSingle();
     if (planError || !plan) {
       return new Response(JSON.stringify({ error: "Forfait introuvable" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -67,12 +75,14 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Le paiement par carte n'est pas encore configuré pour ce forfait" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const origin = req.headers.get("origin") || "";
+    // Adresses de retour construites ici, sur une origine connue : jamais
+    // une adresse arbitraire envoyée par le navigateur.
+    const origin = safeOrigin(req.headers.get("origin"));
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: successUrl || `${origin}/?paiement=succes`,
-      cancel_url: cancelUrl || `${origin}/?paiement=annule`,
+      success_url: `${origin}/?paiement=succes`,
+      cancel_url: `${origin}/?paiement=annule`,
       client_reference_id: organizationId,
       metadata: { organization_id: organizationId, plan_id: planId, billing_cycle: billingCycle },
       customer_email: user.email,
@@ -81,6 +91,6 @@ serve(async (req) => {
     return new Response(JSON.stringify({ url: session.url }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("Erreur de création de session Stripe :", err);
-    return new Response(JSON.stringify({ error: "Erreur serveur : " + String(err) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: "Erreur serveur. Réessaie dans un instant." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

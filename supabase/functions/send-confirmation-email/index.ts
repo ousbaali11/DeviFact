@@ -36,11 +36,25 @@ serve(async (req) => {
     query = userId ? query.eq("id", userId) : query.eq("email", email);
     const { data: profile, error: profileError } = await query.maybeSingle();
 
+    // Un appelant non administrateur reçoit la même réponse que le compte
+    // existe, soit déjà confirmé ou pas : ce point d'entrée ne doit pas
+    // servir à découvrir qui a un compte.
+    const neutral = () => new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const adminHeader = req.headers.get("Authorization") || "";
+    let callerIsAdmin = false;
+    if (adminHeader) {
+      const adminClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: adminHeader } } });
+      const { data: { user: adminUser } } = await adminClient.auth.getUser();
+      if (adminUser) {
+        const { data: adminProfile } = await dbAdmin.from("profiles").select("is_admin").eq("id", adminUser.id).maybeSingle();
+        callerIsAdmin = !!adminProfile?.is_admin;
+      }
+    }
     if (profileError || !profile) {
-      return new Response(JSON.stringify({ error: "Compte introuvable" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return callerIsAdmin ? new Response(JSON.stringify({ error: "Compte introuvable" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }) : neutral();
     }
     if (profile.confirmed_at) {
-      return new Response(JSON.stringify({ error: "Ce compte est déjà confirmé" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return callerIsAdmin ? new Response(JSON.stringify({ error: "Ce compte est déjà confirmé" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }) : neutral();
     }
 
     // Sécurité : sans ça, n'importe qui pourrait harceler une adresse
@@ -111,12 +125,12 @@ serve(async (req) => {
     if (!emailResp.ok) {
       const errText = await emailResp.text();
       console.error("Erreur d'envoi Resend :", errText);
-      return new Response(JSON.stringify({ error: "Erreur d'envoi de l'email : " + errText }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Erreur d'envoi de l'email. Réessaie dans un instant." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("Erreur send-confirmation-email :", err);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: "Erreur serveur" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

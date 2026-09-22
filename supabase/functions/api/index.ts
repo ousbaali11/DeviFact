@@ -96,12 +96,24 @@ serve(async (req) => {
       .maybeSingle();
     if (error) return jsonResponse({ error: "Erreur de lecture des données" }, 500);
 
-    let items = Array.isArray(data?.value) ? data.value : [];
+    // Champs volumineux ou internes retirés (images de signature, photos,
+    // suivi des relances) ; pagination par limit / offset (200 par défaut,
+    // 500 au plus).
+    const slim = (it: any) => {
+      if (!it || typeof it !== "object") return it;
+      const { photos: _p, lastReminderSentAt: _l, ...rest } = it;
+      if (rest.signature && typeof rest.signature === "object") { const { drawing: _d, image: _i, ...sig } = rest.signature; rest.signature = sig; }
+      if (rest.company && typeof rest.company === "object") { const { logo: _logo, ...co } = rest.company; rest.company = co; }
+      return rest;
+    };
+    const items = (Array.isArray(data?.value) ? data.value : []).map(slim);
     if (id) {
       const found = items.find((it: { id?: string }) => it.id === id);
       return found ? jsonResponse(found) : jsonResponse({ error: "Introuvable" }, 404);
     }
-    return jsonResponse({ data: items, count: items.length });
+    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 200));
+    const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+    return jsonResponse({ data: items.slice(offset, offset + limit), count: items.length, limit, offset });
   } catch (err) {
     console.error(err);
     return jsonResponse({ error: "Erreur serveur" }, 500);

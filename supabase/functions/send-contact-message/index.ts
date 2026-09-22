@@ -34,7 +34,9 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
   try {
-    const { nom, prenom, telephone, email, objet, message } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const str = (v: unknown) => (typeof v === "string" ? v : "");
+    const nom = str(body?.nom), prenom = str(body?.prenom), telephone = str(body?.telephone), email = str(body?.email).trim().toLowerCase(), objet = str(body?.objet), message = str(body?.message);
 
     // Validation côté serveur — jamais faire confiance uniquement à
     // celle du navigateur, qui peut toujours être contournée.
@@ -54,6 +56,16 @@ serve(async (req) => {
     if (tooLong) {
       const labels: Record<string, string> = { nom: "Le nom", prenom: "Le prénom", email: "L'email", telephone: "Le téléphone", objet: "L'objet", message: "Le message" };
       return new Response(JSON.stringify({ error: `${labels[tooLong[0]]} est trop long (maximum ${tooLong[1]} caractères).` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Limite d'envois : point d'entrée public, sans compte. Au plus 3
+    // messages par heure pour une même adresse, 40 par heure au total —
+    // au-delà, refus poli plutôt qu'une boîte inondée ou un quota épuisé.
+    const oneHourAgo = new Date(Date.now() - 3600_000).toISOString();
+    const { count: sameEmail } = await dbAdmin.from("contact_messages").select("id", { count: "exact", head: true }).eq("email", email).gte("created_at", oneHourAgo);
+    const { count: total } = await dbAdmin.from("contact_messages").select("id", { count: "exact", head: true }).gte("created_at", oneHourAgo);
+    if ((sameEmail || 0) >= 3 || (total || 0) >= 40) {
+      return new Response(JSON.stringify({ error: "Trop de messages envoyés récemment. Réessaie dans une heure, ou écris-nous directement par e-mail." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Récupère l'adresse de réception configurée dans Admin — jamais

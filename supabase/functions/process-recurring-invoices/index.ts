@@ -17,6 +17,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { recurringInvoiceCopy } from "../_shared/recurring.ts";
+import { updateKvValue } from "../_shared/kv.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -70,6 +71,7 @@ serve(async (req) => {
         .select("organization_id, value")
         .eq("key", "documents")
         .eq("shared", false)
+        .order("organization_id")
         .range(page * pageSize, page * pageSize + pageSize - 1);
 
       if (error) {
@@ -85,6 +87,7 @@ serve(async (req) => {
 
         for (const doc of documents) {
           if (doc.type !== "facture" || !doc.isRecurring || !doc.nextRecurrenceDate) continue;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(String(doc.nextRecurrenceDate))) continue; // date invalide : ignorée plutôt que de faire échouer la tâche
           if (doc.nextRecurrenceDate > today) continue;
           if (doc.recurrenceEndDate && doc.nextRecurrenceDate > doc.recurrenceEndDate) continue;
 
@@ -103,15 +106,17 @@ serve(async (req) => {
         }
 
         if (changed) {
-          const merged = [...newInvoices, ...documents];
-          const { error: updateError } = await dbAdmin
-            .from("kv_store")
-            .update({ value: merged, updated_at: new Date().toISOString() })
-            .eq("organization_id", row.organization_id)
-            .eq("key", "documents")
-            .eq("shared", false);
-          if (updateError) {
-            console.error(`Erreur d'écriture pour l'organisation ${row.organization_id}`, updateError);
+          // Rejoué sur la version fraîche : les nouvelles factures sont
+          // ajoutées et les prochaines échéances reportées sur les modèles,
+          // sans écraser ce qu'un membre a pu enregistrer entre-temps.
+          const nextDates = new Map(documents.filter((d: any) => d.type === "facture" && d.isRecurring !== undefined).map((d: any) => [d.id, { nextRecurrenceDate: d.nextRecurrenceDate, isRecurring: d.isRecurring }]));
+          const result = await updateKvValue<any[]>(dbAdmin, row.organization_id, "documents", (list) => {
+            const existingIds = new Set(list.map((d: any) => d.id));
+            const fresh = list.map((d: any) => (nextDates.has(d.id) ? { ...d, ...nextDates.get(d.id) } : d));
+            return [...newInvoices.filter((inv) => !existingIds.has(inv.id)), ...fresh];
+          });
+          if (!result.ok) {
+            console.error(`Erreur d'écriture pour l'organisation ${row.organization_id}`, result.reason);
           } else {
             organizationsUpdated++;
           }

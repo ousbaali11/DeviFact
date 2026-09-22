@@ -17,6 +17,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
+import { subscriptionPeriodEnd } from "../_shared/stripe.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const PAYPAL_API = Deno.env.get("PAYPAL_API_BASE") || "https://api-m.sandbox.paypal.com";
@@ -78,7 +79,8 @@ serve(async (req) => {
       .eq("user_id", userData.user.id)
       .eq("status", "active")
       .maybeSingle();
-    if (!membership || !["owner", "editor"].includes(membership.role)) {
+    // Propriétaire seulement, comme toute action d'abonnement.
+    if (!membership || membership.role !== "owner") {
       return new Response(JSON.stringify({ error: "Tu n'as pas les droits pour résilier cet abonnement." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -103,7 +105,7 @@ serve(async (req) => {
       // envoie lui-même customer.subscription.deleted à la vraie
       // date de fin (déjà géré dans stripe-webhook).
       const sub = await stripe.subscriptions.update(org.stripe_subscription_id, { cancel_at_period_end: true });
-      expiresAt = new Date(sub.current_period_end * 1000).toISOString();
+      expiresAt = subscriptionPeriodEnd(sub) || org.expires_at;
     } else if (org.paypal_subscription_id) {
       // PayPal n'a pas d'équivalent natif — annule immédiatement de
       // son côté. C'est notre propre "expires_at" (mis à jour à

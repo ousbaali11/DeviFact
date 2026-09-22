@@ -58,6 +58,12 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
   const rawBody = await req.text();
+  // Sans en-têtes de signature ou sans JSON valide : refus immédiat, sans
+  // appeler PayPal (qui compte chaque vérification).
+  if (!req.headers.get("paypal-transmission-sig") || !req.headers.get("paypal-transmission-id")) {
+    return new Response("Missing signature", { status: 400 });
+  }
+  try { JSON.parse(rawBody); } catch { return new Response("Invalid body", { status: 400 }); }
 
   const isValid = await verifyWebhookSignature(req.headers, rawBody);
   if (!isValid) {

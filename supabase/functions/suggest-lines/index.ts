@@ -23,6 +23,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Clé de service : compteur d'usage quotidien (kv_store) et appartenance.
+const dbAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
@@ -40,6 +43,22 @@ serve(async (req) => {
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) {
       return new Response(JSON.stringify({ error: "Non connecté" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Quota quotidien par organisation (compteur dans kv_store, clé
+    // « ai-usage », écrit par le serveur seulement) : protège le budget de
+    // l'API contre un usage automatisé.
+    const { data: membership } = await dbAdmin.from("organization_members").select("organization_id").eq("user_id", user.id).eq("status", "active").limit(1).maybeSingle();
+    const orgId = membership?.organization_id || null;
+    if (orgId) {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: usageRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", orgId).eq("key", "ai-usage").eq("shared", false).maybeSingle();
+      const usage = usageRow?.value && typeof usageRow.value === "object" ? usageRow.value : {};
+      const used = usage.day === today ? Number(usage.count) || 0 : 0;
+      if (used >= 40) {
+        return new Response(JSON.stringify({ error: "Limite atteinte : 40 suggestions par jour pour ton organisation. Réessaie demain." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      await dbAdmin.from("kv_store").upsert({ organization_id: orgId, key: "ai-usage", shared: false, value: { day: today, count: used + 1 }, updated_at: new Date().toISOString() }, { onConflict: "organization_id,key,shared" });
     }
 
     const { description } = await req.json();
