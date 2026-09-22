@@ -11398,7 +11398,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
       ) : (
         <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ background: tone.accent }}><HardHat size={18} /></span>
       )}
-      <span className="df-display text-base font-bold" style={{ color: tone.ink }}>{siteSettings?.name || "Chantiflow"}</span>
+      <span className="df-display text-base font-bold md:hidden lg:inline" style={{ color: tone.ink }}>{siteSettings?.name || "Chantiflow"}</span>
     </HomeLink>
   );
 
@@ -11479,16 +11479,16 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
               <Icon size={18} /> <span className="hidden lg:inline">{label}</span>
             </button>
           ))}
-          {/* Gestion de stock : même niveau que Clients — icône seule sur
-              tablette, « Stock » sur portable, « Gestion de stock » sur grand écran */}
+          {/* Gestion de stock : même niveau que Clients — « Gestion de stock »
+              écrit sur tablette et grand écran, « Stock » sur portable */}
           <StockMenu variant="dropdown" view={view} setView={setView} locked={stockLocked} styleFor={tabStyle} iconColor={tone.accent} buttonClass="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium lg:px-2 xl:px-3" iconSize={18} responsiveLabel />
         </nav>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setCommandPaletteOpen(true)} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-sm" style={{ color: tone.inkSoft, border: `1px solid ${tone.line}` }} title="Rechercher ou aller quelque part (Ctrl+K)">
             <Search size={16} /> <span className="hidden xl:inline">Rechercher</span> <kbd className="hidden rounded px-1 text-[11px] xl:inline" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>Ctrl K</kbd>
           </button>
-          <button onClick={onOpenCreate} className="df-at-tap flex items-center gap-2 rounded-lg px-4 py-2 text-[15px] font-bold" style={{ background: tone.action, color: "#1C2733" }}>
-            <Plus size={18} /> Créer
+          <button onClick={onOpenCreate} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-bold lg:px-4" style={{ background: tone.action, color: "#1C2733" }} title="Créer un document">
+            <Plus size={18} /> <span className="hidden lg:inline">Créer</span>
           </button>
           <div className="relative">
             <button onClick={() => setMoreOpen((v) => !v)} className="df-at-tap flex items-center gap-2 rounded-lg px-2 py-1.5" style={{ color: tone.ink, border: `1px solid ${moreOpen ? tone.accent : tone.line}` }} title="Menu">
@@ -12970,7 +12970,7 @@ function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconCo
       <div className="relative">
         <button onClick={() => setOpen((v) => !v)} className={buttonClass} style={styleFor(active)} aria-expanded={open} title="Gestion de stock">
           <Package size={iconSize} />
-          {responsiveLabel ? <><span className="hidden truncate xl:inline">Gestion de stock</span><span className="hidden truncate lg:inline xl:hidden">Stock</span></> : <span className="truncate">Gestion de stock</span>}
+          {responsiveLabel ? <><span className="truncate lg:hidden xl:inline">Gestion de stock</span><span className="hidden truncate lg:inline xl:hidden">Stock</span></> : <span className="truncate">Gestion de stock</span>}
           {chevron}
         </button>
         {open && (
