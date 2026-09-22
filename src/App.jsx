@@ -5933,7 +5933,7 @@ function PublicDocumentView({ token }) {
   }
 
   return (
-    <div className="df-root min-h-screen w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
+    <div className="df-root min-h-[calc(100*var(--df-vh))] w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
       <div className="mx-auto max-w-xl px-4 py-10 sm:py-16">
         <div className="mb-8 text-center">
@@ -7576,7 +7576,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
         </div>
         {mobileNavOpen && (
           <div className="lg:hidden" style={{ background: navBg, borderBottom: `1px solid ${navLine}` }}>
-            <div className="max-h-[70vh] overflow-y-auto px-3 pb-3">
+            <div className="max-h-[calc(70*var(--df-vh))] overflow-y-auto px-3 pb-3">
               <div className="grid grid-cols-3 gap-1.5 py-2">
                 <button onClick={() => { setMobileNavOpen(false); onNewFacture(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Facture</button>
                 <button onClick={() => { setMobileNavOpen(false); onNewProforma(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Proforma</button>
@@ -11635,7 +11635,7 @@ function AtelierCreateSheet({ open, onClose, visibleServices, onCreate, darkMode
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center md:p-6" style={{ background: "rgba(28,39,51,0.55)" }} onClick={onClose}>
       <div
-        className="flex h-full w-full flex-col overflow-hidden md:h-auto md:max-h-[85vh] md:max-w-3xl md:rounded-2xl"
+        className="flex h-full w-full flex-col overflow-hidden md:h-auto md:max-h-[calc(85*var(--df-vh))] md:max-w-3xl md:rounded-2xl"
         style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}` }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
@@ -11733,7 +11733,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
           navigateur comprise) ; sur grand écran, panneau déroulant limité
           à la hauteur de la fenêtre pour que la liste défile et que
           « Se déconnecter » reste toujours visible en bas. */}
-      <div className="fixed inset-x-0 bottom-0 top-0 z-50 flex max-h-[100dvh] flex-col overflow-hidden md:absolute md:inset-auto md:right-0 md:top-full md:mt-2 md:max-h-[calc(100vh-88px)] md:w-80 md:rounded-xl md:shadow-xl" style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}` }}>
+      <div className="fixed inset-x-0 bottom-0 top-0 z-50 flex max-h-[calc(100*var(--df-dvh))] flex-col overflow-hidden md:absolute md:inset-auto md:right-0 md:top-full md:mt-2 md:max-h-[calc(100*var(--df-vh)-88px)] md:w-80 md:rounded-xl md:shadow-xl" style={{ background: tone.surface, color: tone.ink, border: `1px solid ${tone.line}` }}>
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: tone.line }}>
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">{account?.organizationName || siteSettings?.name || "Mon espace"}</div>
@@ -14206,7 +14206,7 @@ function ProductForm({ product, stock, warehouses = [], warehousePrices = {}, ca
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" style={{ background: "rgba(27,42,51,0.5)" }} onClick={onClose}>
-      <div className="flex max-h-[100dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl sm:max-h-[92vh] sm:rounded-2xl" style={{ background: colors.surface, color: colors.ink, border: `1px solid ${colors.line}` }} onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[calc(100*var(--df-dvh))] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl sm:max-h-[calc(92*var(--df-vh))] sm:rounded-2xl" style={{ background: colors.surface, color: colors.ink, border: `1px solid ${colors.line}` }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b px-5 py-3" style={{ borderColor: colors.line }}>
           <h2 className="df-display text-lg font-semibold">{product.id ? (canEdit ? "Modifier le produit" : "Produit") : "Nouveau produit"}</h2>
           <button onClick={onClose} className="rounded-md p-2" style={{ color: colors.inkSoft }} title="Fermer (Échap)"><X size={18} /></button>
@@ -17322,7 +17322,12 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     const rect = canvasRef.current.getBoundingClientRect();
     const cx = e.touches ? e.touches[0].clientX : e.clientX;
     const cy = e.touches ? e.touches[0].clientY : e.clientY;
-    return { x: cx - rect.left, y: cy - rect.top };
+    // Le canvas peut être affiché plus petit que sa taille interne (zoom
+    // d'affichage, téléphone) : on ramène la position dans ses
+    // coordonnées internes, sinon le trait dérive sous le pointeur.
+    const scaleX = canvasRef.current.width / rect.width;
+    const scaleY = canvasRef.current.height / rect.height;
+    return { x: (cx - rect.left) * scaleX, y: (cy - rect.top) * scaleY };
   }
   function startDraw(e) {
     drawingRef.current = true;

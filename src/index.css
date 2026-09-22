@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+/* Affichage compact sur ordinateur.
+   À 100 % dans le navigateur, le site s'affiche comme il s'affichait
+   auparavant à 75 % : tout est réduit d'un quart, on voit plus de
+   contenu à l'écran. Réservé aux écrans d'au moins 1024 px pilotés à la
+   souris ou au pavé tactile : téléphones et tablettes (tactile) gardent
+   leur taille normale.
+   Les unités vh/dvh ne suivent pas le zoom : les hauteurs qui doivent
+   couvrir la fenêtre passent par --df-vh / --df-dvh (voir App.jsx). */
+:root {
+  --df-zoom: 1;
+  --df-vh: 1vh;
+  --df-dvh: 1dvh;
+}
+@media (min-width: 1024px) and (pointer: fine) {
+  :root {
+    --df-zoom: 0.75;
+    --df-vh: calc(1vh / 0.75);
+    --df-dvh: calc(1dvh / 0.75);
+  }
+  html { zoom: var(--df-zoom); }
+  /* Le document imprimable (capturé pour le PDF) garde sa taille réelle
+     de 210 mm : le PDF généré est identique, au pixel près, à avant. */
+  .print-doc { zoom: calc(1 / var(--df-zoom)); }
+  /* … sauf en mode présentation, où il suit l'affichage comme le reste. */
+  .df-presentation .print-doc { zoom: 1; }
+}
+@media print {
+  html, .print-doc { zoom: 1 !important; }
+}
