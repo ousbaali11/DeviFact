@@ -16,6 +16,7 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { recurringInvoiceCopy } from "../_shared/recurring.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -87,18 +88,8 @@ serve(async (req) => {
           if (doc.nextRecurrenceDate > today) continue;
           if (doc.recurrenceEndDate && doc.nextRecurrenceDate > doc.recurrenceEndDate) continue;
 
-          const copy = {
-            ...doc,
-            id: `doc_${crypto.randomUUID()}`,
-            docNumber: nextNumber([...documents, ...newInvoices], "facture"),
-            issueDate: today,
-            status: "brouillon",
-            workStage: "brouillon",
-            isRecurring: false,
-            nextRecurrenceDate: "",
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
+          // Copie sans paiements ni date de paiement (voir _shared/recurring.ts).
+          const copy = recurringInvoiceCopy(doc, nextNumber([...documents, ...newInvoices], "facture"), today, `doc_${crypto.randomUUID()}`);
           newInvoices.push(copy);
           invoicesCreated++;
 

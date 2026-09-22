@@ -915,6 +915,21 @@ function mergeClientRecord(current, record, name) {
   if (!record) return cur;
   return { ...fillBlankFields(cur, record, DOC_CLIENT_FIELDS), ...(record.type ? { type: record.type } : {}), name };
 }
+// Copie d'un document (bouton Dupliquer) : nouveau numéro, brouillon non
+// terminé ; tout ce qui appartient à la vie du document d'origine est laissé
+// derrière — paiements reçus, date de paiement, acompte versé, signature du
+// client, photos de chantier (fichiers partagés) — sinon la copie naissait
+// « déjà payée » ou « déjà signée ».
+function duplicatedDocumentOf(original, documents) {
+  const copy = { ...original, id: nextId("doc"), docNumber: nextNumber(documents, original.type), status: "brouillon", workStage: "brouillon", createdAt: Date.now(), updatedAt: Date.now() };
+  delete copy.paidAt;
+  if (Array.isArray(copy.payments)) copy.payments = [];
+  if (copy.acompteVerse !== undefined) copy.acompteVerse = "";
+  if (copy.signature) copy.signature = null;
+  if (copy.signatureTechnicien?.name) copy.signatureTechnicien = { ...copy.signatureTechnicien, name: "", date: "" };
+  if (Array.isArray(copy.photos) && copy.photos.length) copy.photos = [];
+  return copy;
+}
 // Client enregistré dont le nom correspond (sans tenir compte de la casse ni
 // des espaces) : sert à lier automatiquement les documents des éditeurs
 // spécialisés, qui n'ont pas de sélecteur de client.
@@ -4293,11 +4308,7 @@ function DeviFactAppInner() {
     if (isLocked) return;
     const original = documents.find((d) => d.id === id);
     if (!original) return;
-    const copy = { ...original, id: nextId("doc"), docNumber: nextNumber(documents, original.type), status: "brouillon", createdAt: Date.now(), updatedAt: Date.now() };
-    // Les photos de chantier restent propres à l'original : les fichiers ne
-    // sont pas dupliqués, la copie repart sans photo (sinon retirer une
-    // photo de l'un supprimerait le fichier de l'autre).
-    if (Array.isArray(copy.photos) && copy.photos.length) copy.photos = [];
+    const copy = duplicatedDocumentOf(original, documents);
     // Facture récurrente : la copie garde les mêmes réglages (intervalle,
     // date de fin), mais sa prochaine échéance repart d'aujourd'hui —
     // sinon elle héritait de la date de l'original et la tâche
@@ -8903,6 +8914,10 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
     if (s.retenueGarantie > 0) rows.push(["", "", "", "", "", "", `Retenue garantie (${localDoc.retenueGarantiePct}%)`, -Number(s.retenueGarantie.toFixed(2))]);
     if (s.acompteVerse > 0) rows.push(["", "", "", "", "", "", "Acompte versé", -Number(s.acompteVerse.toFixed(2))]);
     rows.push(["", "", "", "", "", "", "NET À PAYER", Number(s.netAPayer.toFixed(2))]);
+    if (s.paymentsReceived > 0) {
+      (localDoc.payments || []).filter((p) => p && (Number(p.amount) || 0) > 0).forEach((p) => rows.push(["", "", "", "", "", "", `Paiement reçu${p.date ? ` le ${paymentDateLabel(p.date)}` : ""}${p.method ? ` (${p.method})` : ""}`, -Number((Number(p.amount) || 0).toFixed(2))]));
+      rows.push(["", "", "", "", "", "", "Reste à payer", Number(s.montantARegler.toFixed(2))]);
+    }
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 28 }, { wch: 8 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
     const wb = XLSX.utils.book_new();
@@ -11844,13 +11859,16 @@ function atelierCapitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1
 // pour un PV, un rapport, un planning, ou un document sans ligne).
 function atelierDocAmount(d) {
   if (d.type === "pv_reception" || d.type === "rapport" || d.type === "planning") return null;
-  if (d.type === "situation") { const s = computeSituation(d); return { value: s.netAPayer, note: "net" }; }
+  if (d.type === "situation") { const s = computeSituation(d); return s.paymentsReceived > 0 && d.status !== "payée" ? { value: s.montantARegler, note: "reste" } : { value: s.netAPayer, note: "net" }; }
   if (d.type === "contrat") { const ht = Number(d.montantTotalHT) || 0; return ht ? { value: ht, note: "HT" } : null; }
   if (d.type === "relance") { const v = Number(d.montantDu) || 0; return v ? { value: v, note: "dû" } : null; }
   if (d.type === "revision") { const r = computeRevision(d); return r.valid ? { value: r.montantRevise, note: "révisé" } : null; }
   const hasLines = (d.items || []).some((it) => it.type === "line" && (it.designation || "").trim());
   if (!hasLines) return null;
-  return { value: computeTotals(d).totalTTC, note: "TTC" };
+  const t = computeTotals(d);
+  // Facture partiellement réglée : le reste à payer, pas le total.
+  if ((d.type === "facture" || d.type === "acompte") && t.totalPaid > 0 && d.status !== "payée") return { value: t.montantARegler, note: "reste" };
+  return { value: t.totalTTC, note: "TTC" };
 }
 // Badge métier propre au type (état déjà saisi dans l'éditeur).
 function atelierDocBadge(d) {
@@ -11883,12 +11901,14 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
     const facturesRetard = documents.filter((d) => d.type === "facture" && d.status === "en retard");
     const enCours = documents.filter((d) => d.workStage !== "termine" && (d.status === "brouillon" || !d.status));
     const sum = (list) => list.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
+    // Factures : ce qu'il reste à encaisser, paiements partiels déduits.
+    const sumDue = (list) => list.reduce((s, d) => s + computeTotals(d).montantARegler, 0);
     const devisTraites = documents.filter((d) => d.type === "devis" && d.status !== "brouillon");
     const devisSignes = documents.filter((d) => d.type === "devis" && d.status === "signé");
     return {
       devisAttente: { count: devisAttente.length, amount: sum(devisAttente) },
-      aEncaisser: { count: facturesEnvoyees.length, amount: sum(facturesEnvoyees) },
-      enRetard: { count: facturesRetard.length, amount: sum(facturesRetard) },
+      aEncaisser: { count: facturesEnvoyees.length, amount: sumDue(facturesEnvoyees) },
+      enRetard: { count: facturesRetard.length, amount: sumDue(facturesRetard) },
       enCours: { count: enCours.length },
       tauxSignature: devisTraites.length ? Math.round((devisSignes.length / devisTraites.length) * 100) : null,
     };
@@ -16788,6 +16808,8 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
     const remainingAfter = (totals.montantARegler || 0) - (sumAfter - sumBefore);
     const patch = { payments: next };
     if (remainingAfter <= 0.005 && doc.status !== "payée") patch.status = "payée";
+    // Paiement retiré ou réduit : la facture n'est plus soldée.
+    else if (remainingAfter > 0.005 && doc.status === "payée" && sumAfter < sumBefore) { patch.status = "envoyée"; patch.paidAt = null; }
     onPatch(patch);
   }
   function add() {
@@ -18477,5 +18499,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

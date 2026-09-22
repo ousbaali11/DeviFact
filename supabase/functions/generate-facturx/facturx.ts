@@ -18,6 +18,7 @@
 
 import { PDFDocument, PDFName, PDFArray, PDFString, PDFHexString, AFRelationship, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 import * as fontkitModule from "https://esm.sh/@pdf-lib/fontkit@1.1.1";
+import { computeDocTotals } from "../_shared/totals.ts";
 // Le module expose l'objet fontkit en export par défaut à l'exécution,
 // mais ses types ne le déclarent pas — d'où ce petit détour.
 const fontkit = ((fontkitModule as unknown as { default?: unknown }).default ?? fontkitModule) as Parameters<PDFDocument["registerFontkit"]>[0];
@@ -306,7 +307,8 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   // Acompte déjà versé (TTC) déduit du montant à payer — même règle que
   // « Montant TTC à régler » sur le PDF ; l'acompte demandé en % (doc.acompte)
   // est une notion de devis, jamais un paiement reçu.
-  const prepaid = Math.min(grandTotal, round2(Math.max(0, Number(doc.acompteVerse) || 0)));
+  // Déjà payé = acompte versé + paiements reçus (règlement en plusieurs fois).
+  const prepaid = Math.min(grandTotal, round2(Math.max(0, computeDocTotals(doc).totalPaid)));
   const duePayable = round2(grandTotal - prepaid);
   if (grandTotal <= 0) warnings.push("Montant total nul ou négatif");
 

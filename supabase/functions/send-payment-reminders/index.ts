@@ -74,8 +74,11 @@ serve(async (req) => {
           // Jamais plus d'une relance par semaine pour la même facture.
           if (doc.lastReminderSentAt && Date.now() - doc.lastReminderSentAt < 7 * 86400000) continue;
 
-          // Montant restant à régler, même calcul que la facture (_shared/totals.ts).
-          const amount = formatAmount(computeDocTotals(doc).montantARegler, doc.currency);
+          // Montant restant à régler, même calcul que la facture (_shared/totals.ts) ;
+          // plus rien à relancer si les paiements reçus couvrent le total.
+          const due = computeDocTotals(doc).montantARegler;
+          if (due <= 0.005) continue;
+          const amount = formatAmount(due, doc.currency);
           const emailResp = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
