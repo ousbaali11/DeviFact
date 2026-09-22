@@ -778,6 +778,23 @@ const frShort = (d) => {
 };
 const frLong = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 
+// Ligne d'article sans aucun contenu (désignation, sous-détails, prix) :
+// c'est celle qu'un produit inséré depuis la bibliothèque doit remplir.
+function isBlankLine(it) {
+  if (!it || it.type !== "line") return false;
+  if (String(it.designation || "").trim()) return false;
+  if ((Number(it.unitPrice) || 0) !== 0) return false;
+  if ((it.details || []).some((d) => d && (String(d.text || "").trim() || (Number(d.price) || 0) !== 0))) return false;
+  return true;
+}
+// Insère une ligne de produit : remplace la première ligne vide (en gardant
+// son identifiant) ou l'ajoute à la fin s'il n'y en a pas.
+function insertProductLine(items, line) {
+  const list = Array.isArray(items) ? items : [];
+  const blankIdx = list.findIndex(isBlankLine);
+  if (blankIdx < 0) return [...list, line];
+  return list.map((it, i) => (i === blankIdx ? { ...line, id: it.id } : it));
+}
 function emptyLine() {
   return { id: nextId("l"), type: "line", designation: "", details: [], qty: 1, unit: "", unitPrice: 0, tva: 20, discount: 0 };
 }
@@ -16284,7 +16301,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   // Insertion d'un produit de la Gestion de stock : la ligne garde
   // l'identifiant et la référence du produit (règle prix / stock à venir).
   function addFromLibrary(p) {
-    patch({ items: [...localDoc.items, { id: nextId("l"), type: "line", designation: p.name, details: [], qty: Number(p.default_quantity) > 0 ? Number(p.default_quantity) : 1, unit: p.unit || "", unitPrice: Number(p.sale_price_ht) || 0, tva: Number(p.sale_vat_rate) || 0, discount: 0, productId: p.id, productRef: p.reference || "" }] });
+    const line = { id: nextId("l"), type: "line", designation: p.name, details: [], qty: Number(p.default_quantity) > 0 ? Number(p.default_quantity) : 1, unit: p.unit || "", unitPrice: Number(p.sale_price_ht) || 0, tva: Number(p.sale_vat_rate) || 0, discount: 0, productId: p.id, productRef: p.reference || "" };
+    patch({ items: insertProductLine(localDoc.items, line) });
     setLibraryOpen(false);
     setLibraryQuery("");
   }
@@ -17396,7 +17414,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   </button>
                   {libraryOpen && hasPro && (
                     <div className="absolute right-0 z-10 mt-1 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md shadow-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-                      <input autoFocus className="df-input w-full border-0 border-b px-3 py-2 text-sm" style={{ borderColor: colors.line }} placeholder="Rechercher..." value={libraryQuery} onChange={(e) => setLibraryQuery(e.target.value)} />
+                      <input autoFocus className="df-input w-full border-0 border-b px-3 py-2 text-sm" style={{ borderColor: colors.line }} placeholder="Rechercher par nom ou référence…" value={libraryQuery} onChange={(e) => setLibraryQuery(e.target.value)} />
                       <div className="max-h-64 overflow-y-auto">
                         {libraryProducts.filter((p) => (p.name || "").toLowerCase().includes(libraryQuery.toLowerCase()) || (p.reference || "").toLowerCase().includes(libraryQuery.toLowerCase())).map((p) => (
                           <button key={p.id} onClick={() => addFromLibrary(p)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-black/5">
@@ -17702,5 +17720,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
