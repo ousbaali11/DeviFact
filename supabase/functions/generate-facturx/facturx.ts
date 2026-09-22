@@ -303,8 +303,10 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   const lineTotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
   const taxTotal = round2(vat.reduce((s, g) => s + g.amount, 0));
   const grandTotal = round2(lineTotal + taxTotal);
-  const acomptePct = Number(doc.acompte) || 0;
-  const prepaid = acomptePct > 0 ? round2(grandTotal * acomptePct / 100) : 0;
+  // Acompte déjà versé (TTC) déduit du montant à payer — même règle que
+  // « Montant TTC à régler » sur le PDF ; l'acompte demandé en % (doc.acompte)
+  // est une notion de devis, jamais un paiement reçu.
+  const prepaid = Math.min(grandTotal, round2(Math.max(0, Number(doc.acompteVerse) || 0)));
   const duePayable = round2(grandTotal - prepaid);
   if (grandTotal <= 0) warnings.push("Montant total nul ou négatif");
 

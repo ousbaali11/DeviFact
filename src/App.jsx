@@ -5747,6 +5747,10 @@ function PublicDocumentView({ token }) {
     }
   }
 
+  // Mêmes totaux que le PDF : le montant mis en avant est celui à régler
+  // (acompte déjà versé déduit), pas le total TTC brut.
+  const totals = state.document ? computeTotals(state.document) : null;
+  const amountDue = totals ? (state.document.type === "facture" ? totals.montantARegler : totals.totalTTC) : 0;
   return (
     <div className="df-root min-h-screen w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
@@ -5773,16 +5777,30 @@ function PublicDocumentView({ token }) {
                 <div className="df-display text-xl font-bold">{docTypeLabel(state.document.type)} {state.document.docNumber}</div>
                 <div className="text-sm" style={{ color: colors.inkSoft }}>{state.document.client?.name}</div>
               </div>
-              <div className="df-mono text-xl font-bold">{formatMoney(computeTotals(state.document).totalTTC, state.document.currency)}</div>
+              <div className="text-right">
+                <div className="df-mono text-xl font-bold">{formatMoney(amountDue, state.document.currency)}</div>
+                {state.document.type === "facture" && totals.acompteVerse > 0 && (
+                  <div className="text-xs" style={{ color: colors.inkSoft }}>Total TTC {formatMoney(totals.totalTTC, state.document.currency)} − acompte versé {formatMoney(totals.acompteVerse, state.document.currency)}</div>
+                )}
+              </div>
             </div>
 
             <div className="mb-4 space-y-1">
-              {(state.document.items || []).filter((it) => it.type === "line").map((it) => (
-                <div key={it.id} className="flex justify-between text-sm">
-                  <span>{it.designation}</span>
-                  <span className="df-mono" style={{ color: colors.inkSoft }}>{it.qty} × {formatMoney(it.unitPrice, state.document.currency)}</span>
+              {totals.computedLines.map((it) => (
+                <div key={it.id} className="flex justify-between gap-3 text-sm">
+                  <span>{it.designation || "—"}</span>
+                  <span className="df-mono shrink-0" style={{ color: colors.inkSoft }}>{formatMoney(it.totalHT, state.document.currency)} HT</span>
                 </div>
               ))}
+              {totals.globalDiscountAmount > 0 && (
+                <div className="flex justify-between gap-3 text-sm" style={{ color: colors.inkSoft }}>
+                  <span>{globalDiscountLabel(state.document, totals.globalDiscountPct)}</span>
+                  <span className="df-mono shrink-0">- {formatMoney(totals.globalDiscountAmount, state.document.currency)}</span>
+                </div>
+              )}
+              <div className="flex justify-between gap-3 text-sm" style={{ color: colors.inkSoft }}>
+                <span>TVA</span><span className="df-mono shrink-0">{formatMoney(totals.totalTVA, state.document.currency)}</span>
+              </div>
             </div>
 
             {/* Signature — uniquement pour un devis pas encore signé */}
@@ -5877,7 +5895,7 @@ function PublicDocumentView({ token }) {
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
                 {payError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{payError}</p>}
                 <button onClick={handlePay} disabled={payLoading} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.moss, opacity: payLoading ? 0.7 : 1 }}>
-                  {payLoading ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />} {payLoading ? "Redirection..." : `Payer ${formatMoney(computeTotals(state.document).totalTTC, state.document.currency)} en ligne`}
+                  {payLoading ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />} {payLoading ? "Redirection..." : `Payer ${formatMoney(amountDue, state.document.currency)} en ligne`}
                 </button>
               </div>
             )}

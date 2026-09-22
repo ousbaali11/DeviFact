@@ -16,6 +16,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
+import { computeDocTotals, round2 } from "../_shared/totals.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const dbAdmin = createClient(
@@ -30,29 +31,6 @@ function applicationFeeCents(amountCents: number, percent: number): number {
   const p = Number(percent);
   if (!Number.isFinite(p) || p <= 0) return 0;
   return Math.min(amountCents, Math.round((amountCents * p) / 100));
-}
-
-function computeTotalTTC(doc: any): number {
-  const items = Array.isArray(doc.items) ? doc.items : [];
-  let totalHT = 0;
-  const tvaByRate: Record<string, number> = {};
-  for (const it of items) {
-    if (it.type !== "line") continue;
-    const qty = Number(it.qty) || 0;
-    const price = Number(it.unitPrice) || 0;
-    const discount = Number(it.discount) || 0;
-    const lineHT = qty * price * (1 - discount / 100);
-    totalHT += lineHT;
-    const rate = String(it.tva ?? 20);
-    tvaByRate[rate] = (tvaByRate[rate] || 0) + (lineHT * Number(rate)) / 100;
-  }
-  // Remise globale : en % (défaut) ou en montant HT (globalDiscountMode
-  // = "amount"), même règle que globalDiscountRate() côté site.
-  const discountValue = Math.max(0, Number(doc.globalDiscount) || 0);
-  const globalRate = doc.globalDiscountMode === "amount" ? (totalHT > 0 ? Math.min(1, discountValue / totalHT) : 0) : Math.min(100, discountValue) / 100;
-  const afterGlobal = totalHT * (1 - globalRate);
-  const totalTVA = Object.values(tvaByRate).reduce((s, v) => s + v, 0) * (1 - globalRate);
-  return Math.round((afterGlobal + totalTVA) * 100) / 100;
 }
 
 serve(async (req) => {
@@ -107,10 +85,10 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Ce document n'est pas une facture valide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Montant à régler = total TTC moins l'acompte déjà versé renseigné sur
-    // la facture (même règle que l'affichage « Montant TTC à régler »).
-    const acompteVerse = Math.max(0, Number(doc.acompteVerse) || 0);
-    const amount = Math.round((computeTotalTTC(doc) - acompteVerse) * 100) / 100;
+    // Montant à régler = total TTC moins l'acompte déjà versé — calcul
+    // partagé avec le site (_shared/totals.ts) : sous-détails, remises de
+    // ligne, remise globale en % ou en montant, TVA par taux.
+    const amount = round2(computeDocTotals(doc).montantARegler);
     if (amount <= 0) {
       return new Response(JSON.stringify({ error: "Montant invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }

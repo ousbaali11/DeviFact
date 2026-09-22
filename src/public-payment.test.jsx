@@ -28,7 +28,7 @@ async function renderPublic(response) {
   const root = createRoot(container);
   await act(async () => { root.render(<PublicDocumentView token="abc" />); });
   await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
-  const text = container.textContent;
+  const text = container.textContent.replace(/[  ]/g, " ");
   const buttons = [...container.querySelectorAll("button")].map((b) => b.textContent.trim());
   await act(async () => { root.unmount(); });
   container.remove();
@@ -81,5 +81,12 @@ describe("page publique d'une facture", () => {
       await act(async () => { root.unmount(); });
       container.remove();
     } finally { window.history.replaceState({}, "", "/"); }
+  }, 30000);
+  it("acompte déjà versé et sous-détails : le montant mis en avant est le reste à payer, comme sur le PDF", async () => {
+    const withDetails = { ...facture, acompteVerse: "20", items: [{ id: "l1", type: "line", designation: "Socle", qty: 1, unitPrice: 0, tva: 20, details: [{ id: "d", text: "Serveur", price: "100", included: true }] }] };
+    const { text, buttons } = await renderPublic({ document: withDetails, siteName: "Chantiflow", signedAt: null, paidAt: null, onlinePaymentEnabled: true });
+    expect(text).toContain("100,00 € HT"); // ligne valorisée par ses sous-détails
+    expect(text).toContain("Total TTC 120,00 € − acompte versé 20,00 €");
+    expect(buttons.some((b) => b.replace(/[  ]/g, " ") === "Payer 100,00 € en ligne")).toBe(true);
   }, 30000);
 });

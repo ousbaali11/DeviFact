@@ -10,6 +10,7 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { computeDocTotals, formatAmount } from "../_shared/totals.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -19,22 +20,6 @@ const dbAdmin = createClient(
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const FROM_EMAIL = Deno.env.get("CONFIRMATION_FROM_EMAIL") || "noreply@chantiflow.fr";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, content-type" };
-
-function computeTotalTTC(doc: any): number {
-  const items = Array.isArray(doc.items) ? doc.items : [];
-  let totalHT = 0;
-  for (const it of items) {
-    if (it.type !== "line") continue;
-    const qty = Number(it.qty) || 0;
-    const price = Number(it.unitPrice) || 0;
-    const discount = Number(it.discount) || 0;
-    totalHT += qty * price * (1 - discount / 100);
-  }
-  // Approximation volontairement simple (TVA moyenne à 20%) — cette
-  // fonction sert juste à afficher un montant indicatif dans l'email,
-  // le vrai montant exact reste celui du PDF/de la facture elle-même.
-  return Math.round(totalHT * 1.2 * 100) / 100;
-}
 
 function escapeHtml(s: string) {
   return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
@@ -89,7 +74,8 @@ serve(async (req) => {
           // Jamais plus d'une relance par semaine pour la même facture.
           if (doc.lastReminderSentAt && Date.now() - doc.lastReminderSentAt < 7 * 86400000) continue;
 
-          const amount = computeTotalTTC(doc);
+          // Montant restant à régler, même calcul que la facture (_shared/totals.ts).
+          const amount = formatAmount(computeDocTotals(doc).montantARegler, doc.currency);
           const emailResp = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
@@ -100,7 +86,7 @@ serve(async (req) => {
               html: `
                 <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto; color: #1B2A33;">
                   <p>Bonjour${doc.client.name ? " " + escapeHtml(doc.client.name) : ""},</p>
-                  <p>Un petit rappel : la facture <strong>${escapeHtml(doc.docNumber)}</strong>, d'un montant de <strong>${amount.toFixed(2)} €</strong>, est arrivée à échéance et reste en attente de paiement.</p>
+                  <p>Un petit rappel : la facture <strong>${escapeHtml(doc.docNumber)}</strong>, d'un montant de <strong>${escapeHtml(amount)}</strong>, est arrivée à échéance et reste en attente de paiement.</p>
                   <p>N'hésite pas à nous contacter si tu as la moindre question à ce sujet.</p>
                   <p>Merci !</p>
                 </div>
