@@ -2369,7 +2369,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
   const dueDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
   const lineItems = (doc.items || []).filter((i) => i.type === "line" || i.type === "section");
-  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
+  const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", brass = "#B8763E", brassDark = "#8F5C2E", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
@@ -2548,7 +2549,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
       {/* Tableau */}
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9.3pt", position: "relative", zIndex: 1 }}>
         <thead>
-          <tr style={{ background: ink, color: "white" }}>
+          <tr style={{ background: band, color: "white" }}>
             <th style={{ textAlign: "left", padding: "6px 6px", fontSize: "8pt", textTransform: "uppercase", letterSpacing: "0.04em" }}>{doc.type === "bpu" ? "N° prix / Désignation" : "Désignation"}</th>
             {showOrdered && <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>Qté cmd.</th>}
             <th style={{ textAlign: "right", padding: "6px 6px", fontSize: "8pt" }}>{doc.type === "bpu" ? "Qté estim." : showOrdered ? "Livré" : "Qté"}</th>
@@ -2638,7 +2639,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
                 </div>
               </>
             )}
-            <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "7px 10px", fontWeight: 700 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", background: band, color: "white", padding: "7px 10px", fontWeight: 700 }}>
               <span>{hasGlobalDiscount ? "Total HT après remise" : "Total HT"}</span><span style={mono}>{formatMoney(subtotalHT, doc.currency)}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, padding: "7px 10px", fontWeight: 600 }}>
@@ -2649,7 +2650,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
                 <span>dont TVA {rate}%</span><span style={mono}>{formatMoney(amount, doc.currency)}</span>
               </div>
             ))}
-            <div style={{ display: "flex", justifyContent: "space-between", background: ink, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", background: band, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
               <span>{doc.type === "bpu" ? "Montant total estimatif" : "Total TTC"}</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
             </div>
             {showAcompteDemande && (
@@ -2724,7 +2725,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
 // chargement réussi et à chaque modification depuis Admin.
 // ---------------------------------------------------------------------------
 const SITE_SETTINGS_CACHE_KEY = "devifact_site_settings";
-const DEFAULT_SITE_SETTINGS = { name: "Chantiflow", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" };
+const DEFAULT_SITE_SETTINGS = { name: "Chantiflow", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfTextColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" };
 function readCachedSiteSettings() {
   try {
     const raw = localStorage.getItem(SITE_SETTINGS_CACHE_KEY);
@@ -2741,6 +2742,9 @@ function siteSettingsFromRow(data) {
     name: data.name || "Chantiflow", logo: data.logo_url || null, logoWidth: data.logo_width || 36, logoHeight: data.logo_height || 36,
     pdfBackground: data.pdf_background || "#FBF7EF",
     pdfHeaderColor: data.pdf_header_color || "#1B2A33",
+    // Couleur du texte des PDF, indépendante des bandeaux (colonne
+    // pdf_text_color ; sans elle, texte sombre par défaut).
+    pdfTextColor: data.pdf_text_color || "#1B2A33",
     pdfBlockColor: data.pdf_block_color || "#F1F0EA",
     visibleServices: data.visible_services || null,
     contactEmail: data.contact_email || "contact@chantiflow.fr",
@@ -3253,7 +3257,7 @@ function DeviFactAppInner() {
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", landingPageVersion: "landing_page_version", legalInfo: "legal_info", connectFeePercent: "connect_fee_percent" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfTextColor: "pdf_text_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", landingPageVersion: "landing_page_version", legalInfo: "legal_info", connectFeePercent: "connect_fee_percent" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -7545,7 +7549,7 @@ const upx = (v) => String(v ?? "").toUpperCase();
 
 const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, watermarkEnabled = true }, ref) {
   const sectorLines = getRevisionSectors(doc);
-  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
   const cellStyle = { border: "1px solid #B7B7B7", padding: "3px 5px", verticalAlign: "middle", whiteSpace: "nowrap" };
   const watermarkText = upx(siteSettings?.name || "Chantiflow");
@@ -8356,7 +8360,8 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   const dueDate = vautFacture ? new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 30) * 86400000) : null;
   const legalLines = vautFacture ? legalMentionLines({ ...doc, type: "facture" }, companyProfile) : [];
   const periode = doc.periodeDebut || doc.periodeFin ? [doc.periodeDebut ? `du ${new Date(doc.periodeDebut).toLocaleDateString("fr-FR")}` : "", doc.periodeFin ? `au ${new Date(doc.periodeFin).toLocaleDateString("fr-FR")}` : ""].filter(Boolean).join(" ") : "";
-  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
+  const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
@@ -8396,14 +8401,14 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
         </div>
       </div>
 
-      <div style={{ marginTop: "14px", padding: "8px 14px", borderRadius: "4px", background: ink, color: "white", display: "flex", justifyContent: "space-between", position: "relative", zIndex: 1 }}>
+      <div style={{ marginTop: "14px", padding: "8px 14px", borderRadius: "4px", background: band, color: "white", display: "flex", justifyContent: "space-between", position: "relative", zIndex: 1 }}>
         <span>Avancement global du chantier</span>
         <span style={{ fontWeight: 700, ...mono }}>{s.avancementGlobalPct.toFixed(1)}%</span>
       </div>
 
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt", marginTop: "16px", position: "relative", zIndex: 1 }}>
         <thead>
-          <tr style={{ borderBottom: `2px solid ${ink}` }}>
+          <tr style={{ borderBottom: `2px solid ${band}` }}>
             <th style={{ padding: "5px 4px", textAlign: "left" }}>Désignation</th>
             <th style={{ padding: "5px 4px", textAlign: "right" }}>Montant marché</th>
             <th style={{ padding: "5px 4px", textAlign: "right" }}>% cumulé</th>
@@ -8435,7 +8440,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
           <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", fontWeight: 600 }}><span>Total TTC</span><span style={mono}>{formatMoney(s.totalTTCBrut, doc.currency)}</span></div>
           {s.retenueGarantie > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Retenue de garantie ({doc.retenueGarantiePct}%)</span><span style={mono}>-{formatMoney(s.retenueGarantie, doc.currency)}</span></div>}
           {s.acompteVerse > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Acompte déjà versé</span><span style={mono}>-{formatMoney(s.acompteVerse, doc.currency)}</span></div>}
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: ink, color: "white", fontWeight: 700, borderRadius: "4px", marginTop: "4px" }}><span>Net à payer</span><span style={mono}>{formatMoney(s.netAPayer, doc.currency)}</span></div>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: band, color: "white", fontWeight: 700, borderRadius: "4px", marginTop: "4px" }}><span>Net à payer</span><span style={mono}>{formatMoney(s.netAPayer, doc.currency)}</span></div>
         </div>
       </div>
 
@@ -8840,7 +8845,8 @@ const PV_TYPES = {
 };
 
 const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSettings, watermarkEnabled = true, photoUrls = {} }, ref) {
-  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
+  const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
@@ -8895,7 +8901,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
           <div style={{ fontWeight: 700, marginBottom: "6px", fontSize: "10pt" }}>Liste des réserves</div>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "8.5pt" }}>
             <thead>
-              <tr style={{ borderBottom: `2px solid ${ink}` }}>
+              <tr style={{ borderBottom: `2px solid ${band}` }}>
                 <th style={{ padding: "5px 4px", textAlign: "left" }}>Description</th>
                 <th style={{ padding: "5px 4px", textAlign: "left" }}>Localisation</th>
                 <th style={{ padding: "5px 4px", textAlign: "right" }}>Délai</th>
@@ -8929,12 +8935,12 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
       {doc.notes && <div style={{ marginTop: "16px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
 
       <div style={{ display: "flex", gap: "24px", marginTop: "32px", position: "relative", zIndex: 1 }}>
-        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+        <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le client</div>
           <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureClient?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
         </div>
-        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+        <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>L'entreprise</div>
           <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureEntreprise?.date ? new Date(doc.signatureEntreprise.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureEntreprise?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureEntreprise.name}</div>}
@@ -9278,7 +9284,8 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
   const materielTotal = computeMaterielTotal(doc);
   const hasPrices = materielTotal > 0;
   const currency = doc.currency || "EUR";
-  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
+  const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
@@ -9385,13 +9392,13 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
       {doc.notes && <div style={{ marginTop: "16px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
 
       <div style={{ display: "flex", gap: "24px", marginTop: "32px", position: "relative", zIndex: 1 }}>
-        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+        <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>Signature du client</div>
           <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Atteste de la réalisation de cette intervention — {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureClient?.name && <div style={{ marginTop: "16px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
         </div>
         {(doc.signatureTechnicien?.name || "").trim() && (
-          <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+          <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
             <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le technicien</div>
             <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureTechnicien?.date ? new Date(doc.signatureTechnicien.date).toLocaleDateString("fr-FR") : ""}</div>
             <div style={{ marginTop: "16px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureTechnicien.name.trim()}</div>
@@ -9799,7 +9806,8 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
   const insurance = companyInsuranceLabel(co);
   const clientIsParticulier = doc.client?.type === "particulier";
   const retenuePct = Number(doc.retenueGarantiePct) || 0;
-  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
+  const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
@@ -9881,12 +9889,12 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
         <div style={{ marginTop: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>Fait {(doc.lieuSignature || "").trim() ? `à ${doc.lieuSignature.trim()}, ` : ""}le {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : "…"}, en deux exemplaires originaux.</div>
       )}
       <div style={{ display: "flex", gap: "24px", marginTop: "12px", position: "relative", zIndex: 1 }}>
-        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+        <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le maître d'ouvrage</div>
           <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureClient?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
         </div>
-        <div style={{ flex: 1, borderTop: `1px solid ${ink}`, paddingTop: "6px" }}>
+        <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>L'entreprise</div>
           <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureEntreprise?.date ? new Date(doc.signatureEntreprise.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureEntreprise?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureEntreprise.name}</div>}
@@ -10186,7 +10194,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
   const co = legalCompanyOf(doc.company, companyProfile);
   const iban = (co.iban || "").trim();
   const currency = doc.currency || "EUR";
-  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
@@ -10535,7 +10543,7 @@ function computeMonthMarkers(range) {
 }
 
 const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, watermarkEnabled = true }, ref) {
-  const ink = siteSettings?.pdfHeaderColor || "#1B2A33";
+  const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
   const pageBg = siteSettings?.pdfBackground || "#FBF7EF";
@@ -15360,10 +15368,17 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
               </div>
             </label>
             <label className="text-xs" style={{ color: colors.inkSoft }}>
-              En-tête de tableau
+              Bandeaux (en-tête de tableau, totaux)
               <div className="mt-1 flex items-center gap-2">
                 <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfHeaderColor} onChange={(e) => patch({ pdfHeaderColor: e.target.value })} />
                 <span className="df-mono text-xs">{local.pdfHeaderColor}</span>
+              </div>
+            </label>
+            <label className="text-xs" style={{ color: colors.inkSoft }}>
+              Texte
+              <div className="mt-1 flex items-center gap-2">
+                <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfTextColor || "#1B2A33"} onChange={(e) => patch({ pdfTextColor: e.target.value })} />
+                <span className="df-mono text-xs">{local.pdfTextColor || "#1B2A33"}</span>
               </div>
             </label>
             <label className="text-xs" style={{ color: colors.inkSoft }}>
@@ -18088,5 +18103,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
