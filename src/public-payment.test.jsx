@@ -89,4 +89,27 @@ describe("page publique d'une facture", () => {
     expect(text).toContain("Total TTC 120,00 € − déjà payé 20,00 €");
     expect(buttons.some((b) => b.replace(/[  ]/g, " ") === "Payer 100,00 € en ligne")).toBe(true);
   }, 30000);
+  it("refus du serveur : la vraie raison est affichée, pas le message générique du SDK", async () => {
+    const { PublicDocumentView: View } = await import("./App.jsx");
+    state.response = { document: facture, siteName: "Chantiflow", signedAt: null, paidAt: null, onlinePaymentEnabled: true };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<View token="abc" />); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    // Simule une réponse non-2xx du serveur avec un corps JSON explicite
+    const { db } = await import("./client.js");
+    const original = db.functions.invoke;
+    db.functions.invoke = async (name) => name === "create-invoice-payment"
+      ? { data: null, error: { message: "Edge Function returned a non-2xx status code", context: new Response(JSON.stringify({ error: "Un paiement est déjà en cours pour cette facture." }), { status: 409 }) } }
+      : original(name);
+    const pay = [...container.querySelectorAll("button")].find((b) => b.textContent.trim().startsWith("Payer"));
+    await act(async () => { pay.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(container.textContent).toContain("Un paiement est déjà en cours pour cette facture.");
+    expect(container.textContent).not.toContain("non-2xx");
+    db.functions.invoke = original;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }, 30000);
 });

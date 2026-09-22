@@ -5914,8 +5914,17 @@ function PublicDocumentView({ token }) {
     setPayError(null);
     try {
       const { data, error } = await db.functions.invoke("create-invoice-payment", { body: { token, amount: Math.round(amountToPayNow * 100) / 100 } });
-      if (error) throw error;
-      if (data?.error || !data?.url) throw new Error(data?.error || "Erreur");
+      if (error) {
+        // Le SDK cache la vraie raison (« non-2xx status code ») : elle est
+        // dans le corps de la réponse — paiement déjà en cours, montant hors
+        // limites, facture déjà réglée…
+        let message = data?.error;
+        if (!message && error?.context) {
+          try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ }
+        }
+        throw new Error(message || "Impossible de lancer le paiement pour l'instant. Réessaie dans un instant.");
+      }
+      if (data?.error || !data?.url) throw new Error(data?.error || "Impossible de lancer le paiement pour l'instant.");
       window.location.href = data.url;
     } catch (err) {
       setPayError(err.message || "Impossible de lancer le paiement pour l'instant.");
