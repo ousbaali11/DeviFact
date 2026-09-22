@@ -11484,14 +11484,14 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
           <StockMenu variant="dropdown" view={view} setView={setView} locked={stockLocked} styleFor={tabStyle} iconColor={tone.accent} buttonClass="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium lg:px-2 xl:px-3" iconSize={18} responsiveLabel />
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => setCommandPaletteOpen(true)} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-sm" style={{ color: tone.inkSoft, border: `1px solid ${tone.line}` }} title="Rechercher ou aller quelque part (Ctrl+K)">
+          <button onClick={() => setCommandPaletteOpen(true)} className="df-at-tap flex h-11 items-center gap-2 whitespace-nowrap rounded-lg px-3 text-sm" style={{ color: tone.inkSoft, border: `1px solid ${tone.line}` }} title="Rechercher ou aller quelque part (Ctrl+K)">
             <Search size={16} /> <span className="hidden xl:inline">Rechercher</span> <kbd className="hidden rounded px-1 text-[11px] xl:inline" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>Ctrl K</kbd>
           </button>
-          <button onClick={onOpenCreate} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-bold lg:px-4" style={{ background: tone.action, color: "#1C2733" }} title="Créer un document">
+          <button onClick={onOpenCreate} className="df-at-tap flex h-11 items-center gap-2 rounded-lg px-3 text-[15px] font-bold lg:px-4" style={{ background: tone.action, color: "#1C2733" }} title="Créer un document">
             <Plus size={18} /> <span className="hidden lg:inline">Créer</span>
           </button>
           <div className="relative">
-            <button onClick={() => setMoreOpen((v) => !v)} className="df-at-tap flex items-center gap-2 rounded-lg px-2 py-1.5" style={{ color: tone.ink, border: `1px solid ${moreOpen ? tone.accent : tone.line}` }} title="Menu">
+            <button onClick={() => setMoreOpen((v) => !v)} className="df-at-tap flex h-11 items-center gap-2 rounded-lg px-2" style={{ color: tone.ink, border: `1px solid ${moreOpen ? tone.accent : tone.line}` }} title="Menu">
               <span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: tone.accent }}>{initials}</span>
               <span className="hidden max-w-[120px] truncate text-sm xl:inline">{firstName || "Menu"}</span>
               <ChevronDown size={14} style={{ color: tone.inkSoft }} />
