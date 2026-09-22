@@ -86,7 +86,7 @@ describe("page publique d'une facture", () => {
     const withDetails = { ...facture, acompteVerse: "20", items: [{ id: "l1", type: "line", designation: "Socle", qty: 1, unitPrice: 0, tva: 20, details: [{ id: "d", text: "Serveur", price: "100", included: true }] }] };
     const { text, buttons } = await renderPublic({ document: withDetails, siteName: "Chantiflow", signedAt: null, paidAt: null, onlinePaymentEnabled: true });
     expect(text).toContain("100,00 € HT"); // ligne valorisée par ses sous-détails
-    expect(text).toContain("Total TTC 120,00 € − acompte versé 20,00 €");
+    expect(text).toContain("Total TTC 120,00 € − déjà payé 20,00 €");
     expect(buttons.some((b) => b.replace(/[  ]/g, " ") === "Payer 100,00 € en ligne")).toBe(true);
   }, 30000);
 });

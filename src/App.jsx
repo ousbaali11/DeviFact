@@ -2124,7 +2124,9 @@ function newDocument(type, documents) {
   if (type === "facture") {
     // acompteVerse : acompte déjà réglé par un autre moyen, en montant TTC,
     // déduit du total (vide par défaut, toujours confirmé par l'artisan).
-    return { ...base, acompteVerse: "", serviceDate: "", serviceDateEnd: "", paymentMethod: "", sourceDevisNumber: "", isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "", remindersEnabled: true };
+    // payments : règlements reçus sur cette facture (partiels ou solde),
+    // { id, date, amount, method, note }, chacun déduit du montant à régler.
+    return { ...base, acompteVerse: "", payments: [], serviceDate: "", serviceDateEnd: "", paymentMethod: "", sourceDevisNumber: "", isRecurring: false, recurrenceInterval: "mensuel", recurrenceEndDate: "", nextRecurrenceDate: "", remindersEnabled: true };
   }
   // Facture d'acompte : doit référencer le devis/marché d'origine et
   // savoir combien reste à facturer après cet acompte — sans ça, ce
@@ -2189,6 +2191,17 @@ function globalDiscountLabel(doc, pct) {
   if (doc?.globalDiscountMode === "amount") return "Remise globale";
   return `Remise (${Math.round(pct * 100) / 100} %)`;
 }
+// Paiements reçus sur une facture (règlements partiels ou solde) : montants
+// valides de la liste doc.payments, et date « jj/mm/aaaa » d'un paiement.
+function paymentsTotalOf(doc) {
+  return (Array.isArray(doc?.payments) ? doc.payments : []).reduce((s, p) => s + Math.max(0, Number(p?.amount) || 0), 0);
+}
+function paymentDateLabel(d) {
+  if (!d) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d.split("-").reverse().join("/");
+  const t = new Date(d);
+  return isNaN(t.getTime()) ? String(d) : t.toLocaleDateString("fr-FR");
+}
 function computeTotals(doc) {
   const lineItems = (doc.items || []).filter((i) => i.type === "line");
   const globalRate = globalDiscountRate(doc);
@@ -2216,8 +2229,11 @@ function computeTotals(doc) {
   // Factures uniquement : acompte DÉJÀ VERSÉ, en montant TTC, déduit du
   // total pour obtenir le montant TTC à régler (jamais négatif).
   const acompteVerse = doc.type === "facture" ? Math.max(0, Number(doc.acompteVerse) || 0) : 0;
-  const montantARegler = Math.max(0, totalTTC - acompteVerse);
-  return { computedLines, subtotalHTBrut, globalDiscountPct, globalDiscountAmount, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, acompteVerse, montantARegler };
+  // Paiements reçus sur la facture (partiels ou solde), eux aussi déduits.
+  const paymentsReceived = doc.type === "facture" ? paymentsTotalOf(doc) : 0;
+  const totalPaid = acompteVerse + paymentsReceived;
+  const montantARegler = Math.max(0, totalTTC - totalPaid);
+  return { computedLines, subtotalHTBrut, globalDiscountPct, globalDiscountAmount, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, acompteVerse, paymentsReceived, totalPaid, montantARegler };
 }
 
 const GlobalStyle = () => (
@@ -2440,12 +2456,17 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   const showPayment = isInvoiceLike && !hidePrices;
   const isPaid = isInvoiceLike && doc.status === "payée";
   const paidBefore = doc.type === "facture" ? totals.acompteVerse || 0 : 0;
+  const docPayments = doc.type === "facture" ? (Array.isArray(doc.payments) ? doc.payments : []).filter((p) => p && (Number(p.amount) || 0) > 0) : [];
+  const receivedTotal = paidBefore + docPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const amountToPay = isPaid ? 0 : doc.type === "facture" ? totals.montantARegler : totalTTC;
-  const amountPaid = isPaid ? totalTTC : paidBefore;
+  const amountPaid = isPaid ? totalTTC : receivedTotal;
   const paidDate = doc.paidAt ? new Date(doc.paidAt).toLocaleDateString("fr-FR") : "";
   const paymentsReceived = [];
   if (paidBefore > 0) paymentsReceived.push({ amount: paidBefore, label: "Acompte versé" });
-  if (isPaid) paymentsReceived.push({ amount: Math.max(0, totalTTC - paidBefore), date: paidDate, label: (doc.paymentMethod || "").trim() });
+  docPayments.forEach((p) => paymentsReceived.push({ amount: Number(p.amount) || 0, date: paymentDateLabel(p.date), label: [(p.method || "").trim(), (p.note || "").trim()].filter(Boolean).join(" · ") }));
+  // Marquée payée alors que les paiements listés ne couvrent pas tout :
+  // le solde est présenté comme reçu à la date de paiement.
+  if (isPaid && totalTTC - receivedTotal > 0.005) paymentsReceived.push({ amount: totalTTC - receivedTotal, date: paidDate, label: (doc.paymentMethod || "").trim() });
   const dueLabel = (Number(doc.dueDays) || 0) > 0 ? frLong(dueDate) : "À réception";
   const footerParts = legalCo.type !== "particulier" ? [
     companyDisplayName(legalCo),
@@ -2727,11 +2748,18 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
               </div>
             )}
             {/* Facture : acompte déjà versé déduit du total, montant TTC à régler */}
-            {doc.type === "facture" && (totals.acompteVerse || 0) > 0 && (
+            {doc.type === "facture" && (totals.totalPaid || 0) > 0 && (
               <>
-                <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: inkSoft }}>
-                  <span>Acompte déjà versé</span><span style={mono}>- {formatMoney(totals.acompteVerse, doc.currency)}</span>
-                </div>
+                {(totals.acompteVerse || 0) > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: inkSoft }}>
+                    <span>Acompte déjà versé</span><span style={mono}>- {formatMoney(totals.acompteVerse, doc.currency)}</span>
+                  </div>
+                )}
+                {(totals.paymentsReceived || 0) > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: inkSoft }}>
+                    <span>Paiements reçus</span><span style={mono}>- {formatMoney(totals.paymentsReceived, doc.currency)}</span>
+                  </div>
+                )}
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 10px", fontWeight: 700, fontSize: "11.5pt", color: brassDark, border: `1px solid ${brassDark}` }}>
                   <span>Montant TTC à régler</span><span style={mono}>{formatMoney(totals.montantARegler, doc.currency)}</span>
                 </div>
@@ -5794,8 +5822,8 @@ function PublicDocumentView({ token }) {
               </div>
               <div className="text-right">
                 <div className="df-mono text-xl font-bold">{formatMoney(amountDue, state.document.currency)}</div>
-                {state.document.type === "facture" && totals.acompteVerse > 0 && (
-                  <div className="text-xs" style={{ color: colors.inkSoft }}>Total TTC {formatMoney(totals.totalTTC, state.document.currency)} − acompte versé {formatMoney(totals.acompteVerse, state.document.currency)}</div>
+                {state.document.type === "facture" && totals.totalPaid > 0 && (
+                  <div className="text-xs" style={{ color: colors.inkSoft }}>Total TTC {formatMoney(totals.totalTTC, state.document.currency)} − déjà payé {formatMoney(totals.totalPaid, state.document.currency)}</div>
                 )}
               </div>
             </div>
@@ -16619,6 +16647,64 @@ function ReviewRequestNotice({ notice, onSend, onDismiss }) {
   );
 }
 
+// Paiements reçus sur une facture : un client peut régler en plusieurs
+// fois ; chaque règlement (date, montant, mode, note) est déduit du montant
+// à régler et imprimé sur le PDF. Quand le total reçu couvre la facture,
+// elle passe automatiquement à « payée ».
+function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
+  const payments = Array.isArray(doc.payments) ? doc.payments : [];
+  const currency = doc.currency || "EUR";
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [draft, setDraft] = useState({ date: todayIso, amount: "", method: doc.paymentMethod || "", note: "" });
+  const [error, setError] = useState("");
+  function add() {
+    const amount = Math.round((Number(String(draft.amount).replace(",", ".")) || 0) * 100) / 100;
+    if (amount <= 0) { setError("Indique un montant supérieur à zéro."); return; }
+    setError("");
+    const next = [...payments, { id: nextId("pay"), date: draft.date || todayIso, amount, method: draft.method, note: draft.note.trim() }];
+    const paidAfter = (totals.acompteVerse || 0) + next.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
+    const patch = { payments: next };
+    if (paidAfter + 0.005 >= totals.totalTTC && doc.status !== "payée") patch.status = "payée";
+    onPatch(patch);
+    setDraft({ date: todayIso, amount: "", method: draft.method, note: "" });
+  }
+  function remove(id) { onPatch({ payments: payments.filter((p) => p.id !== id) }); }
+  const inputStyle = { border: `1px solid ${colors.line}` };
+  return (
+    <div className="print-payments-editor mt-6 rounded-xl p-4" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Paiements reçus</span>
+        <span className="df-mono text-xs" style={{ color: colors.inkSoft }}>Reçu {formatMoney(totals.totalPaid || 0, currency)} · Reste à payer <strong style={{ color: (totals.montantARegler || 0) > 0 ? colors.brick : colors.moss }}>{formatMoney(totals.montantARegler || 0, currency)}</strong></span>
+      </div>
+      {payments.length === 0 ? (
+        <p className="text-xs" style={{ color: colors.inkSoft }}>Aucun paiement enregistré sur cette facture.</p>
+      ) : (
+        <div className="divide-y rounded-lg" style={{ background: colors.surface, border: `1px solid ${colors.line}`, borderColor: colors.line }}>
+          {payments.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm" style={{ borderColor: colors.line }}>
+              <span className="df-mono w-24 shrink-0" style={{ color: colors.inkSoft }}>{paymentDateLabel(p.date) || "—"}</span>
+              <span className="df-mono w-28 shrink-0 font-semibold">{formatMoney(Number(p.amount) || 0, currency)}</span>
+              <span className="min-w-0 grow truncate" style={{ color: colors.inkSoft }}>{[p.method, p.note].filter(Boolean).join(" · ") || "—"}</span>
+              {!disabled && <button type="button" onClick={() => remove(p.id)} title="Retirer ce paiement" style={{ color: colors.brick }}><Trash2 size={14} /></button>}
+            </div>
+          ))}
+        </div>
+      )}
+      {!disabled && (
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          <label className="text-xs" style={{ color: colors.inkSoft }}>Date<input type="date" className="df-input df-mono mt-1 block rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} /></label>
+          <label className="text-xs" style={{ color: colors.inkSoft }}>Montant ({currencyLabel(currency)} TTC)<input type="number" min="0" step="0.01" className="df-input df-mono mt-1 block w-32 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder={(totals.montantARegler || 0).toFixed(2)} value={draft.amount} onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))} /></label>
+          <label className="text-xs" style={{ color: colors.inkSoft }}>Mode<select className="df-select mt-1 block rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={draft.method} onChange={(e) => setDraft((d) => ({ ...d, method: e.target.value }))}><option value="">— Non précisé —</option>{PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select></label>
+          <label className="grow basis-40 text-xs" style={{ color: colors.inkSoft }}>Note (optionnel)<input className="df-input mt-1 block w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : chèque n° 123" value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} /></label>
+          <button type="button" onClick={add} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={13} /> Ajouter le paiement</button>
+        </div>
+      )}
+      {error && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{error}</p>}
+      <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Chaque paiement est déduit du montant à régler et imprimé sur la facture. Quand le total est atteint, la facture passe en « payée ».</p>
+    </div>
+  );
+}
+
 function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const [clientQuery, setClientQuery] = useState("");
@@ -17200,8 +17286,9 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         rows.push(["", "", "", "", "", "", `Acompte (${localDoc.acompte}%)`, Number(acompteAmount.toFixed(2))]);
         rows.push(["", "", "", "", "", "", "Reste à payer", Number(resteAPayer.toFixed(2))]);
       }
-      if (localDoc.type === "facture" && totals.acompteVerse > 0) {
-        rows.push(["", "", "", "", "", "", "Acompte déjà versé", -Number(totals.acompteVerse.toFixed(2))]);
+      if (localDoc.type === "facture" && totals.totalPaid > 0) {
+        if (totals.acompteVerse > 0) rows.push(["", "", "", "", "", "", "Acompte déjà versé", -Number(totals.acompteVerse.toFixed(2))]);
+        (localDoc.payments || []).filter((p) => p && (Number(p.amount) || 0) > 0).forEach((p) => rows.push(["", "", "", "", "", "", `Paiement reçu${p.date ? ` le ${paymentDateLabel(p.date)}` : ""}${p.method ? ` (${p.method})` : ""}`, -Number((Number(p.amount) || 0).toFixed(2))]));
         rows.push(["", "", "", "", "", "", "Montant TTC à régler", Number(totals.montantARegler.toFixed(2))]);
       }
     }
@@ -18069,6 +18156,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 
           </>)}
 
+          {localDoc.type === "facture" && <PaymentsEditor doc={localDoc} totals={totals} onPatch={patch} disabled={isLocked || isViewer} />}
+
           <div className="mt-8 flex flex-wrap items-start justify-between gap-8 border-t pt-8" style={{ borderColor: colors.line }}>
             <div className="flex flex-wrap gap-6">
               <label className="text-sm">
@@ -18129,10 +18218,11 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Reste à payer</span><span>{formatMoney(resteAPayer, localDoc.currency)}</span></div>
                   </>
                 )}
-                {localDoc.type === "facture" && totals.acompteVerse > 0 && (
+                {localDoc.type === "facture" && totals.totalPaid > 0 && (
                   <>
                     <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Total TTC</span><span>{formatMoney(totalTTC, localDoc.currency)}</span></div>
-                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte déjà versé</span><span>- {formatMoney(totals.acompteVerse, localDoc.currency)}</span></div>
+                    {totals.acompteVerse > 0 && <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte déjà versé</span><span>- {formatMoney(totals.acompteVerse, localDoc.currency)}</span></div>}
+                    {totals.paymentsReceived > 0 && <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Paiements reçus</span><span>- {formatMoney(totals.paymentsReceived, localDoc.currency)}</span></div>}
                     <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Montant TTC à régler</span><span>{formatMoney(totals.montantARegler, localDoc.currency)}</span></div>
                   </>
                 )}
@@ -18237,5 +18327,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

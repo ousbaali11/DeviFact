@@ -17,6 +17,7 @@ const cases = {
   "remise globale en montant supérieure au total": { items: [line({ unitPrice: 5 })], globalDiscount: 50, globalDiscountMode: "amount" },
   "acompte déjà versé sur une facture": { type: "facture", items: [line({ unitPrice: 100 })], acompteVerse: "20" },
   "acompte versé supérieur au total : jamais négatif": { type: "facture", items: [line({ unitPrice: 100 })], acompteVerse: 500 },
+  "paiements reçus en plusieurs fois, avec acompte": { type: "facture", items: [line({ unitPrice: 100 })], acompteVerse: 20, payments: [{ id: "a", date: "2026-09-22", amount: "30.5", method: "Chèque" }, { id: "b", amount: 50 }, { id: "c", amount: -5 }] },
   "section et ligne vide ignorées": { items: [{ id: "s", type: "section", title: "T" }, line({ unitPrice: 0 }), line({ unitPrice: 30, tva: 0 })] },
 };
 
@@ -26,7 +27,7 @@ describe("totaux serveur = totaux du site", () => {
       const doc = { ...newDocument(extra.type || "facture", []), ...extra };
       const site = computeTotals(doc);
       const server = computeDocTotals(doc);
-      for (const k of ["subtotalHTBrut", "globalDiscountPct", "globalDiscountAmount", "subtotalHT", "totalTVA", "totalTTC", "acompteVerse", "montantARegler"]) {
+      for (const k of ["subtotalHTBrut", "globalDiscountPct", "globalDiscountAmount", "subtotalHT", "totalTVA", "totalTTC", "acompteVerse", "paymentsReceived", "totalPaid", "montantARegler"]) {
         expect(server[k], k).toBeCloseTo(site[k], 6);
       }
       expect(server.lines.map((l) => l.totalHT)).toEqual(site.computedLines.map((l) => l.totalHT));

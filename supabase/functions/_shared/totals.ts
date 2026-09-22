@@ -21,6 +21,8 @@ export type DocTotals = {
   totalTVA: number;
   totalTTC: number;
   acompteVerse: number;
+  paymentsReceived: number;
+  totalPaid: number;
   montantARegler: number;
   lines: Array<{ item: any; baseHT: number; totalHTBrut: number; totalHT: number; rate: number }>;
 };
@@ -35,6 +37,22 @@ export function lineBaseHT(l: any): number {
 }
 export function lineNetHT(l: any): number {
   return lineBaseHT(l) * (1 - num(l?.discount) / 100);
+}
+export function paymentsTotalOf(doc: any): number {
+  return (Array.isArray(doc?.payments) ? doc.payments : []).reduce((s: number, p: any) => s + Math.max(0, num(p?.amount)), 0);
+}
+// Paiement reçu en ligne (Stripe) ajouté à la liste des paiements de la
+// facture ; idempotent (même session = même identifiant). Renvoie la
+// facture mise à jour : « payée » si le total est couvert.
+export function addOnlinePayment(doc: any, sessionId: string, amountCents: number, dateIso: string): any {
+  const payments = Array.isArray(doc?.payments) ? doc.payments : [];
+  const id = `pay_stripe_${sessionId}`;
+  const amount = Math.round(Math.max(0, num(amountCents))) / 100;
+  const next = payments.some((p: any) => p?.id === id) ? payments : [...payments, { id, date: dateIso.slice(0, 10), amount, method: "Carte bancaire (en ligne)", note: "Stripe" }];
+  const updated = { ...doc, payments: next, updatedAt: Date.now() };
+  const t = computeDocTotals(updated);
+  if (t.montantARegler <= 0.005) { updated.status = "payée"; updated.paidAt = dateIso; }
+  return updated;
 }
 export function globalDiscountRate(doc: any): number {
   const value = Math.max(0, num(doc?.globalDiscount));
@@ -60,9 +78,12 @@ export function computeDocTotals(doc: any): DocTotals {
   const totalTVA = Object.values(tvaByRate).reduce((a: number, b: number) => a + b, 0);
   const totalTTC = subtotalHT + totalTVA;
   const acompteVerse = doc?.type === "facture" ? Math.max(0, num(doc.acompteVerse)) : 0;
+  // Paiements reçus sur la facture (partiels ou solde), eux aussi déduits.
+  const paymentsReceived = doc?.type === "facture" ? paymentsTotalOf(doc) : 0;
+  const totalPaid = acompteVerse + paymentsReceived;
   return {
     subtotalHTBrut, globalDiscountPct: rate * 100, globalDiscountAmount: subtotalHTBrut - subtotalHT, subtotalHT,
-    tvaByRate, totalTVA, totalTTC, acompteVerse, montantARegler: Math.max(0, totalTTC - acompteVerse), lines,
+    tvaByRate, totalTVA, totalTTC, acompteVerse, paymentsReceived, totalPaid, montantARegler: Math.max(0, totalTTC - totalPaid), lines,
   };
 }
 export const round2 = (n: number) => Math.round(n * 100) / 100;
