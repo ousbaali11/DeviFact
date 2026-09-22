@@ -50,8 +50,7 @@ export function addOnlinePayment(doc: any, sessionId: string, amountCents: numbe
   const amount = Math.round(Math.max(0, num(amountCents))) / 100;
   const next = payments.some((p: any) => p?.id === id) ? payments : [...payments, { id, date: dateIso.slice(0, 10), amount, method: "Carte bancaire (en ligne)", note: "Stripe" }];
   const updated = { ...doc, payments: next, updatedAt: Date.now() };
-  const t = computeDocTotals(updated);
-  if (t.montantARegler <= 0.005) { updated.status = "payée"; updated.paidAt = dateIso; }
+  if (amountDueOf(updated) <= 0.005) { updated.status = "payée"; updated.paidAt = dateIso; }
   return updated;
 }
 export function globalDiscountRate(doc: any): number {
@@ -87,6 +86,39 @@ export function computeDocTotals(doc: any): DocTotals {
   };
 }
 export const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// Situation de travaux — même règle que computeSituation() côté site :
+// montant de cette situation = cumul atteint − déjà facturé, par ligne ;
+// retenue de garantie et acompte versé déduits ; paiements reçus déduits
+// du net à payer.
+export function computeSituationTotals(doc: any) {
+  const items = (Array.isArray(doc?.items) ? doc.items : []).filter((l: any) => l && l.type === "line");
+  const lines: Array<{ rate: number; montantCetteSituation: number }> = items.map((l: any) => {
+    const montantMarche = num(l.qty) * num(l.unitPrice);
+    const montantCumuleActuel = (montantMarche * num(l.avancementPct)) / 100;
+    return { rate: num(l.tva), montantCetteSituation: montantCumuleActuel - num(l.montantCumulePrecedent) };
+  });
+  const subtotalHT = lines.reduce((s: number, l) => s + l.montantCetteSituation, 0);
+  const tvaByRate: Record<string, number> = {};
+  for (const l of lines) tvaByRate[String(l.rate)] = (tvaByRate[String(l.rate)] || 0) + (l.montantCetteSituation * l.rate) / 100;
+  const totalTVA = Object.values(tvaByRate).reduce((a: number, b: number) => a + b, 0);
+  const totalTTCBrut = subtotalHT + totalTVA;
+  const retenueGarantie = totalTTCBrut * (num(doc?.retenueGarantiePct) / 100);
+  const acompteVerse = num(doc?.acompteVerse);
+  const netAPayer = totalTTCBrut - retenueGarantie - acompteVerse;
+  const paymentsReceived = paymentsTotalOf(doc);
+  return { subtotalHT, tvaByRate, totalTVA, totalTTCBrut, retenueGarantie, acompteVerse, netAPayer, paymentsReceived, totalPaid: acompteVerse + paymentsReceived, montantARegler: Math.max(0, netAPayer - paymentsReceived) };
+}
+// Documents que le client règle : facture, facture d'acompte, situation
+// valant facture — même règle que isPayableDoc() côté site.
+export function isPayableDoc(doc: any): boolean {
+  return !!doc && (doc.type === "facture" || doc.type === "acompte" || (doc.type === "situation" && doc.vautFacture === true));
+}
+// Montant restant à régler d'un document à payer (0 si non concerné).
+export function amountDueOf(doc: any): number {
+  if (!isPayableDoc(doc)) return 0;
+  return doc.type === "situation" ? computeSituationTotals(doc).montantARegler : computeDocTotals(doc).montantARegler;
+}
 
 // Montant lisible pour un e-mail (texte brut) : « 1 234,56 € », « 1 234,56 DH ».
 export function formatAmount(n: number, currency?: string): string {

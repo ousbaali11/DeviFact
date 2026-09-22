@@ -16,7 +16,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
-import { computeDocTotals, round2 } from "../_shared/totals.ts";
+import { amountDueOf, isPayableDoc, round2 } from "../_shared/totals.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const dbAdmin = createClient(
@@ -38,7 +38,7 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
   try {
-    const { token } = await req.json();
+    const { token, amount: requestedAmount } = await req.json();
     if (!token) {
       return new Response(JSON.stringify({ error: "Lien invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -81,17 +81,24 @@ serve(async (req) => {
     const { data: docsRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", link.organization_id).eq("key", "documents").eq("shared", false).maybeSingle();
     const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
     const doc = documents.find((d: any) => d.id === link.document_id);
-    if (!doc || doc.type !== "facture") {
+    // Facture, facture d'acompte ou situation valant facture.
+    if (!doc || !isPayableDoc(doc)) {
       return new Response(JSON.stringify({ error: "Ce document n'est pas une facture valide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Montant à régler = total TTC moins l'acompte déjà versé — calcul
-    // partagé avec le site (_shared/totals.ts) : sous-détails, remises de
-    // ligne, remise globale en % ou en montant, TVA par taux.
-    const amount = round2(computeDocTotals(doc).montantARegler);
-    if (amount <= 0) {
-      return new Response(JSON.stringify({ error: "Montant invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // Reste à régler — calcul partagé avec le site (_shared/totals.ts) :
+    // sous-détails, remises, TVA par taux, acompte versé, paiements déjà
+    // reçus. Le client peut payer tout le reste ou une partie (au moins 1).
+    const due = round2(amountDueOf(doc));
+    if (due <= 0) {
+      return new Response(JSON.stringify({ error: "Cette facture est déjà réglée." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    const requested = requestedAmount === undefined || requestedAmount === null || requestedAmount === "" ? due : round2(Number(requestedAmount));
+    if (!Number.isFinite(requested) || requested < 1 || requested > due + 0.005) {
+      return new Response(JSON.stringify({ error: `Montant invalide : indique un montant entre 1 et ${due.toFixed(2)}.` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const amount = Math.min(due, requested);
+    const label = doc.type === "situation" ? `Situation n° ${doc.numeroSituation || 1} — ${doc.docNumber}` : `Facture ${doc.docNumber}`;
 
     // Commission de la plateforme (réglage Admin, 0 par défaut). Si la
     // colonne n'existe pas encore : 0.
@@ -110,7 +117,7 @@ serve(async (req) => {
       line_items: [{
         price_data: {
           currency: (doc.currency || "EUR").toLowerCase(),
-          product_data: { name: `Facture ${doc.docNumber}` },
+          product_data: { name: label },
           unit_amount: amountCents,
         },
         quantity: 1,

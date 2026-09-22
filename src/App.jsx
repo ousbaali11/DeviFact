@@ -1314,10 +1314,14 @@ function computeSituation(doc) {
   const retenueGarantie = totalTTCBrut * ((Number(doc.retenueGarantiePct) || 0) / 100);
   const acompteVerse = Number(doc.acompteVerse) || 0;
   const netAPayer = totalTTCBrut - retenueGarantie - acompteVerse;
+  // Paiements reçus (situation valant facture), déduits du net à payer.
+  const paymentsReceived = paymentsTotalOf(doc);
+  const totalPaid = acompteVerse + paymentsReceived;
+  const montantARegler = Math.max(0, netAPayer - paymentsReceived);
   const montantMarcheTotal = lines.reduce((s, l) => s + l.montantMarche, 0);
   const montantCumuleTotal = lines.reduce((s, l) => s + l.montantCumuleActuel, 0);
   const avancementGlobalPct = montantMarcheTotal ? (montantCumuleTotal / montantMarcheTotal) * 100 : 0;
-  return { lines, subtotalHT, tvaGroups, totalTVA, totalTTCBrut, retenueGarantie, acompteVerse, netAPayer, montantMarcheTotal, montantCumuleTotal, avancementGlobalPct };
+  return { lines, subtotalHT, tvaGroups, totalTVA, totalTTCBrut, retenueGarantie, acompteVerse, netAPayer, paymentsReceived, totalPaid, montantARegler, montantMarcheTotal, montantCumuleTotal, avancementGlobalPct };
 }
 
 // Crée la situation suivante à partir d'une situation existante : le
@@ -2196,6 +2200,17 @@ function globalDiscountLabel(doc, pct) {
 function paymentsTotalOf(doc) {
   return (Array.isArray(doc?.payments) ? doc.payments : []).reduce((s, p) => s + Math.max(0, Number(p?.amount) || 0), 0);
 }
+// Documents que le client règle (liste des paiements reçus, montant à
+// régler, paiement en ligne) : facture, facture d'acompte, situation de
+// travaux « valant facture ».
+function isPayableDoc(doc) {
+  return !!doc && (doc.type === "facture" || doc.type === "acompte" || (doc.type === "situation" && doc.vautFacture === true));
+}
+// Total déjà réglé d'un document à payer (acompte versé + paiements reçus).
+function documentPaidTotal(doc) {
+  if (!doc) return 0;
+  return doc.type === "situation" ? computeSituation(doc).totalPaid : computeTotals(doc).totalPaid;
+}
 function paymentDateLabel(d) {
   if (!d) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d.split("-").reverse().join("/");
@@ -2228,9 +2243,10 @@ function computeTotals(doc) {
   const resteAPayer = totalTTC - acompteAmount;
   // Factures uniquement : acompte DÉJÀ VERSÉ, en montant TTC, déduit du
   // total pour obtenir le montant TTC à régler (jamais négatif).
-  const acompteVerse = doc.type === "facture" ? Math.max(0, Number(doc.acompteVerse) || 0) : 0;
+  const invoiceLike = doc.type === "facture" || doc.type === "acompte";
+  const acompteVerse = invoiceLike ? Math.max(0, Number(doc.acompteVerse) || 0) : 0;
   // Paiements reçus sur la facture (partiels ou solde), eux aussi déduits.
-  const paymentsReceived = doc.type === "facture" ? paymentsTotalOf(doc) : 0;
+  const paymentsReceived = invoiceLike ? paymentsTotalOf(doc) : 0;
   const totalPaid = acompteVerse + paymentsReceived;
   const montantARegler = Math.max(0, totalTTC - totalPaid);
   return { computedLines, subtotalHTBrut, globalDiscountPct, globalDiscountAmount, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, acompteVerse, paymentsReceived, totalPaid, montantARegler };
@@ -2455,10 +2471,10 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   const legalCo = legalCompanyOf(doc.company, companyProfile);
   const showPayment = isInvoiceLike && !hidePrices;
   const isPaid = isInvoiceLike && doc.status === "payée";
-  const paidBefore = doc.type === "facture" ? totals.acompteVerse || 0 : 0;
-  const docPayments = doc.type === "facture" ? (Array.isArray(doc.payments) ? doc.payments : []).filter((p) => p && (Number(p.amount) || 0) > 0) : [];
+  const paidBefore = isInvoiceLike ? totals.acompteVerse || 0 : 0;
+  const docPayments = isInvoiceLike ? (Array.isArray(doc.payments) ? doc.payments : []).filter((p) => p && (Number(p.amount) || 0) > 0) : [];
   const receivedTotal = paidBefore + docPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const amountToPay = isPaid ? 0 : doc.type === "facture" ? totals.montantARegler : totalTTC;
+  const amountToPay = isPaid ? 0 : totals.montantARegler;
   const amountPaid = isPaid ? totalTTC : receivedTotal;
   const paidDate = doc.paidAt ? new Date(doc.paidAt).toLocaleDateString("fr-FR") : "";
   const paymentsReceived = [];
@@ -2748,7 +2764,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
               </div>
             )}
             {/* Facture : acompte déjà versé déduit du total, montant TTC à régler */}
-            {doc.type === "facture" && (totals.totalPaid || 0) > 0 && (
+            {isInvoiceLike && (totals.totalPaid || 0) > 0 && (
               <>
                 {(totals.acompteVerse || 0) > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: inkSoft }}>
@@ -2805,7 +2821,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
               <div style={{ width: "2cm" }}>
                 <img src={publicQr.dataUrl} alt="QR code" style={{ width: "2cm", height: "2cm", display: "block" }} />
                 <div style={{ fontSize: "6.5pt", color: inkSoft, marginTop: "3px", lineHeight: 1.2, textAlign: "center" }}>
-                  {doc.type === "facture" ? "Scannez pour consulter en ligne" : "Scannez pour signer en ligne"}
+                  {doc.type === "devis" ? "Scannez pour signer en ligne" : "Scannez pour consulter en ligne"}
                 </div>
               </div>
             )}
@@ -5683,6 +5699,24 @@ function PublicDocumentView({ token }) {
     try { return new URLSearchParams(window.location.search).get("paiement") === "ok"; } catch { return false; }
   });
   const [reloadTick, setReloadTick] = useState(0);
+  // Paiement partiel : montant choisi par le client (vide = tout le reste) ;
+  // total déjà réglé à l'arrivée, pour détecter la prise en compte du
+  // paiement en ligne au retour de Stripe.
+  const [payAmount, setPayAmount] = useState("");
+  const [paidBaseline, setPaidBaseline] = useState(null);
+  const payable = isPayableDoc(state.document);
+  const isSituationDoc = state.document?.type === "situation";
+  const sit = isSituationDoc ? computeSituation(state.document) : null;
+  const totals = state.document && !isSituationDoc ? computeTotals(state.document) : null;
+  const amountDue = isSituationDoc ? sit.montantARegler : totals ? (payable ? totals.montantARegler : totals.totalTTC) : 0;
+  const totalPaid = isSituationDoc ? sit.totalPaid : totals ? totals.totalPaid : 0;
+  const totalTTC = isSituationDoc ? sit.netAPayer + sit.acompteVerse : totals ? totals.totalTTC : 0;
+  const summaryLines = isSituationDoc ? sit.lines.map((l) => ({ id: l.id, designation: l.designation, totalHT: l.montantCetteSituation })) : totals ? totals.computedLines : [];
+  const payAmountValue = Math.round((Number(String(payAmount).replace(",", ".")) || 0) * 100) / 100;
+  const amountToPayNow = payAmountValue > 0 ? Math.min(amountDue, payAmountValue) : amountDue;
+  const paymentConfirmed = paymentReturn && paidBaseline !== null && (!!state.paidAt || state.document?.status === "payée" || totalPaid > paidBaseline + 0.005);
+  const awaitingConfirmation = paymentReturn && !paymentConfirmed && reloadTick < 5;
+  const canPay = payable && state.document.status !== "payée" && !state.paidAt && amountDue > 0.005 && !awaitingConfirmation;
   // Signature à distance : saisie du nom (par défaut) ou dessin à main
   // levée — même technique que le dessin dans l'éditeur (canvas 2D,
   // image PNG envoyée à sign-public-document dans signatureDrawing).
@@ -5738,19 +5772,20 @@ function PublicDocumentView({ token }) {
         // Paiement en ligne : uniquement si le serveur l'annonce (compte
         // Stripe connecté et actif pour cet artisan) — jamais par défaut.
         setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true });
+        if (paymentReturn) setPaidBaseline((b) => (b === null ? documentPaidTotal(data.document) : b));
       } catch (err) {
         setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
       }
     })();
-  }, [token, reloadTick]);
+  }, [token, reloadTick, paymentReturn]);
   // Après un paiement, Stripe confirme par webhook quelques secondes plus
   // tard : on relit le document jusqu'à 5 fois (toutes les 3 s) tant qu'il
   // n'est pas marqué payé.
   useEffect(() => {
-    if (!paymentReturn || state.loading || state.paidAt || reloadTick >= 5) return;
+    if (!paymentReturn || state.loading || paymentConfirmed || reloadTick >= 5) return;
     const t = setTimeout(() => setReloadTick((n) => n + 1), 3000);
     return () => clearTimeout(t);
-  }, [paymentReturn, state.loading, state.paidAt, reloadTick]);
+  }, [paymentReturn, state.loading, paymentConfirmed, reloadTick]);
 
   async function handleSign() {
     if (signMode === "dessin") {
@@ -5780,7 +5815,7 @@ function PublicDocumentView({ token }) {
     setPayLoading(true);
     setPayError(null);
     try {
-      const { data, error } = await db.functions.invoke("create-invoice-payment", { body: { token } });
+      const { data, error } = await db.functions.invoke("create-invoice-payment", { body: { token, amount: Math.round(amountToPayNow * 100) / 100 } });
       if (error) throw error;
       if (data?.error || !data?.url) throw new Error(data?.error || "Erreur");
       window.location.href = data.url;
@@ -5790,10 +5825,6 @@ function PublicDocumentView({ token }) {
     }
   }
 
-  // Mêmes totaux que le PDF : le montant mis en avant est celui à régler
-  // (acompte déjà versé déduit), pas le total TTC brut.
-  const totals = state.document ? computeTotals(state.document) : null;
-  const amountDue = totals ? (state.document.type === "facture" ? totals.montantARegler : totals.totalTTC) : 0;
   return (
     <div className="df-root min-h-screen w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
@@ -5822,27 +5853,27 @@ function PublicDocumentView({ token }) {
               </div>
               <div className="text-right">
                 <div className="df-mono text-xl font-bold">{formatMoney(amountDue, state.document.currency)}</div>
-                {state.document.type === "facture" && totals.totalPaid > 0 && (
-                  <div className="text-xs" style={{ color: colors.inkSoft }}>Total TTC {formatMoney(totals.totalTTC, state.document.currency)} − déjà payé {formatMoney(totals.totalPaid, state.document.currency)}</div>
+                {payable && totalPaid > 0 && (
+                  <div className="text-xs" style={{ color: colors.inkSoft }}>{isSituationDoc ? "Net à payer" : "Total TTC"} {formatMoney(totalTTC, state.document.currency)} − déjà payé {formatMoney(totalPaid, state.document.currency)}</div>
                 )}
               </div>
             </div>
 
             <div className="mb-4 space-y-1">
-              {totals.computedLines.map((it) => (
+              {summaryLines.map((it) => (
                 <div key={it.id} className="flex justify-between gap-3 text-sm">
                   <span>{it.designation || "—"}</span>
                   <span className="df-mono shrink-0" style={{ color: colors.inkSoft }}>{formatMoney(it.totalHT, state.document.currency)} HT</span>
                 </div>
               ))}
-              {totals.globalDiscountAmount > 0 && (
+              {totals && totals.globalDiscountAmount > 0 && (
                 <div className="flex justify-between gap-3 text-sm" style={{ color: colors.inkSoft }}>
                   <span>{globalDiscountLabel(state.document, totals.globalDiscountPct)}</span>
                   <span className="df-mono shrink-0">- {formatMoney(totals.globalDiscountAmount, state.document.currency)}</span>
                 </div>
               )}
               <div className="flex justify-between gap-3 text-sm" style={{ color: colors.inkSoft }}>
-                <span>TVA</span><span className="df-mono shrink-0">{formatMoney(totals.totalTVA, state.document.currency)}</span>
+                <span>TVA</span><span className="df-mono shrink-0">{formatMoney(isSituationDoc ? sit.totalTVA : totals.totalTVA, state.document.currency)}</span>
               </div>
             </div>
 
@@ -5918,15 +5949,20 @@ function PublicDocumentView({ token }) {
             )}
 
             {/* Retour de Stripe après paiement, en attendant la confirmation */}
-            {paymentReturn && state.document.type === "facture" && !state.paidAt && state.document.status !== "payée" && (
+            {awaitingConfirmation && (
               <div className="mt-6 flex items-center gap-2 rounded-xl p-4" style={{ background: `${colors.moss}0D` }}>
                 <Loader2 size={18} className="animate-spin" style={{ color: colors.moss }} /> <p className="text-sm font-medium" style={{ color: colors.moss }}>Paiement transmis, merci ! La confirmation arrive dans quelques instants.</p>
+              </div>
+            )}
+            {paymentConfirmed && !state.paidAt && state.document.status !== "payée" && (
+              <div className="mt-6 flex items-center gap-2 rounded-xl p-4" style={{ background: `${colors.moss}0D` }}>
+                <Check size={18} style={{ color: colors.moss }} /> <p className="text-sm font-medium" style={{ color: colors.moss }}>Paiement reçu, merci ! Il reste {formatMoney(amountDue, state.document.currency)} à régler.</p>
               </div>
             )}
             {/* Paiement — uniquement pour une facture pas encore payée, et
                 seulement si le paiement en ligne est disponible pour cet
                 artisan (compte Stripe connecté et actif) ; sinon, virement. */}
-            {!paymentReturn && state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && !state.onlinePayment && (
+            {canPay && !state.onlinePayment && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
                 <p className="flex items-start gap-2 text-sm" style={{ color: colors.inkSoft }}>
                   <Landmark size={16} className="mt-0.5 shrink-0" style={{ color: colors.slate }} />
@@ -5934,11 +5970,15 @@ function PublicDocumentView({ token }) {
                 </p>
               </div>
             )}
-            {!paymentReturn && state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && state.onlinePayment && (
+            {canPay && state.onlinePayment && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
+                <label className="mb-3 block text-xs" style={{ color: colors.inkSoft }}>
+                  Montant à payer maintenant ({currencyLabel(state.document.currency || "EUR")}) — tout ou une partie, reste à régler {formatMoney(amountDue, state.document.currency)}
+                  <input type="number" min="1" step="0.01" max={amountDue.toFixed(2)} className="df-input df-mono mt-1 block w-44 rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder={amountDue.toFixed(2)} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+                </label>
                 {payError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{payError}</p>}
                 <button onClick={handlePay} disabled={payLoading} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.moss, opacity: payLoading ? 0.7 : 1 }}>
-                  {payLoading ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />} {payLoading ? "Redirection..." : `Payer ${formatMoney(amountDue, state.document.currency)} en ligne`}
+                  {payLoading ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />} {payLoading ? "Redirection..." : `Payer ${formatMoney(amountToPayNow, state.document.currency)} en ligne`}
                 </button>
               </div>
             )}
@@ -8587,8 +8627,33 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
           {s.retenueGarantie > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Retenue de garantie ({doc.retenueGarantiePct}%)</span><span style={mono}>-{formatMoney(s.retenueGarantie, doc.currency)}</span></div>}
           {s.acompteVerse > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Acompte déjà versé</span><span style={mono}>-{formatMoney(s.acompteVerse, doc.currency)}</span></div>}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: band, color: "white", fontWeight: 700, borderRadius: "4px", marginTop: "4px" }}><span>Net à payer</span><span style={mono}>{formatMoney(s.netAPayer, doc.currency)}</span></div>
+          {vautFacture && s.paymentsReceived > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Paiements reçus</span><span style={mono}>-{formatMoney(s.paymentsReceived, doc.currency)}</span></div>}
+          {vautFacture && s.paymentsReceived > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", fontWeight: 700 }}><span>Reste à payer</span><span style={mono}>{formatMoney(doc.status === "payée" ? 0 : s.montantARegler, doc.currency)}</span></div>}
         </div>
       </div>
+
+      {/* Facture de situation : paiements reçus (bas à gauche), tampon PAYÉ une fois réglée */}
+      {vautFacture && (() => {
+        const isPaidSit = doc.status === "payée";
+        const paidDateSit = doc.paidAt ? new Date(doc.paidAt).toLocaleDateString("fr-FR") : "";
+        const list = [];
+        if (s.acompteVerse > 0) list.push({ amount: s.acompteVerse, label: "Acompte versé" });
+        (Array.isArray(doc.payments) ? doc.payments : []).filter((p) => p && (Number(p.amount) || 0) > 0).forEach((p) => list.push({ amount: Number(p.amount) || 0, date: paymentDateLabel(p.date), label: [(p.method || "").trim(), (p.note || "").trim()].filter(Boolean).join(" · ") }));
+        if (isPaidSit && s.montantARegler > 0.005) list.push({ amount: s.montantARegler, date: paidDateSit, label: "" });
+        return (
+          <div className="print-payment" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "24px", marginTop: "14px", pageBreakInside: "avoid", position: "relative", zIndex: 1, fontSize: "9pt", lineHeight: 1.55 }}>
+            <div style={{ flex: "0 0 60%" }}>
+              <div>À payer : <strong style={{ ...mono, fontSize: "12pt", color: isPaidSit ? PAID_GREEN : ink }}>{formatMoney(isPaidSit ? 0 : s.montantARegler, doc.currency)}</strong></div>
+              <div>Montant payé : <strong style={mono}>{formatMoney(isPaidSit ? s.netAPayer + s.acompteVerse : s.totalPaid, doc.currency)}</strong></div>
+              <div style={{ marginTop: "4px", fontSize: "7.5pt", textTransform: "uppercase", letterSpacing: "0.04em", color: inkSoft }}>Paiements reçus</div>
+              <div style={{ border: `1px solid ${inkSoft}66`, borderRadius: "3px", padding: "4px 8px", marginTop: "2px" }}>
+                {list.length === 0 ? <span style={{ color: inkSoft }}>Aucun paiement reçu à ce jour.</span> : list.map((p, i) => <div key={i}><span style={mono}>{formatMoney(p.amount, doc.currency)}</span>{p.date ? ` le ${p.date}` : ""}{p.label ? ` - ${p.label}` : ""}</div>)}
+              </div>
+            </div>
+            {isPaidSit && <img className="print-paid-stamp" src={paidStampSvg(paidDateSit)} alt={`PAYÉ${paidDateSit ? ` le ${paidDateSit}` : ""}`} style={{ width: "200px", height: "110px", marginRight: "12px", opacity: 0.92 }} />}
+          </div>
+        );
+      })()}
 
       {(doc.paymentTerms || "").trim() && <div style={{ marginTop: "12px", fontSize: "8.5pt", position: "relative", zIndex: 1 }}>Conditions de paiement : {doc.paymentTerms.trim()}</div>}
       {legalLines.length > 0 && (
@@ -8896,6 +8961,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                 <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du maître d'œuvre" value={localDoc.visaMaitreOeuvre || ""} onChange={(e) => patch({ visaMaitreOeuvre: e.target.value })} />
               </div>
             </div>
+            {localDoc.vautFacture === true && <PaymentsEditor doc={localDoc} totals={{ totalPaid: s.totalPaid, montantARegler: s.montantARegler }} onPatch={patch} disabled={isLocked || isViewer} />}
           </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -16657,18 +16723,34 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
   const todayIso = new Date().toISOString().slice(0, 10);
   const [draft, setDraft] = useState({ date: todayIso, amount: "", method: doc.paymentMethod || "", note: "" });
   const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const parseAmount = (v) => Math.round((Number(String(v).replace(",", ".")) || 0) * 100) / 100;
+  // Enregistre la liste ; « payée » dès que le reste à payer tombe à zéro.
+  function commit(next) {
+    const sumBefore = payments.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
+    const sumAfter = next.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
+    const remainingAfter = (totals.montantARegler || 0) - (sumAfter - sumBefore);
+    const patch = { payments: next };
+    if (remainingAfter <= 0.005 && doc.status !== "payée") patch.status = "payée";
+    onPatch(patch);
+  }
   function add() {
-    const amount = Math.round((Number(String(draft.amount).replace(",", ".")) || 0) * 100) / 100;
+    const amount = parseAmount(draft.amount);
     if (amount <= 0) { setError("Indique un montant supérieur à zéro."); return; }
     setError("");
-    const next = [...payments, { id: nextId("pay"), date: draft.date || todayIso, amount, method: draft.method, note: draft.note.trim() }];
-    const paidAfter = (totals.acompteVerse || 0) + next.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
-    const patch = { payments: next };
-    if (paidAfter + 0.005 >= totals.totalTTC && doc.status !== "payée") patch.status = "payée";
-    onPatch(patch);
+    commit([...payments, { id: nextId("pay"), date: draft.date || todayIso, amount, method: draft.method, note: draft.note.trim() }]);
     setDraft({ date: todayIso, amount: "", method: draft.method, note: "" });
   }
-  function remove(id) { onPatch({ payments: payments.filter((p) => p.id !== id) }); }
+  function remove(id) { commit(payments.filter((p) => p.id !== id)); }
+  function startEdit(p) { setEditingId(p.id); setEditDraft({ date: p.date || todayIso, amount: String(p.amount ?? ""), method: p.method || "", note: p.note || "" }); setError(""); }
+  function saveEdit() {
+    const amount = parseAmount(editDraft.amount);
+    if (amount <= 0) { setError("Indique un montant supérieur à zéro."); return; }
+    setError("");
+    commit(payments.map((p) => (p.id === editingId ? { ...p, date: editDraft.date || todayIso, amount, method: editDraft.method, note: editDraft.note.trim() } : p)));
+    setEditingId(null); setEditDraft(null);
+  }
   const inputStyle = { border: `1px solid ${colors.line}` };
   return (
     <div className="print-payments-editor mt-6 rounded-xl p-4" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
@@ -16680,11 +16762,21 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
         <p className="text-xs" style={{ color: colors.inkSoft }}>Aucun paiement enregistré sur cette facture.</p>
       ) : (
         <div className="divide-y rounded-lg" style={{ background: colors.surface, border: `1px solid ${colors.line}`, borderColor: colors.line }}>
-          {payments.map((p) => (
+          {payments.map((p) => editingId === p.id ? (
+            <div key={p.id} className="flex flex-wrap items-end gap-2 px-3 py-2 text-sm" style={{ borderColor: colors.line }}>
+              <label className="text-xs" style={{ color: colors.inkSoft }}>Date<input type="date" className="df-input df-mono mt-1 block rounded-md px-2 py-1 text-sm" style={inputStyle} value={editDraft.date} onChange={(e) => setEditDraft((d) => ({ ...d, date: e.target.value }))} /></label>
+              <label className="text-xs" style={{ color: colors.inkSoft }}>Montant<input type="number" min="0" step="0.01" className="df-input df-mono mt-1 block w-28 rounded-md px-2 py-1 text-sm" style={inputStyle} value={editDraft.amount} onChange={(e) => setEditDraft((d) => ({ ...d, amount: e.target.value }))} /></label>
+              <label className="text-xs" style={{ color: colors.inkSoft }}>Mode<select className="df-select mt-1 block rounded-md px-2 py-1 text-sm" style={inputStyle} value={editDraft.method} onChange={(e) => setEditDraft((d) => ({ ...d, method: e.target.value }))}><option value="">— Non précisé —</option>{[...PAYMENT_METHODS, ...(editDraft.method && !PAYMENT_METHODS.includes(editDraft.method) ? [editDraft.method] : [])].map((m) => <option key={m} value={m}>{m}</option>)}</select></label>
+              <label className="grow basis-32 text-xs" style={{ color: colors.inkSoft }}>Note<input className="df-input mt-1 block w-full rounded-md px-2 py-1 text-sm" style={inputStyle} value={editDraft.note} onChange={(e) => setEditDraft((d) => ({ ...d, note: e.target.value }))} /></label>
+              <button type="button" onClick={saveEdit} className="rounded-lg px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.ink }}>Enregistrer</button>
+              <button type="button" onClick={() => { setEditingId(null); setEditDraft(null); }} className="rounded-lg px-3 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Annuler</button>
+            </div>
+          ) : (
             <div key={p.id} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm" style={{ borderColor: colors.line }}>
               <span className="df-mono w-24 shrink-0" style={{ color: colors.inkSoft }}>{paymentDateLabel(p.date) || "—"}</span>
               <span className="df-mono w-28 shrink-0 font-semibold">{formatMoney(Number(p.amount) || 0, currency)}</span>
               <span className="min-w-0 grow truncate" style={{ color: colors.inkSoft }}>{[p.method, p.note].filter(Boolean).join(" · ") || "—"}</span>
+              {!disabled && <button type="button" onClick={() => startEdit(p)} title="Modifier ce paiement" style={{ color: colors.slate }}><Pencil size={14} /></button>}
               {!disabled && <button type="button" onClick={() => remove(p.id)} title="Retirer ce paiement" style={{ color: colors.brick }}><Trash2 size={14} /></button>}
             </div>
           ))}
@@ -16700,7 +16792,7 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
         </div>
       )}
       {error && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{error}</p>}
-      <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Chaque paiement est déduit du montant à régler et imprimé sur la facture. Quand le total est atteint, la facture passe en « payée ».</p>
+      <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Chaque paiement est déduit du montant à régler et imprimé sur le document. Les paiements en ligne s'ajoutent tout seuls ; tu peux corriger ou retirer n'importe quel paiement. Quand le total est atteint, le document passe en « payée ».</p>
     </div>
   );
 }
@@ -16935,7 +17027,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   // public du document (devis → signature, facture → paiement). Le lien
   // le plus récent est réutilisé s'il existe ; sinon il est créé au
   // moment du téléchargement du PDF, jamais avant.
-  const hasPublicLinkType = doc.type === "devis" || doc.type === "facture";
+  const hasPublicLinkType = doc.type === "devis" || doc.type === "facture" || doc.type === "acompte";
   const [publicQr, setPublicQr] = useState(null); // { url, dataUrl }
   const publicQrLoadRef = useRef(null);
   useEffect(() => {
@@ -17377,7 +17469,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
             <FileSpreadsheet size={15} /> Excel
           </button>
-          {(localDoc.type === "devis" || localDoc.type === "facture") && (
+          {(localDoc.type === "devis" || localDoc.type === "facture" || localDoc.type === "acompte") && (
             <button onClick={generatePublicLink} disabled={publicLinkState.loading} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: publicLinkState.loading ? 0.7 : 1 }} title={localDoc.type === "devis" ? "Créer un lien pour que le client signe en ligne, sans compte" : "Créer un lien pour que le client consulte la facture en ligne, sans compte"}>
               {publicLinkState.loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />} {publicLinkState.loading ? "Génération…" : localDoc.type === "devis" ? "Lien de signature" : "Lien de la facture"}
             </button>
@@ -18051,8 +18143,10 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             ) : (
               <div key={it.id} className="rounded-lg p-2" style={{ background: selectedLineIds.includes(it.id) ? "rgba(166,72,59,0.08)" : idx % 2 ? "transparent" : "rgba(62,92,110,0.04)" }}>
                 <div className="flex flex-wrap items-start gap-2">
-                  <input type="checkbox" className="no-print mt-2" checked={selectedLineIds.includes(it.id)} onChange={() => toggleLineSelect(it.id)} style={{ accentColor: colors.brick }} aria-label="Sélectionner cette ligne" />
+                  <input type="checkbox" className="no-print mt-6" checked={selectedLineIds.includes(it.id)} onChange={() => toggleLineSelect(it.id)} style={{ accentColor: colors.brick }} aria-label="Sélectionner cette ligne" />
                   <div className="grow basis-56">
+                    {/* Même étiquette au-dessus que les colonnes chiffrées : les champs restent alignés sur une ligne */}
+                    <span className="mb-0.5 block text-xs" style={{ color: colors.inkSoft }}>{localDoc.type === "bpu" ? "N° prix / Désignation" : "Désignation"}</span>
                     {localDoc.type === "bpu" && (
                       <input className="df-input df-mono mb-1 w-28 rounded-md px-2 py-1 text-xs" style={inputStyle} placeholder="N° prix" title="Numéro de prix du bordereau (rempli automatiquement depuis la bibliothèque)" value={it.productRef || ""} onChange={(e) => updateItem(it.id, { productRef: e.target.value })} />
                     )}
@@ -18099,7 +18193,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                       {formatMoney(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (globalDiscountPct || 0) / 100), localDoc.currency)}
                     </div>
                   </div>
-                  <div className="no-print flex w-24 shrink-0 justify-end gap-1 pt-1.5">
+                  <div className="no-print flex w-24 shrink-0 justify-end gap-1 pt-6">
                     <button onClick={() => saveLineAsPrestation(it)} title="Enregistrer comme prestation" style={{ color: colors.brassDark }}><BookmarkPlus size={14} /></button>
                     <button onClick={() => moveItem(it.id, -1)} style={{ color: colors.inkSoft }}><ChevronUp size={14} /></button>
                     <button onClick={() => moveItem(it.id, 1)} style={{ color: colors.inkSoft }}><ChevronDown size={14} /></button>
@@ -18156,7 +18250,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 
           </>)}
 
-          {localDoc.type === "facture" && <PaymentsEditor doc={localDoc} totals={totals} onPatch={patch} disabled={isLocked || isViewer} />}
+          {(localDoc.type === "facture" || localDoc.type === "acompte") && <PaymentsEditor doc={localDoc} totals={totals} onPatch={patch} disabled={isLocked || isViewer} />}
 
           <div className="mt-8 flex flex-wrap items-start justify-between gap-8 border-t pt-8" style={{ borderColor: colors.line }}>
             <div className="flex flex-wrap gap-6">
@@ -18327,5 +18421,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

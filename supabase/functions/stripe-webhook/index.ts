@@ -67,13 +67,15 @@ serve(async (req) => {
         const { data: docsRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", "documents").eq("shared", false).maybeSingle();
         const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
         const docIndex = documents.findIndex((d: any) => d.id === documentId);
+        let fullyPaid = false;
         if (docIndex !== -1) {
           // Paiement ajouté à la liste des paiements reçus ; « payée » (avec
           // paidAt, date de la vente pour les indicateurs) si le total est couvert.
           documents[docIndex] = addOnlinePayment(documents[docIndex], session.id, Number(session.amount_total) || 0, new Date().toISOString());
+          fullyPaid = documents[docIndex].status === "payée";
           await dbAdmin.from("kv_store").update({ value: documents, updated_at: new Date().toISOString() }).eq("organization_id", organizationId).eq("key", "documents").eq("shared", false);
         }
-        if (linkId) await dbAdmin.from("public_document_links").update({ paid_at: new Date().toISOString() }).eq("id", linkId);
+        if (linkId) await dbAdmin.from("public_document_links").update({ payment_pending_at: null, ...(fullyPaid ? { paid_at: new Date().toISOString() } : {}) }).eq("id", linkId);
         return new Response(JSON.stringify({ received: true }), { headers: { "Content-Type": "application/json" } });
       }
 

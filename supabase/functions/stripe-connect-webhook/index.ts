@@ -36,16 +36,20 @@ async function markInvoicePaid(organizationId: string, documentId: string, linkI
   const { data: docsRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", "documents").eq("shared", false).maybeSingle();
   const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
   const docIndex = documents.findIndex((d: any) => d.id === documentId);
+  let fullyPaid = false;
   if (docIndex !== -1) {
     // Paiement ajouté à la liste des paiements reçus de la facture ;
     // « payée » (avec paidAt) quand le total est couvert.
     documents[docIndex] = addOnlinePayment(documents[docIndex], sessionId, amountCents, new Date().toISOString());
+    fullyPaid = documents[docIndex].status === "payée";
     const { error } = await dbAdmin.from("kv_store").update({ value: documents, updated_at: new Date().toISOString() }).eq("organization_id", organizationId).eq("key", "documents").eq("shared", false);
     if (error) console.error("Erreur de mise à jour de la facture payée :", error.message);
   } else {
     console.error("Facture payée introuvable :", organizationId, documentId);
   }
-  if (linkId) await dbAdmin.from("public_document_links").update({ paid_at: new Date().toISOString() }).eq("id", linkId);
+  // Lien public clôturé seulement une fois tout réglé ; verrou levé pour
+  // permettre un paiement suivant (règlement en plusieurs fois).
+  if (linkId) await dbAdmin.from("public_document_links").update({ payment_pending_at: null, ...(fullyPaid ? { paid_at: new Date().toISOString() } : {}) }).eq("id", linkId);
 }
 
 serve(async (req) => {

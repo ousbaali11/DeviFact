@@ -8,6 +8,7 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isPayableDoc } from "../_shared/totals.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -57,7 +58,7 @@ serve(async (req) => {
     // — y compris si la colonne n'existe pas encore — jamais : l'argent
     // d'une facture ne transite pas par le compte de la plateforme.
     const { data: orgRow } = await dbAdmin.from("organizations").select("stripe_account_id, stripe_charges_enabled").eq("id", link.organization_id).maybeSingle();
-    const onlinePaymentEnabled = doc.type === "facture" && !!orgRow?.stripe_account_id && orgRow?.stripe_charges_enabled === true;
+    const onlinePaymentEnabled = isPayableDoc(doc) && !!orgRow?.stripe_account_id && orgRow?.stripe_charges_enabled === true;
 
     return new Response(
       JSON.stringify({ document: doc, signedAt: link.signed_at, paidAt: link.paid_at, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled }),
