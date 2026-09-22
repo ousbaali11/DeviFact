@@ -115,7 +115,11 @@ describe("PDF et mentions", () => {
     expect(out).toContain("Prestation réalisée du 01 septembre 2026 au 05 septembre 2026");
     expect(out).toContain("D'après le devis N° DEV-014");
     expect(out).toContain("Chantier : 5 rue du Chantier, 13001 Marseille");
-    expect(out).toContain("Règlement : Virement bancaire — IBAN FR76 1234 5678 9012 · BIC AGRIFRPP.");
+    // Mode de règlement et IBAN : dans le bloc de paiement, plus dans les mentions légales
+    expect(out).toContain("Mode de règlement : Virement bancaire");
+    expect(out).toContain("IBAN : FR76 1234 5678 9012");
+    expect(out).toContain("BIC : AGRIFRPP");
+    expect(out).not.toContain("Règlement : Virement bancaire");
     expect(pdf({ ...fullFacture() })).toContain("Prestation réalisée le 01 septembre 2026");
     expect(legalMentionLines({ ...fullFacture(), company: { ...company, iban: "" } }).join(" ")).not.toContain("Règlement");
   });

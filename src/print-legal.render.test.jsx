@@ -65,9 +65,9 @@ describe("mentions légales sur le PDF (étape B)", () => {
     expect(withProfile[0]).toBe("SARL au capital de 5 000 € — RCS Lyon 123 456 789");
     expect(withProfile[1]).toContain("SMABTP");
   });
-  it("mention EI accolée au nom, dans l'en-tête et le bloc émetteur, sans doublon", () => {
+  it("mention EI accolée au nom, dans l'en-tête, le bloc émetteur et le pied de page, sans doublon", () => {
     const out = html(doc("devis", {}, { ...profile, name: "Jean Dupont", legalForm: "Micro-entreprise", capital: "", registration: "RM 69 123 456 789", entrepreneurIndividuel: true }));
-    expect(out.split("Jean Dupont EI").length - 1).toBe(2);
+    expect(out.split("Jean Dupont EI").length - 1).toBe(3); // en-tête, bloc émetteur, pied de page
     expect(out).toContain("Micro-entreprise EI — RM 69 123 456 789");
     const already = html(doc("devis", {}, { ...profile, name: "Jean Dupont EI", entrepreneurIndividuel: true }));
     expect(already).not.toContain("Jean Dupont EI EI");

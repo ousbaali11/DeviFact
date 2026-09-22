@@ -46,9 +46,12 @@ function computeTotalTTC(doc: any): number {
     const rate = String(it.tva ?? 20);
     tvaByRate[rate] = (tvaByRate[rate] || 0) + (lineHT * Number(rate)) / 100;
   }
-  const globalDiscount = Number(doc.globalDiscount) || 0;
-  const afterGlobal = totalHT * (1 - globalDiscount / 100);
-  const totalTVA = Object.values(tvaByRate).reduce((s, v) => s + v, 0) * (1 - globalDiscount / 100);
+  // Remise globale : en % (défaut) ou en montant HT (globalDiscountMode
+  // = "amount"), même règle que globalDiscountRate() côté site.
+  const discountValue = Math.max(0, Number(doc.globalDiscount) || 0);
+  const globalRate = doc.globalDiscountMode === "amount" ? (totalHT > 0 ? Math.min(1, discountValue / totalHT) : 0) : Math.min(100, discountValue) / 100;
+  const afterGlobal = totalHT * (1 - globalRate);
+  const totalTVA = Object.values(tvaByRate).reduce((s, v) => s + v, 0) * (1 - globalRate);
   return Math.round((afterGlobal + totalTVA) * 100) / 100;
 }
 

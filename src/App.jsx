@@ -879,6 +879,8 @@ function findClientByName(clients, name) {
 function emptyCompanyProfile() {
   return {
     type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false, googleReviewUrl: "", fiscalStartMonth: 1,
+    // Bloc de paiement et pied de page des factures : nom de la banque, code NAF.
+    bankName: "", naf: "",
     // Mentions légales imprimées sur les devis et factures (audit des champs,
     // étape A) : forme juridique, capital, immatriculation RCS/RM (art.
     // R123-237 C. com.), mention « EI » de l'entrepreneur individuel (art.
@@ -2105,6 +2107,8 @@ function newDocument(type, documents) {
     vatExemptionReason: "franchise",
     items: [emptyLine()],
     globalDiscount: 0,
+    // Remise globale : "percent" (valeur en %) ou "amount" (montant HT).
+    globalDiscountMode: "percent",
     acompte: 0,
     notes: "Merci de votre confiance.",
     signature: { mode: "texte", name: "", image: null, drawing: null },
@@ -2168,13 +2172,31 @@ function newDocument(type, documents) {
 // Totaux d'un document à lignes de prix. La remise globale (en %) est
 // appliquée sur le total HT des lignes ; la TVA est calculée sur le
 // total HT après remise. Sans remise, subtotalHTBrut === subtotalHT.
+// Remise globale : en % (mode "percent", valeur par défaut des anciens
+// documents) ou en montant HT (mode "amount"). Renvoie le taux effectif
+// (0 à 1) appliqué à chaque ligne — en montant, il est réparti au prorata
+// sur les lignes, ce qui garde la TVA juste par taux.
+function globalDiscountRate(doc) {
+  const value = Math.max(0, Number(doc?.globalDiscount) || 0);
+  if (doc?.globalDiscountMode === "amount") {
+    const brut = (doc.items || []).filter((i) => i.type === "line").reduce((sum, l) => sum + lineBaseHT(l) * (1 - (Number(l.discount) || 0) / 100), 0);
+    return brut > 0 ? Math.min(1, value / brut) : 0;
+  }
+  return Math.min(100, value) / 100;
+}
+// Libellé de la ligne de remise : « Remise (10 %) » ou « Remise globale ».
+function globalDiscountLabel(doc, pct) {
+  if (doc?.globalDiscountMode === "amount") return "Remise globale";
+  return `Remise (${Math.round(pct * 100) / 100} %)`;
+}
 function computeTotals(doc) {
   const lineItems = (doc.items || []).filter((i) => i.type === "line");
-  const globalDiscountPct = Math.min(100, Math.max(0, Number(doc.globalDiscount) || 0));
+  const globalRate = globalDiscountRate(doc);
+  const globalDiscountPct = globalRate * 100;
   const computedLines = lineItems.map((l) => {
     const base = lineBaseHT(l);
     const afterLine = base * (1 - (Number(l.discount) || 0) / 100);
-    const afterGlobal = afterLine * (1 - globalDiscountPct / 100);
+    const afterGlobal = afterLine * (1 - globalRate);
     return { ...l, totalHTBrut: afterLine, totalHT: afterGlobal };
   });
   const subtotalHTBrut = computedLines.reduce((s, l) => s + l.totalHTBrut, 0);
@@ -2298,6 +2320,8 @@ const PUBLIC_QR_OPTIONS = { margin: 0, width: 300, errorCorrectionLevel: "M", co
 
 // Mentions d'exonération de TVA imprimées sur le PDF classique quand une
 // ligne est à 0 % (mêmes textes que le XML Factur-X, voir facturx.ts).
+// Tampon « PAYÉ » et montant à zéro d'une facture réglée.
+const PAID_GREEN = "#2E7D4F";
 const VAT_EXEMPTION_TEXTS = {
   franchise: "TVA non applicable, art. 293 B du CGI.",
   export: "Exonération de TVA, art. 262 I du CGI (exportation hors Union européenne).",
@@ -2307,7 +2331,7 @@ const VAT_EXEMPTION_TEXTS = {
 // Champs du profil entreprise portant les mentions légales (audit des champs,
 // étape B) : lus sur la copie du profil enregistrée dans le document, sinon
 // sur le profil courant (documents créés avant l'étape A).
-const LEGAL_COMPANY_FIELDS = ["legalForm", "capital", "registration", "entrepreneurIndividuel", "insuranceName", "insurancePolicy", "insuranceZone", "mediatorName", "mediatorContact", "vatOnDebits", "iban", "bic"];
+const LEGAL_COMPANY_FIELDS = ["legalForm", "capital", "registration", "entrepreneurIndividuel", "insuranceName", "insurancePolicy", "insuranceZone", "mediatorName", "mediatorContact", "vatOnDebits", "iban", "bic", "bankName", "naf"];
 function legalCompanyOf(docCompany, companyProfile) {
   const out = { ...(docCompany || {}) };
   for (const f of LEGAL_COMPANY_FIELDS) {
@@ -2332,7 +2356,10 @@ function companyDisplayName(co) {
 //     ces mentions restent à la main de l'artisan, dans ses conditions ou ses notes ;
 //   * TVA : motif d'exonération si une ligne est à 0 %, option débits ;
 //   * médiateur de la consommation pour un client particulier (art. L616-1 C. conso).
-function legalMentionLines(doc, companyProfile) {
+// options.identity = false : sans la ligne forme / capital / immatriculation
+// (imprimée ailleurs) ; options.payment = false : sans la ligne de règlement.
+function legalMentionLines(doc, companyProfile, options = {}) {
+  const { identity = true, payment = true } = options;
   if (!doc || !["devis", "facture", "acompte", "avoir"].includes(doc.type)) return [];
   const co = legalCompanyOf(doc.company, companyProfile);
   const isCompany = co.type !== "particulier";
@@ -2342,7 +2369,7 @@ function legalMentionLines(doc, companyProfile) {
   if (isCompany) {
     const form = companyLegalFormLabel(co);
     const reg = (co.registration || "").trim();
-    if (form || reg) lines.push([form, reg].filter(Boolean).join(" — "));
+    if (identity && (form || reg)) lines.push([form, reg].filter(Boolean).join(" — "));
     const ins = companyInsuranceLabel(co);
     if (ins) lines.push(`Assurance décennale et responsabilité civile professionnelle : ${ins}.`);
   }
@@ -2351,7 +2378,7 @@ function legalMentionLines(doc, companyProfile) {
   if ((isInvoice || doc.type === "avoir") && co.vatOnDebits) lines.push("TVA acquittée d'après les débits.");
   // Mode de règlement et coordonnées bancaires (facultatif, mais l'IBAN
   // imprimé évite les erreurs de virement).
-  if (isInvoice) {
+  if (isInvoice && payment) {
     const method = (doc.paymentMethod || "").trim();
     const iban = (co.iban || "").trim();
     if (method || iban) lines.push(`Règlement${method ? ` : ${method}` : ""}${iban ? ` — IBAN ${iban}${(co.bic || "").trim() ? ` · BIC ${co.bic.trim()}` : ""}` : ""}.`);
@@ -2388,14 +2415,37 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   const signatureCaption = doc.type === "commande" ? "Validation de l'acheteur" : doc.type === "livraison" ? "Réception par le client" : "";
   // Facture et facture d'acompte : échéance de règlement ; autres : validité.
   const isInvoiceLike = doc.type === "facture" || doc.type === "acompte";
-  const legalLines = legalMentionLines(doc, companyProfile);
+  // Bloc de paiement (facture et facture d'acompte) : « À payer », montant
+  // payé, échéance, mode de règlement, banque, BIC, IBAN, paiements reçus.
+  // Le pied de page reprend l'identité de l'entreprise : ces deux blocs
+  // remplacent les lignes correspondantes des mentions légales.
+  const legalCo = legalCompanyOf(doc.company, companyProfile);
+  const showPayment = isInvoiceLike && !hidePrices;
+  const isPaid = isInvoiceLike && doc.status === "payée";
+  const paidBefore = doc.type === "facture" ? totals.acompteVerse || 0 : 0;
+  const amountToPay = isPaid ? 0 : doc.type === "facture" ? totals.montantARegler : totalTTC;
+  const amountPaid = isPaid ? totalTTC : paidBefore;
+  const paidDate = doc.paidAt ? new Date(doc.paidAt).toLocaleDateString("fr-FR") : "";
+  const paymentsReceived = [];
+  if (paidBefore > 0) paymentsReceived.push({ amount: paidBefore, label: "Acompte versé" });
+  if (isPaid) paymentsReceived.push({ amount: Math.max(0, totalTTC - paidBefore), date: paidDate, label: (doc.paymentMethod || "").trim() });
+  const dueLabel = (Number(doc.dueDays) || 0) > 0 ? frLong(dueDate) : "À réception";
+  const footerParts = legalCo.type !== "particulier" ? [
+    companyDisplayName(legalCo),
+    [legalCo.address, [legalCo.postalCode, legalCo.city].filter(Boolean).join(" ")].filter((p) => (p || "").trim()).join(", "),
+    [companyLegalFormLabel(legalCo), (legalCo.registration || "").trim()].filter(Boolean).join(" — "),
+    (legalCo.naf || "").trim() ? `NAF : ${legalCo.naf.trim()}` : "",
+    (legalCo.siret || "").trim() ? `SIRET : ${legalCo.siret.trim()}` : "",
+    (legalCo.tva || "").trim() ? `TVA : ${legalCo.tva.trim()}` : "",
+  ].filter(Boolean) : [];
+  const legalLines = legalMentionLines(doc, companyProfile, { identity: footerParts.length === 0, payment: !showPayment });
   const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
     fontFamily: "'Inter', sans-serif", color: ink, fontSize: "10.5pt", lineHeight: 1.4,
     background: pageBg,
     width: "210mm", minHeight: "294mm", boxSizing: "border-box",
-    padding: "24px 28px", position: "relative", overflow: "hidden",
+    padding: "24px 28px 48px", position: "relative", overflow: "hidden",
   };
 
   return (
@@ -2572,7 +2622,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
               </tr>
             )
           ) : (() => {
-            const lineHT = lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(doc.globalDiscount) || 0) / 100);
+            const lineHT = lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (totals.globalDiscountPct || 0) / 100);
             const lineTVA = (lineHT * (Number(it.tva) || 0)) / 100;
             return (
               <tr key={it.id} style={{ pageBreakInside: "avoid", borderBottom: `1px solid ${line}`, background: idx % 2 ? "transparent" : "rgba(27,42,51,0.02)" }}>
@@ -2635,7 +2685,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
                   <span>Total HT</span><span style={mono}>{formatMoney(totals.subtotalHTBrut, doc.currency)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: brassDark }}>
-                  <span>Remise ({totals.globalDiscountPct} %)</span><span style={mono}>- {formatMoney(totals.globalDiscountAmount, doc.currency)}</span>
+                  <span>{globalDiscountLabel(doc, totals.globalDiscountPct)}</span><span style={mono}>- {formatMoney(totals.globalDiscountAmount, doc.currency)}</span>
                 </div>
               </>
             )}
@@ -2672,6 +2722,33 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
           </div>
         )}
       </div>
+
+      {/* Facture : bloc de paiement à gauche, tampon PAYÉ à droite une fois réglée */}
+      {showPayment && (
+        <div className="print-payment" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "24px", marginTop: "16px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
+          <div style={{ flex: "0 0 60%", fontSize: "9pt", lineHeight: 1.55 }}>
+            <div>À payer : <strong style={{ ...mono, fontSize: "13pt", color: isPaid ? PAID_GREEN : ink }}>{formatMoney(amountToPay, doc.currency)}</strong></div>
+            <div>Montant payé : <strong style={mono}>{formatMoney(amountPaid, doc.currency)}</strong></div>
+            <div>Date limite de règlement : <strong>{dueLabel}</strong></div>
+            <div>Mode de règlement : <strong>{(doc.paymentMethod || "").trim() || "—"}</strong></div>
+            {(legalCo.bankName || "").trim() && <div>Banque : <strong>{legalCo.bankName.trim()}</strong></div>}
+            {(legalCo.bic || "").trim() && <div>BIC : <strong style={mono}>{legalCo.bic.trim()}</strong></div>}
+            {(legalCo.iban || "").trim() && <div>IBAN : <strong style={mono}>{legalCo.iban.trim()}</strong></div>}
+            <div style={{ marginTop: "6px", fontSize: "7.5pt", textTransform: "uppercase", letterSpacing: "0.04em", color: inkSoft }}>Paiements reçus</div>
+            <div style={{ border: `1px solid ${line}`, borderRadius: "3px", padding: "5px 8px", marginTop: "2px" }}>
+              {paymentsReceived.length === 0
+                ? <span style={{ color: inkSoft }}>Aucun paiement reçu à ce jour.</span>
+                : paymentsReceived.map((p, i) => <div key={i}><span style={mono}>{formatMoney(p.amount, doc.currency)}</span>{p.date ? ` le ${p.date}` : ""}{p.label ? ` - ${p.label}` : ""}</div>)}
+            </div>
+          </div>
+          {isPaid && (
+            <div className="print-paid-stamp" style={{ transform: "rotate(-12deg)", border: `3px double ${PAID_GREEN}`, borderRadius: "8px", padding: "6px 22px", color: PAID_GREEN, textAlign: "center", opacity: 0.9, marginRight: "24px" }}>
+              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "24pt", fontWeight: 700, letterSpacing: "0.2em", lineHeight: 1.1 }}>PAYÉ</div>
+              {paidDate && <div style={{ ...mono, fontSize: "8pt", marginTop: "2px" }}>le {paidDate}</div>}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* QR code du lien public — bas à gauche (devis/factures uniquement)
           — et signature — bas à droite, uniquement si une signature existe */}
@@ -2710,6 +2787,14 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
             )}
           </div>
           )}
+        </div>
+      )}
+
+      {/* Pied de page : identité de l'entreprise (nom, adresse, forme et
+          capital, immatriculation, NAF, SIRET, TVA), centrée tout en bas */}
+      {footerParts.length > 0 && (
+        <div className="print-footer" style={{ position: "absolute", left: "28px", right: "28px", bottom: "14px", textAlign: "center", fontSize: "7.5pt", lineHeight: 1.35, color: inkSoft, borderTop: `1px solid ${line}`, paddingTop: "6px", zIndex: 1 }}>
+          {footerParts.join(" · ")}
         </div>
       )}
     </div>
@@ -14703,7 +14788,9 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
             {profile.phone && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Téléphone</dt><dd>{profile.phone}</dd></div>}
             {profile.googleReviewUrl && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Avis Google</dt><dd className="break-all">{profile.googleReviewUrl}</dd></div>}
             {(profile.postalCode || profile.city) && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>CP / Ville</dt><dd>{[profile.postalCode, profile.city].filter(Boolean).join(" ")}</dd></div>}
+            {profile.bankName && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Banque</dt><dd>{profile.bankName}</dd></div>}
             {profile.iban && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>IBAN</dt><dd className="df-mono">{profile.iban}{profile.bic ? ` — BIC ${profile.bic}` : ""}</dd></div>}
+            {profile.type !== "particulier" && profile.naf && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>Code NAF</dt><dd>{profile.naf}</dd></div>}
             {profile.vatOnDebits && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>TVA</dt><dd>Option pour le paiement d'après les débits</dd></div>}
             {profile.type !== "particulier" && profile.siret && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>SIRET</dt><dd>{profile.siret}</dd></div>}
             {profile.type !== "particulier" && profile.tva && <div className="flex gap-2"><dt className="w-24 shrink-0" style={{ color: colors.inkSoft }}>N° TVA</dt><dd>{profile.tva}</dd></div>}
@@ -14847,8 +14934,16 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
           )}
           <div className="rounded-lg p-3" style={{ background: colors.paper }}>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Facturation électronique (Factur-X)</div>
-            <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Coordonnées de paiement et option de TVA reprises dans les factures électroniques — sans effet sur le PDF classique.</p>
+            <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Coordonnées de paiement reprises dans le bloc « À payer » des factures (PDF) et dans les factures électroniques ; option de TVA pour Factur-X.</p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Banque</label>
+                <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : CIC Valenton" value={local.bankName || ""} onChange={(e) => patch({ bankName: e.target.value })} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Code NAF / APE</label>
+                <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : 4332A" value={local.naf || ""} onChange={(e) => patch({ naf: e.target.value })} />
+              </div>
               <div>
                 <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>IBAN</label>
                 <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="FR76 ..." value={local.iban || ""} onChange={(e) => patch({ iban: e.target.value })} />
@@ -17061,7 +17156,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       rows.push([]);
       if (globalDiscountPct > 0 && globalDiscountAmount > 0) {
         rows.push(["", "", "", "", "", "", "Total HT", Number(subtotalHTBrut.toFixed(2))]);
-        rows.push(["", "", "", "", "", "", `Remise (${globalDiscountPct} %)`, -Number(globalDiscountAmount.toFixed(2))]);
+        rows.push(["", "", "", "", "", "", globalDiscountLabel(localDoc, globalDiscountPct), -Number(globalDiscountAmount.toFixed(2))]);
         rows.push(["", "", "", "", "", "", "Total HT après remise", Number(subtotalHT.toFixed(2))]);
       } else {
         rows.push(["", "", "", "", "", "", "Total HT", Number(subtotalHT.toFixed(2))]);
@@ -17881,7 +17976,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   <div className="w-24 text-xs">
                     <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Total HT</span>
                     <div className="df-mono py-1.5 text-right text-sm font-medium">
-                      {formatMoney(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (Number(localDoc.globalDiscount) || 0) / 100), localDoc.currency)}
+                      {formatMoney(lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (globalDiscountPct || 0) / 100), localDoc.currency)}
                     </div>
                   </div>
                   <div className="no-print flex w-24 shrink-0 justify-end gap-1 pt-1.5">
@@ -17944,8 +18039,14 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           <div className="mt-8 flex flex-wrap items-start justify-between gap-8 border-t pt-8" style={{ borderColor: colors.line }}>
             <div className="flex flex-wrap gap-6">
               <label className="text-sm">
-                <div className="mb-1" style={{ color: colors.inkSoft }}>Remise globale (%)</div>
-                <input type="number" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.globalDiscount} onChange={(e) => patch({ globalDiscount: e.target.value })} />
+                <div className="mb-1" style={{ color: colors.inkSoft }}>Remise globale</div>
+                <div className="flex items-center gap-1">
+                  <input type="number" min="0" step="0.01" className="df-input df-mono w-28 rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.globalDiscount} onChange={(e) => patch({ globalDiscount: e.target.value })} />
+                  <select className="df-select rounded-md px-2 py-1.5" style={inputStyle} value={localDoc.globalDiscountMode === "amount" ? "amount" : "percent"} onChange={(e) => patch({ globalDiscountMode: e.target.value })} title="Remise en pourcentage ou en montant HT">
+                    <option value="percent">%</option>
+                    <option value="amount">{currencyLabel(localDoc.currency || "EUR")} HT</option>
+                  </select>
+                </div>
               </label>
               {localDoc.type === "facture" ? (
                 <label className="text-sm">
@@ -17980,7 +18081,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                 {globalDiscountPct > 0 && globalDiscountAmount > 0 ? (
                   <>
                     <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Total HT</span><span>{formatMoney(subtotalHTBrut, localDoc.currency)}</span></div>
-                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Remise ({globalDiscountPct} %)</span><span>- {formatMoney(globalDiscountAmount, localDoc.currency)}</span></div>
+                    <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>{globalDiscountLabel(localDoc, globalDiscountPct)}</span><span>- {formatMoney(globalDiscountAmount, localDoc.currency)}</span></div>
                     <div className="flex justify-between gap-8 font-semibold"><span style={{ color: colors.inkSoft }}>Total HT après remise</span><span>{formatMoney(subtotalHT, localDoc.currency)}</span></div>
                   </>
                 ) : (
@@ -18103,5 +18204,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

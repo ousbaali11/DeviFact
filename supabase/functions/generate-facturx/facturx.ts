@@ -228,7 +228,16 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   // ligne est arrondie au centime avant d'être additionnée (règle
   // BR-CO-10 de la norme : le total est la somme des lignes affichées).
   const items: any[] = Array.isArray(doc.items) ? doc.items : [];
-  const globalDiscount = Number(doc.globalDiscount) || 0;
+  // Remise globale : en % (défaut) ou en montant HT (globalDiscountMode =
+  // "amount"), répartie au prorata des lignes — même règle que
+  // globalDiscountRate() côté site.
+  const lineNetOf = (it: any) => {
+    const detailsSum = (Array.isArray(it.details) ? it.details : []).filter((d: any) => d?.included).reduce((s: number, d: any) => s + (Number(d.price) || 0), 0);
+    return ((Number(it.qty) || 0) * (Number(it.unitPrice) || 0) + detailsSum) * (1 - (Number(it.discount) || 0) / 100);
+  };
+  const brutHT = items.filter((it) => it && it.type === "line").reduce((s, it) => s + lineNetOf(it), 0);
+  const discountValue = Math.max(0, Number(doc.globalDiscount) || 0);
+  const globalRate = doc.globalDiscountMode === "amount" ? (brutHT > 0 ? Math.min(1, discountValue / brutHT) : 0) : Math.min(100, discountValue) / 100;
   const lines: FxLine[] = [];
   let lineIndex = 0;
   for (const it of items) {
@@ -238,7 +247,7 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
     const detailsSum = (Array.isArray(it.details) ? it.details : []).filter((d: any) => d?.included).reduce((s: number, d: any) => s + (Number(d.price) || 0), 0);
     const base = qty * (Number(it.unitPrice) || 0) + detailsSum;
     const afterLine = base * (1 - (Number(it.discount) || 0) / 100);
-    const lineTotal = round2(afterLine * (1 - globalDiscount / 100));
+    const lineTotal = round2(afterLine * (1 - globalRate));
     const rate = Number(it.tva) || 0;
     if (rate < 0 || rate > 100) missing.push(`Ligne ${lineIndex} : taux de TVA invalide (${rate})`);
     // Taux admis par les règles françaises (BR-FR-16) : métropole, DOM,
