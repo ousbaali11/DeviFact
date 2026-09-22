@@ -13,7 +13,7 @@ import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
   ArrowRightLeft, Eraser, ChevronUp, ChevronDown, LayoutList, ArrowLeft, TrendingUp, Info, Minus,
   Search, FileText, Receipt, Copy, Loader2, Inbox, Check, Users, Building2,
-  Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail,
+  Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail, Landmark,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
   Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Mic, Sun, Moon, Link2,
@@ -2683,7 +2683,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
               <div style={{ width: "2cm" }}>
                 <img src={publicQr.dataUrl} alt="QR code" style={{ width: "2cm", height: "2cm", display: "block" }} />
                 <div style={{ fontSize: "6.5pt", color: inkSoft, marginTop: "3px", lineHeight: 1.2, textAlign: "center" }}>
-                  {doc.type === "facture" ? "Scannez pour payer en ligne" : "Scannez pour signer en ligne"}
+                  {doc.type === "facture" ? "Scannez pour consulter en ligne" : "Scannez pour signer en ligne"}
                 </div>
               </div>
             )}
@@ -5502,7 +5502,7 @@ export default function DeviFactApp() {
 // besoin d'un compte. Permet de consulter un devis/facture, de le
 // signer, ou de le payer en ligne selon son type et son statut.
 function PublicDocumentView({ token }) {
-  const [state, setState] = useState({ loading: true, error: null, document: null, siteName: "", signedAt: null, paidAt: null });
+  const [state, setState] = useState({ loading: true, error: null, document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
   const [signatureName, setSignatureName] = useState("");
   const [secondSigner, setSecondSigner] = useState(false);
   const [secondSignatureName, setSecondSignatureName] = useState("");
@@ -5563,9 +5563,11 @@ function PublicDocumentView({ token }) {
         const { data, error } = await db.functions.invoke("get-public-document", { body: { token } });
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
-        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt });
+        // Paiement en ligne : uniquement si le serveur l'annonce (compte
+        // Stripe connecté et actif pour cet artisan) — jamais par défaut.
+        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true });
       } catch (err) {
-        setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null });
+        setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
       }
     })();
   }, [token]);
@@ -5717,8 +5719,18 @@ function PublicDocumentView({ token }) {
               </div>
             )}
 
-            {/* Paiement — uniquement pour une facture pas encore payée */}
-            {state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && (
+            {/* Paiement — uniquement pour une facture pas encore payée, et
+                seulement si le paiement en ligne est disponible pour cet
+                artisan (compte Stripe connecté et actif) ; sinon, virement. */}
+            {state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && !state.onlinePayment && (
+              <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
+                <p className="flex items-start gap-2 text-sm" style={{ color: colors.inkSoft }}>
+                  <Landmark size={16} className="mt-0.5 shrink-0" style={{ color: colors.slate }} />
+                  <span>Règlement par virement bancaire : les coordonnées (IBAN) figurent sur la facture. Le paiement en ligne n'est pas disponible pour cette facture.</span>
+                </p>
+              </div>
+            )}
+            {state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && state.onlinePayment && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
                 {payError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{payError}</p>}
                 <button onClick={handlePay} disabled={payLoading} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.moss, opacity: payLoading ? 0.7 : 1 }}>
@@ -16780,8 +16792,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <FileSpreadsheet size={15} /> Excel
           </button>
           {(localDoc.type === "devis" || localDoc.type === "facture") && (
-            <button onClick={generatePublicLink} disabled={publicLinkState.loading} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: publicLinkState.loading ? 0.7 : 1 }} title={localDoc.type === "devis" ? "Créer un lien pour que le client signe en ligne, sans compte" : "Créer un lien pour que le client paie en ligne, sans compte"}>
-              {publicLinkState.loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />} {publicLinkState.loading ? "Génération…" : localDoc.type === "devis" ? "Lien de signature" : "Lien de paiement"}
+            <button onClick={generatePublicLink} disabled={publicLinkState.loading} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: publicLinkState.loading ? 0.7 : 1 }} title={localDoc.type === "devis" ? "Créer un lien pour que le client signe en ligne, sans compte" : "Créer un lien pour que le client consulte la facture en ligne, sans compte"}>
+              {publicLinkState.loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />} {publicLinkState.loading ? "Génération…" : localDoc.type === "devis" ? "Lien de signature" : "Lien de la facture"}
             </button>
           )}
           <button onClick={enterPresentation} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }} title="Afficher le document seul en plein écran, pour le présenter au client (Échap pour quitter)">
@@ -17720,5 +17732,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

@@ -52,8 +52,15 @@ serve(async (req) => {
 
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name, logo_url").limit(1).maybeSingle();
 
+    // Paiement en ligne : désactivé pour tout le monde tant que Stripe
+    // Connect n'est pas en place — l'argent d'une facture ne doit jamais
+    // transiter par le compte Stripe de la plateforme. Deviendra
+    // « compte Stripe connecté et actif pour cette organisation »
+    // (organizations.stripe_charges_enabled) avec Stripe Connect.
+    const onlinePaymentEnabled = false;
+
     return new Response(
-      JSON.stringify({ document: doc, signedAt: link.signed_at, paidAt: link.paid_at, siteName: settingsRow?.name || "Chantiflow" }),
+      JSON.stringify({ document: doc, signedAt: link.signed_at, paidAt: link.paid_at, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {

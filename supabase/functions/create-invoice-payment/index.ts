@@ -17,6 +17,15 @@ const dbAdmin = createClient(
 );
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
+// Paiement en ligne désactivé pour tout le monde tant que Stripe Connect
+// n'est pas en place : une session de paiement créée ici encaisserait
+// l'argent de l'artisan sur le compte Stripe de la plateforme. Même
+// garde-fou côté serveur que le masquage du bouton sur la page publique
+// (get-public-document), pour qu'un appel direct ne puisse pas le
+// contourner. Deviendra « organizations.stripe_charges_enabled » avec
+// Stripe Connect.
+const ONLINE_PAYMENT_ENABLED = false;
+
 function computeTotalTTC(doc: any): number {
   const items = Array.isArray(doc.items) ? doc.items : [];
   let totalHT = 0;
@@ -45,6 +54,9 @@ serve(async (req) => {
     const { token } = await req.json();
     if (!token) {
       return new Response(JSON.stringify({ error: "Lien invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (!ONLINE_PAYMENT_ENABLED) {
+      return new Response(JSON.stringify({ error: "Le paiement en ligne n'est pas disponible pour cette facture. Merci de régler par virement (coordonnées bancaires sur la facture)." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const { data: link } = await dbAdmin.from("public_document_links").select("id, organization_id, document_id, paid_at, payment_pending_at").eq("token", token).maybeSingle();
