@@ -56,7 +56,7 @@ describe("PDF de facture : bloc de paiement", () => {
     expect(out).toContain("Paiements reçus");
     expect(out).toContain("Aucun paiement reçu à ce jour.");
     expect(html).not.toContain("print-paid-stamp");
-    expect(out).not.toContain("PAYÉ");
+    expect(html).not.toContain("PAYÉ");
     // La ligne de règlement des mentions légales n'est plus répétée
     expect(out).not.toContain("Règlement : Carte bancaire");
   });
@@ -67,8 +67,12 @@ describe("PDF de facture : bloc de paiement", () => {
     const html = pdf(facture({ status: "payée", paidAt: "2026-09-21T10:00:00.000Z" }));
     const out = textOf(html);
     expect(html).toContain("print-paid-stamp");
-    expect(out).toContain("PAYÉ");
-    expect(out).toContain("le 21/09/2026");
+    // Tampon = image SVG autonome (cadre + texte + date dessinés ensemble)
+    const src = decodeURIComponent(html.match(/class="print-paid-stamp" src="([^"]+)"/)[1]);
+    expect(src).toContain("<svg");
+    expect(src).toContain(">PAYÉ<");
+    expect(src).toContain("le 21/09/2026");
+    expect(html).toContain('alt="PAYÉ le 21/09/2026"');
     expect(out).toContain("À payer : 0,00 €");
     expect(out).toContain("Montant payé : 532,67 €");
     expect(out).toContain("532,67 € le 21/09/2026 - Carte bancaire");

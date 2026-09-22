@@ -2322,6 +2322,23 @@ const PUBLIC_QR_OPTIONS = { margin: 0, width: 300, errorCorrectionLevel: "M", co
 // ligne est à 0 % (mêmes textes que le XML Factur-X, voir facturx.ts).
 // Tampon « PAYÉ » et montant à zéro d'une facture réglée.
 const PAID_GREEN = "#2E7D4F";
+// Le tampon est une image SVG autonome (cadre, texte et date dessinés
+// ensemble, rotation incluse) : une rotation CSS sur du texte HTML est mal
+// rendue à la génération du PDF (texte décalé dans le cadre).
+function paidStampSvg(dateText) {
+  const date = dateText ? `<text x="110" y="84" font-size="10" font-family="Courier New, monospace">le ${dateText}</text>` : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="120" viewBox="0 0 220 120">
+  <g transform="rotate(-12 110 60)" fill="none" stroke="${PAID_GREEN}">
+    <rect x="22" y="22" width="176" height="76" rx="9" stroke-width="3"/>
+    <rect x="28" y="28" width="164" height="64" rx="6" stroke-width="1.5"/>
+  </g>
+  <g transform="rotate(-12 110 60)" fill="${PAID_GREEN}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">
+    <text x="110" y="${dateText ? 63 : 70}" font-size="30" font-weight="700" letter-spacing="5">PAYÉ</text>
+    ${date}
+  </g>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
 const VAT_EXEMPTION_TEXTS = {
   franchise: "TVA non applicable, art. 293 B du CGI.",
   export: "Exonération de TVA, art. 262 I du CGI (exportation hors Union européenne).",
@@ -2742,10 +2759,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
             </div>
           </div>
           {isPaid && (
-            <div className="print-paid-stamp" style={{ transform: "rotate(-12deg)", border: `3px double ${PAID_GREEN}`, borderRadius: "8px", padding: "6px 22px", color: PAID_GREEN, textAlign: "center", opacity: 0.9, marginRight: "24px" }}>
-              <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "24pt", fontWeight: 700, letterSpacing: "0.2em", lineHeight: 1.1 }}>PAYÉ</div>
-              {paidDate && <div style={{ ...mono, fontSize: "8pt", marginTop: "2px" }}>le {paidDate}</div>}
-            </div>
+            <img className="print-paid-stamp" src={paidStampSvg(paidDate)} alt={`PAYÉ${paidDate ? ` le ${paidDate}` : ""}`} style={{ width: "220px", height: "120px", marginRight: "12px", opacity: 0.92 }} />
           )}
         </div>
       )}
