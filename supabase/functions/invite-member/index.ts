@@ -35,8 +35,15 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Non connecté" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { email, role, organizationId: requestedOrgId } = await req.json();
+    const { email, role, organizationId: requestedOrgId, fullName, jobTitle, phone } = await req.json();
     const cleanEmail = String(email || "").trim().toLowerCase();
+    // Profil de l'employé (facultatif) : nom complet, poste ou spécialité,
+    // téléphone — enregistrés sur l'appartenance, modifiables ensuite
+    // depuis la page Équipe.
+    const cleanText = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max) || null;
+    const cleanFullName = cleanText(fullName, 120);
+    const cleanJobTitle = cleanText(jobTitle, 120);
+    const cleanPhone = cleanText(phone, 40);
     const cleanRole = ["owner", "editor", "viewer", "comptable"].includes(role) ? role : "editor";
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return new Response(JSON.stringify({ error: "Email invalide" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -118,6 +125,9 @@ serve(async (req) => {
       user_id: memberUserId,
       role: cleanRole,
       status: "active",
+      full_name: cleanFullName,
+      job_title: cleanJobTitle,
+      phone: cleanPhone,
     });
     if (insertError) {
       console.error("Erreur d'ajout du membre :", insertError.message);

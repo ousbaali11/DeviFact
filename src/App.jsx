@@ -1467,6 +1467,8 @@ function newRapportInterventionDocument(documents) {
     adresseIntervention: "",
     typeIntervention: "depannage", // depannage | entretien | sav | diagnostic
     technicien: "",
+    // Membre de l'équipe choisi comme technicien (user_id), null en saisie libre.
+    technicienMemberId: null,
     heureArrivee: "", heureDepart: "",
     motifAppel: "",
     diagnostic: "",
@@ -1619,6 +1621,8 @@ function newPlanningChantierDocument(documents) {
     objet: "",
     adresseChantier: "",
     responsable: "",
+    // Membre de l'équipe choisi comme responsable (user_id), null en saisie libre.
+    responsableMemberId: null,
     taches: [emptyTachePlanning()],
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
@@ -9361,8 +9365,71 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
   );
 });
 
+// Nom affiché d'un membre de l'équipe : nom complet renseigné dans la page
+// Équipe, sinon son e-mail.
+function memberDisplayName(m) {
+  return String(m?.full_name || "").trim() || m?.email || "Membre";
+}
+// Membres actifs de l'organisation, pour les listes déroulantes
+// « technicien » (rapport) et « responsable » (planning). Liste vide tant
+// que la base n'a pas répondu, ou en cas d'erreur : le champ redevient
+// alors un simple texte libre.
+function useOrgMembers(organizationId) {
+  const [members, setMembers] = useState([]);
+  useEffect(() => {
+    if (!organizationId) { setMembers([]); return; }
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => db.rpc("get_organization_members_with_profiles", { org_id: organizationId }))
+      .then(({ data, error }) => {
+        if (error || cancelled) return;
+        setMembers((data || []).filter((m) => m.status === "active").map((m) => ({ userId: m.user_id, label: memberDisplayName(m), jobTitle: m.job_title || "", phone: m.phone || "" })));
+      })
+      .catch((err) => console.warn("Membres de l'équipe non chargés (saisie libre)", err));
+    return () => { cancelled = true; };
+  }, [organizationId]);
+  return members;
+}
+// Champ « membre de l'équipe ou saisie libre » : liste des membres actifs
+// avec « Autre… » qui rouvre le texte libre. Le document garde toujours le
+// nom en texte (value) — c'est lui qui est imprimé et contrôlé ; memberId
+// n'est qu'un repère. Un ancien document avec un nom saisi à la main
+// s'affiche en « Autre… » avec son texte, sans rien bloquer. Sans membre
+// chargé, simple champ texte comme avant.
+function TeamMemberField({ members, value, memberId, onChange, required = false }) {
+  const [other, setOther] = useState(false);
+  const text = value || "";
+  const missing = required && !text.trim();
+  const border = `1px solid ${missing ? colors.brick : colors.line}`;
+  if (!members.length) {
+    return <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border }} value={text} onChange={(e) => onChange({ value: e.target.value, memberId: null })} />;
+  }
+  const selected = memberId ? members.find((m) => m.userId === memberId) : null;
+  const mode = selected ? selected.userId : other || text.trim() ? "autre" : "";
+  function choose(v) {
+    if (v === "autre") { setOther(true); onChange({ value: selected ? "" : text, memberId: null }); return; }
+    setOther(false);
+    if (!v) { onChange({ value: "", memberId: null }); return; }
+    const m = members.find((x) => x.userId === v);
+    onChange({ value: m ? m.label : "", memberId: v });
+  }
+  return (
+    <div className="space-y-2">
+      <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={{ border }} value={mode} onChange={(e) => choose(e.target.value)}>
+        <option value="">Choisir un membre de l'équipe…</option>
+        {members.map((m) => <option key={m.userId} value={m.userId}>{m.label}{m.jobTitle ? ` — ${m.jobTitle}` : ""}</option>)}
+        <option value="autre">Autre… (saisie libre)</option>
+      </select>
+      {mode === "autre" && (
+        <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border }} value={text} placeholder="Nom de la personne" onChange={(e) => onChange({ value: e.target.value, memberId: null })} />
+      )}
+    </div>
+  );
+}
+
 function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
+  const members = useOrgMembers(account?.organizationId);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
   const pendingPatchRef = useRef(null);
@@ -9566,7 +9633,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Technicien *</label>
-              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.technicien || "").trim() ? colors.line : colors.brick}` }} value={localDoc.technicien || ""} onChange={(e) => patch({ technicien: e.target.value })} />
+              <TeamMemberField members={members} value={localDoc.technicien || ""} memberId={localDoc.technicienMemberId || null} required onChange={(v) => patch({ technicien: v.value, technicienMemberId: v.memberId })} />
               <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires ; le motif de l'appel ou les travaux réalisés doivent aussi être renseignés.</p>
             </div>
           </div>
@@ -10505,6 +10572,7 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
 
 function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
+  const members = useOrgMembers(account?.organizationId);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
   const pendingPatchRef = useRef(null);
@@ -10683,7 +10751,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Responsable / chef de chantier (optionnel)</label>
-              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.responsable || ""} onChange={(e) => patch({ responsable: e.target.value })} />
+              <TeamMemberField members={members} value={localDoc.responsable || ""} memberId={localDoc.responsableMemberId || null} onChange={(v) => patch({ responsable: v.value, responsableMemberId: v.memberId })} />
             </div>
           </div>
 
@@ -10881,7 +10949,7 @@ function PlanningView({ documents, account, siteSettings, darkMode, isLocked, is
     if (!account?.organizationId) return;
     db.rpc("get_organization_members_with_profiles", { org_id: account.organizationId }).then(({ data, error }) => {
       if (error) { console.error("Erreur de chargement de l'équipe", error); return; }
-      setMembers((data || []).filter((m) => m.status === "active").map((m) => ({ userId: m.user_id, label: m.email || "Membre" })));
+      setMembers((data || []).filter((m) => m.status === "active").map((m) => ({ userId: m.user_id, label: memberDisplayName(m) })));
     });
   }, [account?.organizationId]);
 
@@ -11838,7 +11906,7 @@ function useAtelierPlanning(organizationId) {
     })();
     db.rpc("get_organization_members_with_profiles", { org_id: organizationId }).then(({ data, error }) => {
       if (error || cancelled) return;
-      setMembers((data || []).filter((m) => m.status === "active").map((m) => ({ userId: m.user_id, label: m.email || "Membre" })));
+      setMembers((data || []).filter((m) => m.status === "active").map((m) => ({ userId: m.user_id, label: memberDisplayName(m) })));
     });
     return () => { cancelled = true; };
   }, [organizationId]);
@@ -12941,7 +13009,7 @@ function useOrgMemberLabels(organizationId) {
     db.rpc("get_organization_members_with_profiles", { org_id: organizationId }).then(({ data, error }) => {
       if (error || cancelled) return;
       const map = {};
-      (data || []).forEach((m) => { map[m.user_id] = m.email || "Membre"; });
+      (data || []).forEach((m) => { map[m.user_id] = memberDisplayName(m); });
       setLabels(map);
     });
     return () => { cancelled = true; };
@@ -14100,9 +14168,16 @@ function TeamView({ account, siteSettings }) {
   const [membersError, setMembersError] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("editor");
+  // Profil de l'employé invité (facultatif) : nom complet, poste, téléphone.
+  const [inviteProfile, setInviteProfile] = useState({ fullName: "", jobTitle: "", phone: "" });
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  // Modification du profil d'un membre (propriétaire : tous ; membre : le sien).
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ fullName: "", jobTitle: "", phone: "" });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState("");
   const isOwner = account?.role === "owner";
 
   async function loadMembers() {
@@ -14119,6 +14194,7 @@ function TeamView({ account, siteSettings }) {
     // (profiles imbriqué), pour ne rien avoir à changer plus bas.
     setMembers((data || []).map((m) => ({
       id: m.id, user_id: m.user_id, role: m.role, status: m.status,
+      full_name: m.full_name || "", job_title: m.job_title || "", phone: m.phone || "",
       profiles: { email: m.email, company_name: m.company_name },
     })));
   }
@@ -14133,7 +14209,7 @@ function TeamView({ account, siteSettings }) {
     try {
       const { data: { session } } = await db.auth.getSession();
       const { data, error: fnError } = await db.functions.invoke("invite-member", {
-        body: { email: cleanEmail, role: inviteRole, organizationId: account.organizationId },
+        body: { email: cleanEmail, role: inviteRole, organizationId: account.organizationId, fullName: inviteProfile.fullName.trim(), jobTitle: inviteProfile.jobTitle.trim(), phone: inviteProfile.phone.trim() },
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
       if (fnError || data?.error) {
@@ -14147,6 +14223,7 @@ function TeamView({ account, siteSettings }) {
       } else {
         setInfo(`${cleanEmail} a été ajouté à l'équipe.`);
         setInviteEmail("");
+        setInviteProfile({ fullName: "", jobTitle: "", phone: "" });
         await loadMembers();
       }
     } catch (err) {
@@ -14161,6 +14238,27 @@ function TeamView({ account, siteSettings }) {
     const { data, error: updateError } = await db.from("organization_members").update({ role: newRole }).eq("id", memberId).select();
     if (updateError) { console.error("Erreur de changement de rôle", updateError); alert(`Impossible de changer ce rôle : ${updateError.message || "erreur inconnue"}`); return; }
     if (!data || data.length === 0) { console.error("Aucune ligne modifiée (changement de rôle) — probablement bloqué par une règle de sécurité."); alert("Impossible de changer ce rôle : la mise à jour a été bloquée."); return; }
+    await loadMembers();
+  }
+
+  function startEditProfile(m) {
+    setEditingId(m.id);
+    setEditForm({ fullName: m.full_name || "", jobTitle: m.job_title || "", phone: m.phone || "" });
+    setProfileError("");
+  }
+  async function saveProfile(memberId) {
+    setSavingProfile(true);
+    setProfileError("");
+    // Fonction SQL dédiée (update_member_profile) : ne touche que le nom,
+    // le poste et le téléphone — jamais le rôle ni le statut.
+    const { error: rpcError } = await db.rpc("update_member_profile", { member_id: memberId, new_full_name: editForm.fullName.trim(), new_job_title: editForm.jobTitle.trim(), new_phone: editForm.phone.trim() });
+    setSavingProfile(false);
+    if (rpcError) {
+      console.error("Erreur d'enregistrement du profil du membre", rpcError);
+      setProfileError(`Impossible d'enregistrer ce profil (${rpcError.message || "erreur inconnue"}).`);
+      return;
+    }
+    setEditingId(null);
     await loadMembers();
   }
 
@@ -14180,8 +14278,8 @@ function TeamView({ account, siteSettings }) {
         <h1 className="df-display text-2xl font-semibold">Équipe</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>
           {isOwner
-            ? "Invite des collègues à partager tes devis, clients et prestations — avec le niveau d'accès de ton choix."
-            : "Les membres de ton organisation. Seul le propriétaire peut inviter ou modifier les rôles."}
+            ? "Invite des collègues à partager tes devis, clients et prestations — avec le niveau d'accès de ton choix. Leur nom et leur poste apparaissent dans les listes « technicien » (rapport d'intervention) et « responsable » (planning de chantier)."
+            : "Les membres de ton organisation. Seul le propriétaire peut inviter ou modifier les rôles ; tu peux compléter ton propre nom, poste et téléphone."}
         </p>
       </div>
 
@@ -14201,6 +14299,20 @@ function TeamView({ account, siteSettings }) {
                 <option value="comptable">Expert-comptable (lecture seule)</option>
                 <option value="owner">Propriétaire</option>
               </select>
+            </label>
+          </div>
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <label className="grow basis-40 text-xs" style={{ color: colors.inkSoft }}>
+              Nom complet (optionnel)
+              <input type="text" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={inviteProfile.fullName} onChange={(e) => setInviteProfile((f) => ({ ...f, fullName: e.target.value }))} placeholder="Prénom Nom" />
+            </label>
+            <label className="grow basis-40 text-xs" style={{ color: colors.inkSoft }}>
+              Poste / spécialité (optionnel)
+              <input type="text" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={inviteProfile.jobTitle} onChange={(e) => setInviteProfile((f) => ({ ...f, jobTitle: e.target.value }))} placeholder="Plombier, chef de chantier…" />
+            </label>
+            <label className="grow basis-32 text-xs" style={{ color: colors.inkSoft }}>
+              Téléphone (optionnel)
+              <input type="tel" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={inviteProfile.phone} onChange={(e) => setInviteProfile((f) => ({ ...f, phone: e.target.value }))} placeholder="06 12 34 56 78" />
             </label>
             <button onClick={handleInvite} disabled={inviting} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: inviting ? 0.7 : 1 }}>
               {inviting ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />} Inviter
@@ -14223,12 +14335,20 @@ function TeamView({ account, siteSettings }) {
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-          {members.map((m, idx) => (
-            <div key={m.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
+          {members.map((m, idx) => {
+            const canEditProfile = isOwner || m.user_id === account?.id;
+            const details = [m.full_name ? m.profiles?.email : null, m.job_title, m.phone].filter(Boolean).join(" · ");
+            return (
+            <div key={m.id} className="px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
+            <div className="flex flex-wrap items-center gap-3">
               <div className="min-w-0 grow basis-40">
-                <div className="truncate text-sm font-medium">{m.profiles?.email || "—"}</div>
+                <div className="truncate text-sm font-medium">{m.full_name || m.profiles?.email || "—"}</div>
+                {details && <div className="truncate text-xs" style={{ color: colors.inkSoft }}>{details}</div>}
                 {m.user_id === account?.id && <span className="text-xs" style={{ color: colors.inkSoft }}>C'est toi</span>}
               </div>
+              {canEditProfile && editingId !== m.id && (
+                <button onClick={() => startEditProfile(m)} title="Modifier le profil (nom, poste, téléphone)" style={{ color: colors.slate }}><Pencil size={15} /></button>
+              )}
               {isOwner && m.user_id !== account?.id ? (
                 <select className="df-select rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} value={m.role} onChange={(e) => changeRole(m.id, e.target.value)}>
                   <option value="owner">Propriétaire</option>
@@ -14240,10 +14360,33 @@ function TeamView({ account, siteSettings }) {
                 <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${ROLE_COLORS[m.role]}18`, color: ROLE_COLORS[m.role] }}>{ROLE_LABELS[m.role]}</span>
               )}
               {isOwner && m.user_id !== account?.id && (
-                <button onClick={() => { if (window.confirm(`Retirer "${m.profiles?.email || "ce membre"}" de l'équipe ?`)) removeMember(m.id); }} title="Retirer de l'équipe" style={{ color: colors.brick }}><Trash2 size={15} /></button>
+                <button onClick={() => { if (window.confirm(`Retirer "${m.full_name || m.profiles?.email || "ce membre"}" de l'équipe ?`)) removeMember(m.id); }} title="Retirer de l'équipe" style={{ color: colors.brick }}><Trash2 size={15} /></button>
               )}
             </div>
-          ))}
+            {editingId === m.id && (
+              <div className="mt-3 rounded-xl p-3" style={{ background: colors.paper }}>
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="grow basis-40 text-xs" style={{ color: colors.inkSoft }}>
+                    Nom complet
+                    <input type="text" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editForm.fullName} onChange={(e) => setEditForm((f) => ({ ...f, fullName: e.target.value }))} placeholder="Prénom Nom" />
+                  </label>
+                  <label className="grow basis-40 text-xs" style={{ color: colors.inkSoft }}>
+                    Poste / spécialité
+                    <input type="text" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editForm.jobTitle} onChange={(e) => setEditForm((f) => ({ ...f, jobTitle: e.target.value }))} placeholder="Plombier, chef de chantier…" />
+                  </label>
+                  <label className="grow basis-32 text-xs" style={{ color: colors.inkSoft }}>
+                    Téléphone
+                    <input type="tel" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} placeholder="06 12 34 56 78" />
+                  </label>
+                  <button onClick={() => saveProfile(m.id)} disabled={savingProfile} className="rounded-lg px-3 py-2 text-xs font-medium text-white" style={{ background: colors.ink, opacity: savingProfile ? 0.7 : 1 }}>{savingProfile ? "Enregistrement…" : "Enregistrer le profil"}</button>
+                  <button onClick={() => setEditingId(null)} className="rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Annuler</button>
+                </div>
+                {profileError && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{profileError}</p>}
+              </div>
+            )}
+            </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -17732,5 +17875,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
