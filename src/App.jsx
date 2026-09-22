@@ -2327,9 +2327,9 @@ function companyDisplayName(co) {
 // vide si rien ne s'applique.
 //   * forme juridique, capital, immatriculation (art. R123-237 C. com.) ;
 //   * assurance décennale (art. L243-2 C. assurances) ;
-//   * factures et acomptes entre professionnels : pénalités de retard,
-//     indemnité forfaitaire de 40 €, escompte (art. L441-9 et D441-5 C. com.)
-//     — jamais pour un particulier (l'indemnité ne s'applique qu'en B2B) ;
+//   * aucune phrase automatique sur les pénalités de retard, l'indemnité de
+//     40 € ni l'escompte (retirée le 22/09/2026 à la demande de l'utilisateur) :
+//     ces mentions restent à la main de l'artisan, dans ses conditions ou ses notes ;
 //   * TVA : motif d'exonération si une ligne est à 0 %, option débits ;
 //   * médiateur de la consommation pour un client particulier (art. L616-1 C. conso).
 function legalMentionLines(doc, companyProfile) {
@@ -2345,9 +2345,6 @@ function legalMentionLines(doc, companyProfile) {
     if (form || reg) lines.push([form, reg].filter(Boolean).join(" — "));
     const ins = companyInsuranceLabel(co);
     if (ins) lines.push(`Assurance décennale et responsabilité civile professionnelle : ${ins}.`);
-  }
-  if (isInvoice && clientIsPro) {
-    lines.push("Pénalités de retard : trois fois le taux d'intérêt légal, exigibles le jour suivant la date de règlement. Indemnité forfaitaire pour frais de recouvrement : 40 € (art. D441-5 du Code de commerce). Pas d'escompte pour paiement anticipé.");
   }
   const zeroRated = (doc.items || []).some((it) => it.type === "line" && (Number(it.tva) || 0) === 0);
   if (zeroRated && VAT_EXEMPTION_TEXTS[doc.vatExemptionReason]) lines.push(VAT_EXEMPTION_TEXTS[doc.vatExemptionReason]);

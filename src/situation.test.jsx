@@ -105,9 +105,9 @@ describe("PDF", () => {
     expect(out).toContain("FACTURE DE SITUATION N° 2");
     expect(out).toContain("Échéance : 13/10/2026");
     expect(out).toContain("SARL au capital de 5 000 € — RCS Lyon 1");
-    expect(out).toContain("Pénalités de retard : trois fois le taux d'intérêt légal");
+    expect(out).not.toContain("Pénalités de retard"); // aucune phrase automatique de paiement
     expect(out).toContain("IBAN FR76 1234");
-    expect(legalMentionLines({ ...full({ vautFacture: true }), type: "facture" }, profile).length).toBeGreaterThan(2);
+    expect(legalMentionLines({ ...full({ vautFacture: true }), type: "facture" }, profile).length).toBeGreaterThan(1);
   });
 });
 

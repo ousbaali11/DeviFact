@@ -16,18 +16,18 @@ const PENALITES = "Pénalités de retard : trois fois le taux d'intérêt légal
 const INDEMNITE = "Indemnité forfaitaire pour frais de recouvrement : 40 €";
 
 describe("mentions légales sur le PDF (étape B)", () => {
-  it("facture à un professionnel : forme, RCS, décennale, pénalités, 40 €, escompte ; pas de médiateur", () => {
+  it("facture à un professionnel : forme, RCS, décennale ; jamais de phrase automatique sur les pénalités, les 40 € ou l'escompte ; pas de médiateur", () => {
     const lines = legalMentionLines(doc("facture"));
     expect(lines[0]).toBe("SARL au capital de 5 000 € — RCS Lyon 123 456 789");
     expect(lines[1]).toBe("Assurance décennale et responsabilité civile professionnelle : SMABTP, contrat n° P-42, couverture : France métropolitaine.");
-    expect(lines[2]).toContain(PENALITES);
-    expect(lines[2]).toContain(INDEMNITE);
-    expect(lines[2]).toContain("Pas d'escompte pour paiement anticipé.");
+    expect(lines.join(" ")).not.toContain(PENALITES);
+    expect(lines.join(" ")).not.toContain(INDEMNITE);
+    expect(lines.join(" ")).not.toContain("escompte");
     expect(lines.join(" ")).not.toContain("Médiateur");
     const out = html(doc("facture"));
     expect(out).toContain('class="print-legal"');
     expect(out).toContain("RCS Lyon 123 456 789");
-    expect(out).toContain("40 €");
+    expect(out).not.toContain(INDEMNITE);
   });
   it("facture à un particulier : pas de pénalités ni de 40 € (art. L441-10 : professionnels seulement), médiateur imprimé", () => {
     const d = doc("facture"); d.client.type = "particulier";
@@ -36,8 +36,9 @@ describe("mentions légales sur le PDF (étape B)", () => {
     expect(lines.join(" ")).not.toContain(PENALITES);
     expect(lines.join(" ")).toContain("Médiateur de la consommation : CM2C — https://cm2c.net (art. L616-1 du Code de la consommation).");
   });
-  it("facture d'acompte : mêmes mentions de paiement qu'une facture ; avoir : identité et assurance seulement", () => {
-    expect(legalMentionLines(doc("acompte")).join(" ")).toContain(INDEMNITE);
+  it("facture d'acompte : mêmes mentions qu'une facture, sans phrase automatique de paiement ; avoir : identité et assurance seulement", () => {
+    expect(legalMentionLines(doc("acompte")).join(" ")).not.toContain(INDEMNITE);
+    expect(legalMentionLines(doc("acompte"))).toEqual(legalMentionLines(doc("facture")));
     const avoir = legalMentionLines(doc("avoir"));
     expect(avoir).toHaveLength(2);
     expect(avoir.join(" ")).not.toContain(PENALITES);
@@ -59,7 +60,7 @@ describe("mentions légales sur le PDF (étape B)", () => {
   it("document créé avant l'étape A (copie du profil sans les nouveaux champs) : reprise depuis le profil courant", () => {
     const legacyCompany = { type: "entreprise", name: "Bâti Plus", siret: "123", address: "1 rue", country: "", email: "", phone: "", tva: "", logo: null };
     const d = doc("facture", {}, legacyCompany);
-    expect(legalMentionLines(d, null)).toEqual([expect.stringContaining(PENALITES)]); // sans profil : seules les mentions de paiement
+    expect(legalMentionLines(d, null)).toEqual([]); // sans profil ni mention : rien
     const withProfile = legalMentionLines(d, profile);
     expect(withProfile[0]).toBe("SARL au capital de 5 000 € — RCS Lyon 123 456 789");
     expect(withProfile[1]).toContain("SMABTP");
