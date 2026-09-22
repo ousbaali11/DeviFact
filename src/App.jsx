@@ -2476,9 +2476,10 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
           {watermarkText}
         </div>
       )}
-      {/* Numéro + Logo/Entreprise */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px", position: "relative", zIndex: 1 }}>
-        <div>
+      {/* En-tête : logo et nom de l'entreprise à gauche, numéro et dates à
+          droite (ordre inversé par rapport au code : row-reverse) */}
+      <div style={{ display: "flex", flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "18px", position: "relative", zIndex: 1 }}>
+        <div style={{ textAlign: "right" }}>
           <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontWeight: 700 }}>
             {docTypeLabel(doc.type).toUpperCase()} N° : 
             <span style={mono}>{doc.docNumber || "—"}/{new Date(doc.issueDate).getFullYear()}</span>
@@ -2500,9 +2501,9 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
             <div style={{ fontSize: "9.5pt", color: inkSoft }}>{!isInvoiceLike ? `Valable jusqu'au ${frLong(validityDate)}` : `Échéance : ${frLong(dueDate)}`}</div>
           )}
         </div>
-        <div style={{ textAlign: "right" }}>
+        <div style={{ textAlign: "left" }}>
           {doc.company.logo && (
-            <img src={doc.company.logo} alt="Logo" style={{ height: "46px", marginLeft: "auto", marginBottom: "6px", objectFit: "contain" }} />
+            <img src={doc.company.logo} alt="Logo" style={{ height: "46px", display: "block", marginBottom: "6px", objectFit: "contain" }} />
           )}
           {companyName && (
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontWeight: 700 }}>{companyName}</div>
