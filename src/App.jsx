@@ -2753,6 +2753,9 @@ function siteSettingsFromRow(data) {
     desktopAppEnabled: data.desktop_app_enabled || false,
     contactInstagramUrl: data.contact_instagram_url || "",
     landingPageVersion: data.landing_page_version || "classique",
+    // Commission de la plateforme sur les paiements en ligne des factures
+    // (Stripe Connect), en % ; 0 = aucune commission.
+    connectFeePercent: Number(data.connect_fee_percent) || 0,
     // Informations légales saisies dans Admin (colonne jsonb legal_info).
     legalInfo: data.legal_info && typeof data.legal_info === "object" && !Array.isArray(data.legal_info) ? data.legal_info : {},
   };
@@ -3222,7 +3225,7 @@ function DeviFactAppInner() {
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", landingPageVersion: "landing_page_version", legalInfo: "legal_info" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", landingPageVersion: "landing_page_version", legalInfo: "legal_info", connectFeePercent: "connect_fee_percent" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -4773,7 +4776,7 @@ function DeviFactAppInner() {
     } else if (view === "clients") {
       page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} darkMode={darkMode} />;
     } else if (view === "company") {
-      page = <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} />;
+      page = <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} />;
     } else if (view === "team") {
       page = <TeamView account={account} siteSettings={siteSettings} />;
     } else if (view === "planning-equipe") {
@@ -4975,7 +4978,7 @@ function DeviFactAppInner() {
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} />
+        <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} siteSettings={siteSettings} />
       </div>
     );
   }
@@ -5515,6 +5518,11 @@ function PublicDocumentView({ token }) {
   const [signed, setSigned] = useState(false);
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState(null);
+  // Retour de Stripe après paiement (success_url de create-invoice-payment).
+  const [paymentReturn] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("paiement") === "ok"; } catch { return false; }
+  });
+  const [reloadTick, setReloadTick] = useState(0);
   // Signature à distance : saisie du nom (par défaut) ou dessin à main
   // levée — même technique que le dessin dans l'éditeur (canvas 2D,
   // image PNG envoyée à sign-public-document dans signatureDrawing).
@@ -5574,7 +5582,15 @@ function PublicDocumentView({ token }) {
         setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
       }
     })();
-  }, [token]);
+  }, [token, reloadTick]);
+  // Après un paiement, Stripe confirme par webhook quelques secondes plus
+  // tard : on relit le document jusqu'à 5 fois (toutes les 3 s) tant qu'il
+  // n'est pas marqué payé.
+  useEffect(() => {
+    if (!paymentReturn || state.loading || state.paidAt || reloadTick >= 5) return;
+    const t = setTimeout(() => setReloadTick((n) => n + 1), 3000);
+    return () => clearTimeout(t);
+  }, [paymentReturn, state.loading, state.paidAt, reloadTick]);
 
   async function handleSign() {
     if (signMode === "dessin") {
@@ -5723,10 +5739,16 @@ function PublicDocumentView({ token }) {
               </div>
             )}
 
+            {/* Retour de Stripe après paiement, en attendant la confirmation */}
+            {paymentReturn && state.document.type === "facture" && !state.paidAt && state.document.status !== "payée" && (
+              <div className="mt-6 flex items-center gap-2 rounded-xl p-4" style={{ background: `${colors.moss}0D` }}>
+                <Loader2 size={18} className="animate-spin" style={{ color: colors.moss }} /> <p className="text-sm font-medium" style={{ color: colors.moss }}>Paiement transmis, merci ! La confirmation arrive dans quelques instants.</p>
+              </div>
+            )}
             {/* Paiement — uniquement pour une facture pas encore payée, et
                 seulement si le paiement en ligne est disponible pour cet
                 artisan (compte Stripe connecté et actif) ; sinon, virement. */}
-            {state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && !state.onlinePayment && (
+            {!paymentReturn && state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && !state.onlinePayment && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
                 <p className="flex items-start gap-2 text-sm" style={{ color: colors.inkSoft }}>
                   <Landmark size={16} className="mt-0.5 shrink-0" style={{ color: colors.slate }} />
@@ -5734,7 +5756,7 @@ function PublicDocumentView({ token }) {
                 </p>
               </div>
             )}
-            {state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && state.onlinePayment && (
+            {!paymentReturn && state.document.type === "facture" && state.document.status !== "payée" && !state.paidAt && state.onlinePayment && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
                 {payError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{payError}</p>}
                 <button onClick={handlePay} disabled={payLoading} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.moss, opacity: payLoading ? 0.7 : 1 }}>
@@ -14450,8 +14472,9 @@ function stripeDisabledReasonLabel(reason) {
   if (/under_review/.test(reason)) return "Compte en cours d'examen par Stripe.";
   return `Motif Stripe : ${reason}`;
 }
-function StripeConnectCard({ account, onRedirect = (url) => { window.location.href = url; } }) {
+function StripeConnectCard({ account, siteSettings = null, onRedirect = (url) => { window.location.href = url; } }) {
   const isOwner = account?.role === "owner";
+  const feePercent = Number(siteSettings?.connectFeePercent) || 0;
   const organizationId = account?.organizationId;
   const [status, setStatus] = useState(null); // null = vérification en cours
   const [error, setError] = useState("");
@@ -14516,8 +14539,8 @@ function StripeConnectCard({ account, onRedirect = (url) => { window.location.hr
   } else if (!status.connected) {
     body = (
       <div className="space-y-3">
-        <p className="text-sm">Connecte ton compte dès maintenant pour être prêt : tes clients pourront payer directement en ligne dès la prochaine mise à jour du site. Stripe te demandera, en quelques minutes : une pièce d'identité, ton SIRET, ton IBAN et un numéro de téléphone. Tu gardes ensuite un accès complet à ton tableau de bord Stripe (encaissements, virements, remboursements).</p>
-        <p className="text-xs" style={{ color: colors.inkSoft }}>Frais Stripe à ta charge sur chaque paiement par carte (environ 1,5 % + 0,25 € pour une carte européenne). Aucune commission de la plateforme.</p>
+        <p className="text-sm">Une fois ton compte connecté et vérifié par Stripe, le bouton « Payer en ligne » apparaît sur la page de tes factures. Stripe te demandera, en quelques minutes : une pièce d'identité, ton SIRET, ton IBAN et un numéro de téléphone. Tu gardes ensuite un accès complet à ton tableau de bord Stripe (encaissements, virements, remboursements).</p>
+        <p className="text-xs" style={{ color: colors.inkSoft }}>Frais Stripe à ta charge sur chaque paiement par carte (environ 1,5 % + 0,25 € pour une carte européenne). {feePercent > 0 ? `Commission de la plateforme : ${String(feePercent).replace(".", ",")} % du montant payé, prélevée automatiquement.` : "Aucune commission de la plateforme."}</p>
         {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
         <button onClick={start} disabled={busy} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}>
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Landmark size={15} />} {busy ? "Redirection vers Stripe…" : "Connecter avec Stripe"}
@@ -14538,7 +14561,7 @@ function StripeConnectCard({ account, onRedirect = (url) => { window.location.hr
         {!active && status.requirementsDue > 0 && <p className="text-xs" style={{ color: colors.inkSoft }}>{status.requirementsDue} information{status.requirementsDue > 1 ? "s" : ""} attendue{status.requirementsDue > 1 ? "s" : ""} par Stripe.</p>}
         {!active && stripeDisabledReasonLabel(status.disabledReason) && <p className="text-xs" style={{ color: colors.inkSoft }}>{stripeDisabledReasonLabel(status.disabledReason)}</p>}
         {status.stale && <p className="text-xs" style={{ color: colors.inkSoft }}>Dernier état connu (Stripe injoignable pour l'instant).</p>}
-        {active && <p className="text-xs" style={{ color: colors.inkSoft }}>Tu es prêt : tes clients pourront payer directement en ligne dès la prochaine mise à jour du site.</p>}
+        {active && <p className="text-xs" style={{ color: colors.inkSoft }}>Tes clients peuvent payer tes factures en ligne par carte, depuis le lien ou le QR code de la facture.</p>}
         {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
         <div className="flex flex-wrap items-center gap-2">
           {!active && (
@@ -14562,7 +14585,7 @@ function StripeConnectCard({ account, onRedirect = (url) => { window.location.hr
   );
 }
 
-function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, isViewer, onGoToPricing }) {
+function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, isViewer, onGoToPricing, siteSettings = null }) {
   const [local, setLocal] = useState(() => withGeoCountry(profile));
   const [editing, setEditing] = useState(!profile.name);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -14807,7 +14830,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
         </div>
       )}
 
-      <StripeConnectCard account={account} />
+      <StripeConnectCard account={account} siteSettings={siteSettings} />
 
       <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
         <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.brick }}>
@@ -15258,6 +15281,11 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
           <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Lien Instagram</label>
           <input type="url" className="df-input w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="https://instagram.com/tonsite" value={local.contactInstagramUrl || ""} onChange={(e) => patch({ contactInstagramUrl: e.target.value })} />
           <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Affiché sous forme d'icône sur la page "Nous contacter". Laisse vide pour ne pas l'afficher.</p>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Commission sur les paiements en ligne (%)</label>
+          <input type="number" min="0" max="20" step="0.1" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.connectFeePercent ?? 0} onChange={(e) => patch({ connectFeePercent: Math.min(20, Math.max(0, Number(e.target.value) || 0)) })} />
+          <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Stripe Connect : part du montant de chaque facture payée en ligne prélevée pour la plateforme, en plus des frais Stripe à la charge de l'artisan. 0 = aucune commission. Une commission est un service facturé à l'artisan : à prévoir dans les CGV et à facturer avec TVA.</p>
         </div>
         <div>
           <label className="mb-2 block text-xs font-medium" style={{ color: colors.inkSoft }}>Logo du site</label>
@@ -18024,5 +18052,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

@@ -52,12 +52,12 @@ serve(async (req) => {
 
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name, logo_url").limit(1).maybeSingle();
 
-    // Paiement en ligne : désactivé pour tout le monde tant que Stripe
-    // Connect n'est pas en place — l'argent d'une facture ne doit jamais
-    // transiter par le compte Stripe de la plateforme. Deviendra
-    // « compte Stripe connecté et actif pour cette organisation »
-    // (organizations.stripe_charges_enabled) avec Stripe Connect.
-    const onlinePaymentEnabled = false;
+    // Paiement en ligne : uniquement si l'organisation a un compte Stripe
+    // connecté dont les encaissements sont actifs (Stripe Connect). Sinon
+    // — y compris si la colonne n'existe pas encore — jamais : l'argent
+    // d'une facture ne transite pas par le compte de la plateforme.
+    const { data: orgRow } = await dbAdmin.from("organizations").select("stripe_account_id, stripe_charges_enabled").eq("id", link.organization_id).maybeSingle();
+    const onlinePaymentEnabled = doc.type === "facture" && !!orgRow?.stripe_account_id && orgRow?.stripe_charges_enabled === true;
 
     return new Response(
       JSON.stringify({ document: doc, signedAt: link.signed_at, paidAt: link.paid_at, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled }),

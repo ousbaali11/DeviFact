@@ -5,6 +5,13 @@
 // aux abonnements) : ici, c'est un paiement unique ("mode: payment"),
 // jamais récurrent. Public, sans authentification — accessible via le
 // lien envoyé au client.
+//
+// Stripe Connect (livraison 2) : PAIEMENT DIRECT sur le compte Stripe
+// connecté de l'artisan (en-tête Stripe-Account). L'argent arrive chez
+// l'artisan, les frais Stripe sont à sa charge, le libellé sur le relevé
+// du client est le sien, et c'est stripe-connect-webhook (événements des
+// comptes connectés) qui confirme le paiement. Commission de la plateforme
+// facultative (site_settings.connect_fee_percent, 0 par défaut).
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -17,14 +24,13 @@ const dbAdmin = createClient(
 );
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
-// Paiement en ligne désactivé pour tout le monde tant que Stripe Connect
-// n'est pas en place : une session de paiement créée ici encaisserait
-// l'argent de l'artisan sur le compte Stripe de la plateforme. Même
-// garde-fou côté serveur que le masquage du bouton sur la page publique
-// (get-public-document), pour qu'un appel direct ne puisse pas le
-// contourner. Deviendra « organizations.stripe_charges_enabled » avec
-// Stripe Connect.
-const ONLINE_PAYMENT_ENABLED = false;
+// Commission de la plateforme, en centimes, pour un montant en centimes et
+// un pourcentage (0 → pas de commission). Arrondi au centime le plus proche.
+function applicationFeeCents(amountCents: number, percent: number): number {
+  const p = Number(percent);
+  if (!Number.isFinite(p) || p <= 0) return 0;
+  return Math.min(amountCents, Math.round((amountCents * p) / 100));
+}
 
 function computeTotalTTC(doc: any): number {
   const items = Array.isArray(doc.items) ? doc.items : [];
@@ -55,13 +61,18 @@ serve(async (req) => {
     if (!token) {
       return new Response(JSON.stringify({ error: "Lien invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-    if (!ONLINE_PAYMENT_ENABLED) {
-      return new Response(JSON.stringify({ error: "Le paiement en ligne n'est pas disponible pour cette facture. Merci de régler par virement (coordonnées bancaires sur la facture)." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
 
     const { data: link } = await dbAdmin.from("public_document_links").select("id, organization_id, document_id, paid_at, payment_pending_at").eq("token", token).maybeSingle();
     if (!link) {
       return new Response(JSON.stringify({ error: "Ce lien n'existe pas ou n'est plus valide." }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    // Garde-fou serveur, même règle que l'affichage du bouton
+    // (get-public-document) : sans compte connecté actif, aucune session
+    // n'est créée — un appel direct ne peut pas encaisser sur le compte
+    // de la plateforme.
+    const { data: org } = await dbAdmin.from("organizations").select("stripe_account_id, stripe_charges_enabled").eq("id", link.organization_id).maybeSingle();
+    if (!org?.stripe_account_id || org.stripe_charges_enabled !== true) {
+      return new Response(JSON.stringify({ error: "Le paiement en ligne n'est pas disponible pour cette facture. Merci de régler par virement (coordonnées bancaires sur la facture)." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     if (link.paid_at) {
       return new Response(JSON.stringify({ error: "Cette facture a déjà été payée." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -101,7 +112,17 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Montant invalide." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Commission de la plateforme (réglage Admin, 0 par défaut). Si la
+    // colonne n'existe pas encore : 0.
+    const { data: settingsRow } = await dbAdmin.from("site_settings").select("connect_fee_percent").eq("id", 1).maybeSingle();
+    const amountCents = Math.round(amount * 100);
+    const feeCents = applicationFeeCents(amountCents, Number(settingsRow?.connect_fee_percent) || 0);
+
     const origin = req.headers.get("origin") || "https://www.chantiflow.fr";
+    // Retour du client sur la page publique de sa facture : « paiement=ok »
+    // affiche la confirmation en attendant que le webhook marque la facture
+    // payée ; en cas d'abandon, simple retour sur la page.
+    const publicPage = `${origin}/?voir-document=${encodeURIComponent(token)}`;
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -109,15 +130,19 @@ serve(async (req) => {
         price_data: {
           currency: (doc.currency || "EUR").toLowerCase(),
           product_data: { name: `Facture ${doc.docNumber}` },
-          unit_amount: Math.round(amount * 100),
+          unit_amount: amountCents,
         },
         quantity: 1,
       }],
-      // Distingue ce paiement (facture) d'un paiement d'abonnement dans
-      // le webhook Stripe partagé — jamais confondre les deux.
+      ...(feeCents > 0 ? { payment_intent_data: { application_fee_amount: feeCents } } : {}),
+      // Repères pour stripe-connect-webhook (kind distingue ce paiement
+      // d'un paiement d'abonnement — jamais confondre les deux).
       metadata: { kind: "invoice_payment", linkId: link.id, organizationId: link.organization_id, documentId: link.document_id },
-      success_url: `${origin}/facture-payee?token=${token}`,
-      cancel_url: `${origin}/payer?token=${token}`,
+      success_url: `${publicPage}&paiement=ok`,
+      cancel_url: publicPage,
+    }, {
+      // Paiement direct : la session est créée SUR le compte connecté.
+      stripeAccount: org.stripe_account_id,
     });
 
     return new Response(JSON.stringify({ url: session.url }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

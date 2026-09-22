@@ -34,6 +34,11 @@ verify_jwt = false
 [functions.paypal-webhook]
 verify_jwt = false
 
+# Événements Stripe des comptes connectés (Stripe Connect) : même principe,
+# Stripe n'envoie pas de jeton Supabase, la fonction vérifie la signature.
+[functions.stripe-connect-webhook]
+verify_jwt = false
+
 # Génération Factur-X : les polices (PDF/A exige des polices embarquées)
 # et le profil couleur sRGB doivent être déployés avec la fonction.
 [functions.generate-facturx]

@@ -23,7 +23,7 @@ vi.mock("./client.js", () => ({
     rpc: async () => ({ data: [], error: null }),
   },
 }));
-import { StripeConnectCard, CompanyView, emptyCompanyProfile } from "./App.jsx";
+import { StripeConnectCard, CompanyView, SiteIdentitySettings, emptyCompanyProfile } from "./App.jsx";
 
 beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = () => {}; });
 beforeEach(() => { calls.length = 0; state.status = { connected: false }; state.fail = null; window.history.replaceState({}, "", "/"); });
@@ -47,6 +47,7 @@ describe("carte Connecter mon compte bancaire", () => {
     expect(text).toContain("Connecter mon compte bancaire");
     expect(text).toContain("pièce d'identité, ton SIRET, ton IBAN");
     expect(text).toContain("Aucune commission de la plateforme.");
+    expect(text).toContain("le bouton « Payer en ligne » apparaît sur la page de tes factures");
     expect(buttonByText(container, "Connecter avec Stripe")).toBeTruthy();
     expect(calls).toEqual([{ name: "connect-onboarding", body: { organizationId: "org", action: "status" }, auth: "Bearer jeton" }]);
     await unmount();
@@ -83,6 +84,7 @@ describe("carte Connecter mon compte bancaire", () => {
     state.status = { connected: true, chargesEnabled: true, payoutsEnabled: true, detailsSubmitted: true, requirementsDue: 0, disabledReason: null };
     const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
     expect(container.textContent).toContain("Compte connecté : paiements en ligne actifs");
+    expect(container.textContent).toContain("Tes clients peuvent payer tes factures en ligne par carte");
     expect(buttonByText(container, "Reprendre la configuration")).toBeUndefined();
     await click(buttonByText(container, "Actualiser"));
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
@@ -118,6 +120,35 @@ describe("carte Connecter mon compte bancaire", () => {
     const text = container.textContent;
     expect(text.indexOf("Connecter mon compte bancaire")).toBeGreaterThan(-1);
     expect(text.indexOf("Connecter mon compte bancaire")).toBeLessThan(text.indexOf("Zone de test"));
+    await unmount();
+  }, 30000);
+  it("commission réglée dans Admin : annoncée sur la carte", async () => {
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} siteSettings={{ connectFeePercent: 2.5 }} />);
+    expect(container.textContent).toContain("Commission de la plateforme : 2,5 % du montant payé, prélevée automatiquement.");
+    expect(container.textContent).not.toContain("Aucune commission");
+    await unmount();
+  }, 30000);
+  it("Admin, Identité du site : champ commission (0 à 20 %), enregistré avec les autres réglages", async () => {
+    let saved = null;
+    const { container, unmount } = await mount(<SiteIdentitySettings siteSettings={{ name: "Chantiflow", contactEmail: "c@e.fr", connectFeePercent: 0 }} saving={false} onSave={(s) => { saved = s; }} />);
+    const input = container.querySelector('input[type="number"][max="20"]');
+    expect(input).toBeTruthy();
+    expect(container.textContent).toContain("Commission sur les paiements en ligne (%)");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "1.5");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "35");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(input.value).toBe("20"); // borné
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "1.5");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(buttonByText(container, "Enregistrer"));
+    expect(saved).toMatchObject({ name: "Chantiflow", connectFeePercent: 1.5 });
     await unmount();
   }, 30000);
 });
