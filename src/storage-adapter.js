@@ -61,6 +61,31 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // Sans base connue (première écriture de la session) : union, les
 // versions locales gagnent sur les versions distantes du même élément.
 // Valeur qui n'est pas une liste à identifiants : la version locale gagne.
+// Paiements reçus d'un document modifié des deux côtés (par exemple un
+// paiement en ligne enregistré par le serveur pendant qu'un membre modifiait
+// la facture) : un paiement ajouté d'un côté depuis la base n'est jamais
+// perdu, quelle que soit la version qui gagne ; le statut « payée » posé par
+// l'autre version est conservé si tous ses paiements sont bien repris.
+function mergePayments(winner, l, r, b) {
+  const lp = Array.isArray(l?.payments) ? l.payments : null;
+  const rp = Array.isArray(r?.payments) ? r.payments : null;
+  if (!lp && !rp) return winner;
+  const baseIds = new Set((Array.isArray(b?.payments) ? b.payments : []).map((p) => p?.id));
+  const out = Array.isArray(winner.payments) ? [...winner.payments] : [];
+  const have = new Set(out.map((p) => p?.id));
+  for (const p of [...(lp || []), ...(rp || [])]) {
+    if (p && p.id !== undefined && !have.has(p.id) && !baseIds.has(p.id)) { out.push(p); have.add(p.id); }
+  }
+  if (out.length === (Array.isArray(winner.payments) ? winner.payments.length : 0)) return winner;
+  const merged = { ...winner, payments: out };
+  const other = winner === l ? r : l;
+  if (other?.status === "payée" && merged.status !== "payée" && (other.payments || []).every((p) => have.has(p?.id))) {
+    merged.status = "payée";
+    merged.paidAt = other.paidAt || merged.paidAt || null;
+  }
+  return merged;
+}
+
 export function mergeValues(base, local, remote) {
   if (!isIdList(local) || !isIdList(remote)) return local;
   const byId = (list) => new Map(list.map((x) => [x.id, x]));
@@ -75,7 +100,7 @@ export function mergeValues(base, local, remote) {
     if (!B) { out.push(l || r); continue; }
     if (l && r) {
       const lChanged = !b || !same(l, b), rChanged = !b || !same(r, b);
-      if (lChanged && rChanged && !same(l, r)) out.push(stamp(r) > stamp(l) ? r : l);
+      if (lChanged && rChanged && !same(l, r)) out.push(mergePayments(stamp(r) > stamp(l) ? r : l, l, r, b));
       else out.push(lChanged ? l : r);
     } else if (l && !r) {
       // absent en base : supprimé à distance, sauf si modifié localement depuis la base

@@ -113,3 +113,47 @@ describe("page publique d'une facture", () => {
     container.remove();
   }, 30000);
 });
+
+describe("retour de Stripe avec l'identifiant de session", () => {
+  it("le paiement figure déjà sur la facture à la première lecture : confirmé tout de suite, aucune relecture", async () => {
+    window.history.replaceState({}, "", "/?voir-document=abc&paiement=ok&session=cs_9");
+    try {
+      state.calls = 0;
+      const paid = { ...facture, payments: [{ id: "pay_stripe_cs_9", date: "2026-09-22", amount: 9, method: "Carte bancaire (en ligne)" }] };
+      state.response = { document: paid, siteName: "Chantiflow", signedAt: null, paidAt: null, onlinePaymentEnabled: true };
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await act(async () => { root.render(<PublicDocumentView token="abc" />); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+      const text = () => container.textContent.replace(/[  ]/g, " ");
+      expect(text()).toContain("Paiement reçu, merci !");
+      expect(text()).not.toContain("Paiement transmis");
+      await act(async () => { await new Promise((r) => setTimeout(r, 3100)); });
+      expect(invokeCount()).toBe(1);
+      expect([...container.querySelectorAll("button")].some((b) => b.textContent.trim().startsWith("Payer"))).toBe(true);
+      await act(async () => { root.unmount(); });
+      container.remove();
+    } finally { window.history.replaceState({}, "", "/"); }
+  }, 30000);
+  it("session inconnue de la facture (webhook et rapprochement pas encore passés) : attente puis relecture, comme avant", async () => {
+    window.history.replaceState({}, "", "/?voir-document=abc&paiement=ok&session=cs_9");
+    try {
+      state.calls = 0;
+      let reads = 0;
+      state.response = () => { reads += 1; return { document: reads >= 2 ? { ...facture, payments: [{ id: "pay_stripe_cs_9", date: "2026-09-22", amount: 9, method: "Carte bancaire (en ligne)" }] } : facture, siteName: "Chantiflow", signedAt: null, paidAt: null, onlinePaymentEnabled: true }; };
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      await act(async () => { root.render(<PublicDocumentView token="abc" />); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+      expect(container.textContent).toContain("Paiement transmis, merci !");
+      await act(async () => { await new Promise((r) => setTimeout(r, 3100)); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+      expect(container.textContent).toContain("Paiement reçu, merci !");
+      expect(invokeCount()).toBe(2);
+      await act(async () => { root.unmount(); });
+      container.remove();
+    } finally { window.history.replaceState({}, "", "/"); }
+  }, 30000);
+});

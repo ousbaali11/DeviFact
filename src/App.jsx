@@ -3549,6 +3549,26 @@ function DeviFactAppInner() {
       }
     }
   }
+  // Paiements en ligne (Stripe Connect) : vérification directe auprès de
+  // Stripe des paiements terminés, indépendante du webhook — à l'ouverture
+  // de l'application et de chaque facture pas encore soldée. Si un paiement
+  // manquait, la liste des documents est relue depuis le serveur ; renvoie
+  // le document à jour quand un identifiant est donné, sinon null.
+  async function syncOnlinePayments(documentId = null) {
+    const orgId = getActiveOrganization();
+    if (!orgId) return null;
+    try {
+      const { data, error } = await db.functions.invoke("sync-online-payments", { body: { organizationId: orgId, ...(documentId ? { documentId } : {}) } });
+      if (error || !data || !(Number(data.added) > 0)) return null;
+      const res = await window.storage.get("documents", false);
+      const fresh = JSON.parse(res.value);
+      setDocuments(fresh);
+      return documentId ? fresh.find((d) => d.id === documentId) || null : null;
+    } catch (err) {
+      console.error("Vérification des paiements en ligne", err);
+      return null;
+    }
+  }
   function clearUserData() {
     // Vide toutes les données en mémoire — indispensable à la déconnexion
     // pour qu'aucune trace du compte précédent ne reste visible au suivant.
@@ -3588,6 +3608,7 @@ function DeviFactAppInner() {
     setActiveOrganization(profile?.organizationId || null);
     await loadUserData();
     setAccount(profile);
+    syncOnlinePayments();
     setView("dashboard");
   }
 
@@ -3654,6 +3675,7 @@ function DeviFactAppInner() {
           setActiveOrganization(profile?.organizationId || null);
           await loadUserData();
           setAccount(profile);
+          syncOnlinePayments();
         } else {
           setAccount(null);
         }
@@ -3698,6 +3720,7 @@ function DeviFactAppInner() {
           setActiveOrganization(profile?.organizationId || null);
           await loadUserData();
           setAccount(profile);
+          syncOnlinePayments();
         } else {
           // Ne traite "pas de session" comme vraiment définitif que pour
           // une vraie déconnexion explicite — la vérification initiale
@@ -4816,6 +4839,7 @@ function DeviFactAppInner() {
         reviewNotice={reviewNotice?.docId === activeDoc.id ? reviewNotice : null}
         onSendReview={sendReviewRequest}
         onDismissReview={() => setReviewNotice(null)}
+        onSyncOnlinePayments={syncOnlinePayments}
       />
     );
   }
@@ -4857,6 +4881,7 @@ function DeviFactAppInner() {
         onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onCreateNext={createNextSituationDoc}
+        onSyncOnlinePayments={syncOnlinePayments}
         onGoToPricing={() => setView("pricing")}
       />
     );
@@ -5802,6 +5827,12 @@ function PublicDocumentView({ token }) {
   // paiement en ligne au retour de Stripe.
   const [payAmount, setPayAmount] = useState("");
   const [paidBaseline, setPaidBaseline] = useState(null);
+  // Identifiant de la session Stripe (ajouté par create-invoice-payment à
+  // l'adresse de retour) : le paiement est confirmé dès qu'il figure sur la
+  // facture, sans attendre une relecture.
+  const [paymentSession] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("session") || null; } catch { return null; }
+  });
   const payable = isPayableDoc(state.document);
   const isSituationDoc = state.document?.type === "situation";
   const sit = isSituationDoc ? computeSituation(state.document) : null;
@@ -5812,7 +5843,8 @@ function PublicDocumentView({ token }) {
   const summaryLines = isSituationDoc ? sit.lines.map((l) => ({ id: l.id, designation: l.designation, totalHT: l.montantCetteSituation })) : totals ? totals.computedLines : [];
   const payAmountValue = Math.round((Number(String(payAmount).replace(",", ".")) || 0) * 100) / 100;
   const amountToPayNow = payAmountValue > 0 ? Math.min(amountDue, payAmountValue) : amountDue;
-  const paymentConfirmed = paymentReturn && paidBaseline !== null && (!!state.paidAt || state.document?.status === "payée" || totalPaid > paidBaseline + 0.005);
+  const sessionPaymentSeen = !!paymentSession && (Array.isArray(state.document?.payments) ? state.document.payments : []).some((p) => p?.id === `pay_stripe_${paymentSession}`);
+  const paymentConfirmed = paymentReturn && (sessionPaymentSeen || (paidBaseline !== null && (!!state.paidAt || state.document?.status === "payée" || totalPaid > paidBaseline + 0.005)));
   const awaitingConfirmation = paymentReturn && !paymentConfirmed && reloadTick < 5;
   const canPay = payable && state.document.status !== "payée" && !state.paidAt && amountDue > 0.005 && !awaitingConfirmation;
   // Signature à distance : saisie du nom (par défaut) ou dessin à main
@@ -8802,8 +8834,9 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   );
 });
 
-function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null, clients = [] }) {
+function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null, clients = [], onSyncOnlinePayments = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
+  useOnlinePaymentsSync(doc, onSyncOnlinePayments, setLocalDoc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
   const pendingPatchRef = useRef(null);
@@ -16878,6 +16911,32 @@ function ReviewRequestNotice({ notice, onSend, onDismiss }) {
 // fois ; chaque règlement (date, montant, mode, note) est déduit du montant
 // à régler et imprimé sur le PDF. Quand le total reçu couvre la facture,
 // elle passe automatiquement à « payée ».
+// Paiement en ligne reçu pendant que la facture n'était pas ouverte : à
+// l'ouverture d'une facture pas encore soldée, vérification auprès de
+// Stripe (syncOnlinePayments dans l'application) et reprise des paiements
+// à jour, sans toucher au reste de la saisie en cours.
+function useOnlinePaymentsSync(doc, onSync, setLocalDoc) {
+  const syncRef = useRef(onSync);
+  syncRef.current = onSync;
+  const awaiting = isPayableDoc(doc) && doc.status !== "payée";
+  const docId = doc.id;
+  useEffect(() => {
+    if (!awaiting || !syncRef.current) return undefined;
+    let active = true;
+    Promise.resolve(syncRef.current(docId)).then((fresh) => {
+      if (!active || !fresh || fresh.id !== docId) return;
+      setLocalDoc((prev) => ({
+        ...prev,
+        payments: Array.isArray(fresh.payments) ? fresh.payments : [],
+        status: fresh.status || prev.status,
+        paidAt: fresh.paidAt ?? prev.paidAt ?? null,
+        updatedAt: fresh.updatedAt || prev.updatedAt,
+      }));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [docId, awaiting, setLocalDoc]);
+}
+
 function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
   const payments = Array.isArray(doc.payments) ? doc.payments : [];
   const currency = doc.currency || "EUR";
@@ -16960,8 +17019,9 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
   );
 }
 
-function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview }) {
+function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
+  useOnlinePaymentsSync(doc, onSyncOnlinePayments, setLocalDoc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [selectedLineIds, setSelectedLineIds] = useState([]);

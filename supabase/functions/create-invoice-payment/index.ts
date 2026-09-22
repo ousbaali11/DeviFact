@@ -130,7 +130,9 @@ serve(async (req) => {
         // Repères pour stripe-connect-webhook (kind distingue ce paiement
         // d'un paiement d'abonnement — jamais confondre les deux).
         metadata: { kind: "invoice_payment", linkId: link.id, organizationId: link.organization_id, documentId: link.document_id },
-        success_url: `${publicPage}&paiement=ok`,
+        // {CHECKOUT_SESSION_ID} est remplacé par Stripe : la page publique
+        // confirme le paiement dès qu'il figure sur la facture.
+        success_url: `${publicPage}&paiement=ok&session={CHECKOUT_SESSION_ID}`,
         cancel_url: publicPage,
       }, {
         // Paiement direct : la session est créée SUR le compte connecté.

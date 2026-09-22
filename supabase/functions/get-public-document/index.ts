@@ -8,12 +8,21 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { isPayableDoc } from "../_shared/totals.ts";
+import { syncOnlinePayments } from "../_shared/online-payments.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
+// Rapprochement des paiements en ligne (voir plus bas) — sans clé Stripe,
+// la page publique fonctionne quand même, simplement sans rapprochement.
+const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+const stripe = stripeKey ? new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient() }) : null;
+// Un paiement lancé il y a plus de 15 minutes sans être arrivé chez Stripe
+// est considéré abandonné : verrou levé (même délai que create-invoice-payment).
+const PENDING_LOCK_MS = 15 * 60 * 1000;
 
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
@@ -29,7 +38,7 @@ serve(async (req) => {
 
     const { data: link, error: linkError } = await dbAdmin
       .from("public_document_links")
-      .select("organization_id, document_id, signed_at, paid_at")
+      .select("id, organization_id, document_id, signed_at, paid_at, payment_pending_at")
       .eq("token", token)
       .maybeSingle();
 
@@ -45,7 +54,34 @@ serve(async (req) => {
       .eq("shared", false)
       .maybeSingle();
 
-    const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
+    let documents: any[] = Array.isArray(docsRow?.value) ? docsRow.value : [];
+
+    // Paiement en ligne : uniquement si l'organisation a un compte Stripe
+    // connecté dont les encaissements sont actifs (Stripe Connect). Sinon
+    // — y compris si la colonne n'existe pas encore — jamais : l'argent
+    // d'une facture ne transite pas par le compte de la plateforme.
+    const { data: orgRow } = await dbAdmin.from("organizations").select("stripe_account_id, stripe_charges_enabled").eq("id", link.organization_id).maybeSingle();
+
+    // Un paiement a été lancé sur ce lien (retour du client après Stripe,
+    // ou paiement en cours) : on vérifie directement auprès de Stripe s'il
+    // est terminé et on l'enregistre sur la facture sans attendre le
+    // webhook. Si rien n'est arrivé après 15 minutes, le verrou est levé.
+    let paidAt = link.paid_at;
+    if (link.payment_pending_at && stripe && orgRow?.stripe_account_id) {
+      try {
+        const sync = await syncOnlinePayments(dbAdmin, stripe, link.organization_id, orgRow.stripe_account_id, { documentId: link.document_id });
+        if (sync.documents) documents = sync.documents;
+        if (sync.added > 0) {
+          const { data: fresh } = await dbAdmin.from("public_document_links").select("paid_at").eq("id", link.id).maybeSingle();
+          paidAt = fresh?.paid_at ?? paidAt;
+        } else if (Date.now() - new Date(link.payment_pending_at).getTime() > PENDING_LOCK_MS) {
+          await dbAdmin.from("public_document_links").update({ payment_pending_at: null }).eq("id", link.id);
+        }
+      } catch (err) {
+        console.error("Rapprochement des paiements en ligne (page publique) :", err);
+      }
+    }
+
     const doc = documents.find((d: any) => d.id === link.document_id);
     if (!doc) {
       return new Response(JSON.stringify({ error: "Ce document n'existe plus." }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -61,15 +97,10 @@ serve(async (req) => {
     }
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name, logo_url").limit(1).maybeSingle();
 
-    // Paiement en ligne : uniquement si l'organisation a un compte Stripe
-    // connecté dont les encaissements sont actifs (Stripe Connect). Sinon
-    // — y compris si la colonne n'existe pas encore — jamais : l'argent
-    // d'une facture ne transite pas par le compte de la plateforme.
-    const { data: orgRow } = await dbAdmin.from("organizations").select("stripe_account_id, stripe_charges_enabled").eq("id", link.organization_id).maybeSingle();
     const onlinePaymentEnabled = isPayableDoc(doc) && !!orgRow?.stripe_account_id && orgRow?.stripe_charges_enabled === true;
 
     return new Response(
-      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt: link.paid_at, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled }),
+      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {

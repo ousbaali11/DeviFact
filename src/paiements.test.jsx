@@ -150,3 +150,49 @@ describe("éditeur", () => {
     await d.unmount();
   }, 30000);
 });
+
+describe("éditeur — paiements en ligne repris à l'ouverture", () => {
+  async function mount(element) {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(element); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    return { container, unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); } };
+  }
+  const noop = () => {};
+  const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
+  const common = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow", landingPageVersion: "classique" }, isLocked: false, isViewer: false, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients: [], products: [], stockByProduct: {}, companyProfile: emptyCompanyProfile(), onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, onChange: noop };
+  const online = { id: "pay_stripe_cs_9", date: "2026-09-22", amount: 9, method: "Carte bancaire (en ligne)", note: "Stripe" };
+  it("facture pas soldée : vérification demandée avec son identifiant, paiement reçu affiché sans enregistrement local", async () => {
+    const doc = facture({ payments: [] });
+    const asked = [];
+    const patches = [];
+    const sync = async (id) => { asked.push(id); return { ...doc, payments: [online], updatedAt: 99 }; };
+    const { container, unmount } = await mount(<Editor {...common} doc={doc} onChange={(p) => patches.push(p)} onSyncOnlinePayments={sync} />);
+    expect(asked).toEqual([doc.id]);
+    const text = container.textContent.replace(/[  ]/g, " ");
+    expect(text).toContain("Carte bancaire (en ligne)");
+    expect(text).toContain("9,00 €");
+    expect(text).toContain("Reste à payer 111,00 €");
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+    expect(patches).toHaveLength(0); // déjà enregistré côté serveur : rien à renvoyer
+    await unmount();
+  }, 30000);
+  it("rien de nouveau (null), facture déjà payée ou devis : aucune vérification inutile, saisie intacte", async () => {
+    const asked = [];
+    const none = async (id) => { asked.push(id); return null; };
+    const a = await mount(<Editor {...common} doc={facture({ payments: pays })} onSyncOnlinePayments={none} />);
+    expect(asked).toHaveLength(1);
+    expect(a.container.textContent.replace(/[  ]/g, " ")).toContain("22/09/2026");
+    await a.unmount();
+    const b = await mount(<Editor {...common} doc={facture({ status: "payée", paidAt: "2026-10-01T10:00:00.000Z", payments: pays })} onSyncOnlinePayments={none} />);
+    await b.unmount();
+    const c = await mount(<Editor {...common} doc={newDocument("devis", [])} onSyncOnlinePayments={none} />);
+    await c.unmount();
+    expect(asked).toHaveLength(1);
+    const d = await mount(<Editor {...common} doc={facture({ payments: [] })} />); // sans la fonction : rien ne casse
+    expect(d.container.querySelector(".print-payments-editor")).toBeTruthy();
+    await d.unmount();
+  }, 30000);
+});

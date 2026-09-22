@@ -106,3 +106,38 @@ describe("adaptateur : écriture conditionnelle et fusion", () => {
     expect(store.row.value).toEqual([doc("a", 1)]);
   });
 });
+
+describe("mergeValues — paiements reçus", () => {
+  const facture = (updatedAt, extra = {}) => ({ id: "f1", type: "facture", status: "envoyée", notes: "", payments: [{ id: "p1", amount: 30 }], updatedAt, ...extra });
+  it("paiement en ligne enregistré par le serveur pendant une modification locale : conservé même si la version locale gagne", () => {
+    const base = [facture(10)];
+    const local = [facture(50, { notes: "note tapée" })];
+    const remote = [facture(20, { payments: [{ id: "p1", amount: 30 }, { id: "pay_stripe_cs_9", amount: 9 }] })];
+    const out = mergeValues(base, local, remote);
+    expect(out[0].notes).toBe("note tapée");
+    expect(out[0].payments.map((p) => p.id)).toEqual(["p1", "pay_stripe_cs_9"]);
+    expect(out[0].status).toBe("envoyée");
+  });
+  it("paiement ajouté localement pendant que le serveur soldait la facture : les deux gardés, statut « payée » repris", () => {
+    const base = [facture(10)];
+    const local = [facture(20, { payments: [{ id: "p1", amount: 30 }, { id: "p2", amount: 10 }] })];
+    const remote = [facture(50, { status: "payée", paidAt: "2026-09-22T10:00:00Z", payments: [{ id: "p1", amount: 30 }, { id: "pay_stripe_cs_9", amount: 90 }] })];
+    const out = mergeValues(base, local, remote);
+    expect(out[0].payments.map((p) => p.id)).toEqual(["p1", "pay_stripe_cs_9", "p2"]);
+    expect(out[0].status).toBe("payée");
+  });
+  it("paiement retiré d'un côté : le retrait du vainqueur est respecté, pas de résurrection", () => {
+    const base = [facture(10)];
+    const local = [facture(50, { payments: [] })];
+    const remote = [facture(20, { notes: "autre" })];
+    expect(mergeValues(base, local, remote)[0].payments).toEqual([]);
+  });
+  it("statut « payée » de l'autre version non repris si ses paiements ne sont pas tous là", () => {
+    const base = [facture(10)];
+    const local = [facture(50, { payments: [] })];
+    const remote = [facture(20, { status: "payée", payments: [{ id: "p1", amount: 30 }, { id: "pay_stripe_cs_9", amount: 90 }] })];
+    const out = mergeValues(base, local, remote);
+    expect(out[0].payments.map((p) => p.id)).toEqual(["pay_stripe_cs_9"]);
+    expect(out[0].status).toBe("envoyée");
+  });
+});
