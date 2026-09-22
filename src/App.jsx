@@ -6307,7 +6307,7 @@ const LEGAL_FIELDS = [
   { id: "pricesTaxNote", group: "Tarifs et facturation", kind: "text", label: "Précision sur les tarifs (HT / TTC, TVA)", help: "Ex. « Tarifs indiqués hors taxes, TVA de 20 % en sus » ou « TVA non applicable, article 293 B du CGI ». Vide : rien n'est affiché.", pages: ["cgu"], empty: "hide" },
   // Points à valider avec un professionnel
   { id: "processorClause", group: "Points à valider avec un professionnel", kind: "textarea", label: "Responsabilité du traitement pour les données de vos clients", help: "Paragraphe expliquant que l'artisan est responsable du traitement des données de ses propres clients et que le site agit comme sous-traitant. Vide : le paragraphe n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
-  { id: "thirdPartyTransfers", group: "Points à valider avec un professionnel", kind: "textarea", label: "Localisation des prestataires et transferts hors UE", help: "Pays d'établissement de Stripe, PayPal, Resend, Google, GeoJS… et garanties de transfert (clauses contractuelles types). Vide : le paragraphe n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
+  { id: "thirdPartyTransfers", group: "Points à valider avec un professionnel", kind: "textarea", label: "Localisation des prestataires et transferts hors UE", help: "Pays d'établissement des prestataires (paiement par carte, PayPal, envoi d'e-mails, Google…) et garanties de transfert (clauses contractuelles types). Vide : le paragraphe n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
   { id: "paypalCookies", group: "Points à valider avec un professionnel", kind: "textarea", label: "Cookies déposés par le script PayPal", help: "À vérifier puis décrire : quels cookies, à quelle fin, et l'information donnée au visiteur. Vide : la phrase n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
   { id: "signatureLegalValue", group: "Points à valider avec un professionnel", kind: "textarea", label: "Valeur juridique de la signature électronique", help: "Valeur probante de la signature « simple » (nom saisi ou dessin) et mentions à ajouter. Vide : le paragraphe n'apparaît pas.", pages: ["cgu"], empty: "hide" },
   { id: "withdrawalRefund", group: "Points à valider avec un professionnel", kind: "textarea", label: "Droit de rétractation et remboursement", help: "Règle applicable aux professionnels (et aux consommateurs si le service leur est ouvert). Vide : le paragraphe n'apparaît pas.", pages: ["cgu"], empty: "hide" },
@@ -6427,7 +6427,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Signatures : nom saisi ou image de la signature (dessinée à l'écran ou importée), y compris lors d'une signature à distance par le client via un lien ou un QR code, avec la date de signature.",
               "Photos de chantier ajoutées aux rapports d'intervention, PV de réception et situations de travaux (fichiers image, réduits avant envoi).",
               "Équipe et planning : email des membres invités, rôle, créneaux du planning (titre, dates, membre, chantier).",
-              "Abonnement : forfait, cycle de facturation, identifiants techniques de client et d'abonnement chez Stripe ou PayPal, dates de paiement et d'expiration. Aucun numéro de carte bancaire n'est stocké par le site.",
+              "Abonnement : forfait, cycle de facturation, identifiants techniques de client et d'abonnement chez le prestataire de paiement par carte ou PayPal, dates de paiement et d'expiration. Aucun numéro de carte bancaire n'est stocké par le site.",
               "Formulaire de contact : prénom, nom, email, téléphone (optionnel), objet et message, enregistrés en base et transmis par email à l'éditeur.",
               "Clés d'accès API (forfait Entreprise) : nom de la clé, empreinte hachée (jamais la clé en clair), date de dernière utilisation, compteur d'appels par minute.",
               "Liens publics de signature ou de paiement : jeton aléatoire, dates de signature et de paiement.",
@@ -6446,7 +6446,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
             <LegalP>Le site fait appel aux prestataires suivants.</LegalP>
             <LegalUl items={[
               "Supabase (hébergement de la base de données, authentification, stockage des photos, fonctions serveur) : ensemble des données, région Union européenne (Stockholm, Suède).",
-              "Stripe (paiement par carte) : votre adresse email et l'identifiant de votre organisation lors de la souscription d'un abonnement ; pour le paiement d'une facture par un client, le numéro de la facture et son montant. Les données de carte sont saisies directement sur les pages de Stripe.",
+              "Prestataire de paiement par carte : votre adresse email et l'identifiant de votre organisation lors de la souscription d'un abonnement ; pour le paiement d'une facture par un client, le numéro de la facture et son montant. Les données de carte sont saisies directement sur les pages sécurisées du prestataire.",
               "PayPal (paiement de l'abonnement) : identifiant de votre organisation ; le paiement se fait sur les pages de PayPal, dont le script est chargé sur la page Tarifs.",
               "Resend (envoi des emails) : adresse email du destinataire, contenu de l'email (numéro de facture, montant, nom du client, lien d'avis, votre message de contact).",
               "Google (Gemini, intelligence artificielle) : uniquement le texte de description du chantier que vous saisissez dans la fenêtre « Suggestions IA ». Aucune donnée de compte, de client ni de montant n'est envoyée.",
@@ -6472,7 +6472,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Abonnement résilié : l'accès est maintenu jusqu'à la fin de la période payée, puis le compte repasse automatiquement au forfait Gratuit ; les données ne sont pas supprimées.",
               <>Factures : en tant qu'émetteur, vous devez conserver vos factures pendant la durée légale (10 ans au titre des obligations comptables).{v("invoiceRetention") && <> Après suppression d'un compte : {v("invoiceRetention")}.</>}</>,
               <>Messages du formulaire de contact : <LegalValue info={info} id="contactMessagesRetention" />.</>,
-              "Données de facturation de l'abonnement (chez Stripe et PayPal) : selon leurs propres politiques et les obligations comptables.",
+              "Données de facturation de l'abonnement (chez le prestataire de paiement par carte et PayPal) : selon leurs propres politiques et les obligations comptables.",
             ]} />
             <LegalH2>7. Vos droits</LegalH2>
             <LegalP>Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation, d'opposition et de portabilité de vos données, ainsi que du droit de définir des directives après votre décès. Vous pouvez modifier vous-même la plupart de vos données depuis l'application (Mon entreprise, Mon compte, Clients). Pour exercer un autre droit, notamment la suppression complète de votre compte, écrivez à {contactEmail} : la demande est traitée {v("rightsResponseDelay") ? <>dans un délai de {v("rightsResponseDelay")}</> : <>dans le délai prévu par le RGPD</>}. Vous pouvez aussi introduire une réclamation auprès de la CNIL (cnil.fr).</LegalP>
@@ -6497,7 +6497,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
             <LegalUl items={[
               "Forfait Gratuit : sans carte bancaire, limité à un nombre de documents indiqué sur la page Tarifs (3 par défaut). Au-delà, le compte passe en lecture seule jusqu'au choix d'un forfait payant.",
               <>Forfaits payants (Essentiel, Pro, Entreprise) : abonnement mensuel ou annuel, aux tarifs affichés sur la page Tarifs au moment de la souscription — ces tarifs font foi.{v("pricesTaxNote") && <> {v("pricesTaxNote")}</>}</>,
-              "Le paiement s'effectue par carte bancaire via Stripe ou via PayPal. L'abonnement se renouvelle automatiquement à chaque échéance jusqu'à résiliation.",
+              "Le paiement s'effectue par carte bancaire via notre prestataire de paiement ou via PayPal. L'abonnement se renouvelle automatiquement à chaque échéance jusqu'à résiliation.",
               "Résiliation : possible à tout moment depuis la page Abonnement. L'accès aux fonctionnalités du forfait est conservé jusqu'à la fin de la période déjà payée, puis le compte repasse automatiquement au forfait Gratuit, sans suppression des données.",
               <>L'éditeur peut modifier les tarifs ; les nouveaux tarifs s'appliquent au renouvellement suivant, après information préalable{v("priceChangeNotice") && <> avec un préavis de {v("priceChangeNotice")}</>}.</>,
             ]} />
@@ -6509,7 +6509,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Recueillir, lorsque c'est nécessaire, le consentement de vos clients avant de leur envoyer des emails depuis le service (relances, demande d'avis) et respecter vos propres obligations en matière de données personnelles.",
             ]} />
             <LegalH2>5. Signature et paiement en ligne</LegalH2>
-            <LegalP>Le service permet à vos clients de signer un devis (nom saisi ou signature dessinée) et de payer une facture depuis un lien ou un QR code, sans compte. La signature enregistrée est une signature électronique « simple » : le service conserve le nom ou le dessin, la date et le lien utilisé. Le paiement est réalisé par Stripe ; le service n'encaisse pas les fonds pour votre compte.</LegalP>
+            <LegalP>Le service permet à vos clients de signer un devis (nom saisi ou signature dessinée) et de payer une facture depuis un lien ou un QR code, sans compte. La signature enregistrée est une signature électronique « simple » : le service conserve le nom ou le dessin, la date et le lien utilisé. Le paiement est réalisé par un prestataire de paiement agréé ; le service n'encaisse pas les fonds pour votre compte.</LegalP>
             <LegalCustom info={info} id="signatureLegalValue" />
             <LegalH2>6. Facturation électronique</LegalH2>
             <LegalP>Le service permet de télécharger vos factures au format Factur-X. La transmission à une plateforme agréée, prévue par la réforme de la facturation électronique, n'est pas encore assurée par le service et reste à votre charge tant qu'elle n'est pas proposée.</LegalP>
@@ -8363,7 +8363,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         </div>
       </div>
 
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {isLocked && (
           <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
             <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
@@ -9024,7 +9024,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
         </div>
       </div>
 
-      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {isLocked && (
           <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
             <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
@@ -9502,7 +9502,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
         </div>
       </div>
 
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {isLocked && (
           <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
             <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
@@ -10022,7 +10022,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
         </div>
       </div>
 
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {isLocked && (
           <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
             <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
@@ -10394,7 +10394,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <div className="no-print mb-6 flex items-start gap-2.5 rounded-xl p-4" style={{ background: "#FDF3D9", border: "1px solid #E9CE85" }}>
           <AlertTriangle size={16} style={{ color: "#7A5A12", flexShrink: 0, marginTop: "1px" }} />
           <p className="text-xs" style={{ color: "#7A5A12" }}>
@@ -10751,7 +10751,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <div className="no-print mb-6 flex items-start gap-2.5 rounded-xl p-4" style={{ background: "#FDF3D9", border: "1px solid #E9CE85" }}>
           <AlertTriangle size={16} style={{ color: "#7A5A12", flexShrink: 0, marginTop: "1px" }} />
           <p className="text-xs" style={{ color: "#7A5A12" }}>
@@ -11110,7 +11110,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
         </div>
       </div>
 
-      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {isLocked && (
           <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl p-4" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}40` }}>
             <span className="flex items-center gap-2 text-sm font-medium" style={{ color: colors.brick }}>
@@ -14892,10 +14892,10 @@ async function callConnectOnboarding(organizationId, action) {
 // Libellé lisible des motifs de blocage renvoyés par Stripe.
 function stripeDisabledReasonLabel(reason) {
   if (!reason) return "";
-  if (/past_due|pending_verification|listed|fields_needed/.test(reason)) return "Stripe attend des informations ou une vérification.";
-  if (/rejected/.test(reason)) return "Stripe a refusé le compte : contacte le support Stripe depuis ton tableau de bord.";
-  if (/under_review/.test(reason)) return "Compte en cours d'examen par Stripe.";
-  return `Motif Stripe : ${reason}`;
+  if (/past_due|pending_verification|listed|fields_needed/.test(reason)) return "Le prestataire de paiement attend des informations ou une vérification.";
+  if (/rejected/.test(reason)) return "Le prestataire de paiement a refusé le compte : contacte son support depuis ton tableau de bord de paiement.";
+  if (/under_review/.test(reason)) return "Compte en cours d'examen par le prestataire de paiement.";
+  return `Motif du prestataire de paiement : ${reason}`;
 }
 function StripeConnectCard({ account, siteSettings = null, profile = null, onRedirect = (url) => { window.location.href = url; } }) {
   const isOwner = account?.role === "owner";
@@ -14938,7 +14938,7 @@ function StripeConnectCard({ account, siteSettings = null, profile = null, onRed
   // Repart d'un compte neuf (compte inachevé : mauvais e-mail, parcours
   // bloqué…) ; les infos corrigées dans Mon entreprise seront pré-remplies.
   async function reset() {
-    if (!window.confirm("Repartir de zéro ? Le compte Stripe inachevé sera détaché et un nouveau sera créé au prochain clic, pré-rempli avec les informations de Mon entreprise.")) return;
+    if (!window.confirm("Repartir de zéro ? Le compte de paiement inachevé sera détaché et un nouveau sera créé au prochain clic, pré-rempli avec les informations de Mon entreprise.")) return;
     setBusy(true);
     setError("");
     try {
@@ -14984,12 +14984,12 @@ function StripeConnectCard({ account, siteSettings = null, profile = null, onRed
   } else if (!status.connected) {
     body = (
       <div className="space-y-3">
-        <p className="text-sm">Une fois ton compte connecté et vérifié par Stripe, le bouton « Payer en ligne » apparaît sur la page de tes factures. Chantiflow envoie d'avance à Stripe ce que tu as déjà saisi dans Mon entreprise{prefilled.length ? ` (${prefilled.join(", ")})` : ""} : il ne te reste que la date de naissance, l'acceptation des conditions de Stripe et, si Stripe l'exige, une photo de pièce d'identité. Deux à trois minutes, rien à retaper.</p>
-        {ibanMissing && <p className="text-xs" style={{ color: colors.brassDark }}>Astuce : renseigne ton IBAN dans Mon entreprise (bouton Modifier) avant de cliquer, il sera pré-rempli chez Stripe.</p>}
-        <p className="text-xs" style={{ color: colors.inkSoft }}>Frais Stripe à ta charge sur chaque paiement par carte (environ 1,5 % + 0,25 € pour une carte européenne). {feePercent > 0 ? `Commission de la plateforme : ${String(feePercent).replace(".", ",")} % du montant payé, prélevée automatiquement.` : "Aucune commission de la plateforme."}</p>
+        <p className="text-sm">Une fois ton compte de paiement connecté et vérifié, le bouton « Payer en ligne » apparaît sur la page de tes factures. Chantiflow envoie d'avance au prestataire de paiement ce que tu as déjà saisi dans Mon entreprise{prefilled.length ? ` (${prefilled.join(", ")})` : ""} : il ne te reste que la date de naissance, l'acceptation de ses conditions et, s'il l'exige, une photo de pièce d'identité. Deux à trois minutes, rien à retaper.</p>
+        {ibanMissing && <p className="text-xs" style={{ color: colors.brassDark }}>Astuce : renseigne ton IBAN dans Mon entreprise (bouton Modifier) avant de cliquer, il sera pré-rempli automatiquement.</p>}
+        <p className="text-xs" style={{ color: colors.inkSoft }}>Frais du prestataire de paiement à ta charge sur chaque paiement par carte (environ 1,5 % + 0,25 € pour une carte européenne). {feePercent > 0 ? `Commission de la plateforme : ${String(feePercent).replace(".", ",")} % du montant payé, prélevée automatiquement.` : "Aucune commission de la plateforme."}</p>
         {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
         <button onClick={start} disabled={busy} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}>
-          {busy ? <Loader2 size={15} className="animate-spin" /> : <Landmark size={15} />} {busy ? "Redirection vers Stripe…" : "Connecter avec Stripe"}
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Landmark size={15} />} {busy ? "Redirection…" : "Connecter mon compte de paiement"}
         </button>
       </div>
     );
@@ -14997,25 +14997,25 @@ function StripeConnectCard({ account, siteSettings = null, profile = null, onRed
     const badge = active
       ? { color: colors.moss, text: "Compte connecté : paiements en ligne actifs" }
       : status.chargesEnabled
-        ? { color: colors.brassDark, text: "Paiements actifs, virements en attente : informations à compléter chez Stripe" }
-        : { color: colors.brassDark, text: "Configuration à terminer chez Stripe" };
+        ? { color: colors.brassDark, text: "Paiements actifs, virements en attente : informations à compléter auprès du prestataire de paiement" }
+        : { color: colors.brassDark, text: "Configuration à terminer auprès du prestataire de paiement" };
     body = (
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-medium" style={{ color: badge.color }}>
           {active ? <Check size={16} /> : <AlertTriangle size={16} />} {badge.text}
         </div>
-        {!active && status.requirementsDue > 0 && <p className="text-xs" style={{ color: colors.inkSoft }}>{status.requirementsDue} information{status.requirementsDue > 1 ? "s" : ""} attendue{status.requirementsDue > 1 ? "s" : ""} par Stripe.</p>}
+        {!active && status.requirementsDue > 0 && <p className="text-xs" style={{ color: colors.inkSoft }}>{status.requirementsDue} information{status.requirementsDue > 1 ? "s" : ""} attendue{status.requirementsDue > 1 ? "s" : ""} par le prestataire de paiement.</p>}
         {!active && stripeDisabledReasonLabel(status.disabledReason) && <p className="text-xs" style={{ color: colors.inkSoft }}>{stripeDisabledReasonLabel(status.disabledReason)}</p>}
-        {status.stale && <p className="text-xs" style={{ color: colors.inkSoft }}>Dernier état connu (Stripe injoignable pour l'instant).</p>}
+        {status.stale && <p className="text-xs" style={{ color: colors.inkSoft }}>Dernier état connu (prestataire de paiement injoignable pour l'instant).</p>}
         {active && <p className="text-xs" style={{ color: colors.inkSoft }}>Tes clients peuvent payer tes factures en ligne par carte, depuis le lien ou le QR code de la facture.</p>}
         {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
         <div className="flex flex-wrap items-center gap-2">
           {!active && (
             <button onClick={start} disabled={busy} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}>
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <Landmark size={15} />} {busy ? "Redirection vers Stripe…" : "Reprendre la configuration"}
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Landmark size={15} />} {busy ? "Redirection…" : "Reprendre la configuration"}
             </button>
           )}
-          <a href={STRIPE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className="rounded-lg px-3 py-2 text-xs font-medium" style={secondary}>Ouvrir mon tableau de bord Stripe</a>
+          <a href={STRIPE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className="rounded-lg px-3 py-2 text-xs font-medium" style={secondary}>Ouvrir mon tableau de bord de paiement</a>
           <button onClick={load} className="rounded-lg px-3 py-2 text-xs font-medium" style={secondary}>Actualiser</button>
           {!status.chargesEnabled && (
             <button onClick={reset} disabled={busy} className="rounded-lg px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.brick}66`, color: colors.brick }} title="Détache le compte inachevé et repart d'un compte neuf (par exemple après une erreur d'e-mail)">Recommencer à zéro</button>
@@ -15028,8 +15028,8 @@ function StripeConnectCard({ account, siteSettings = null, profile = null, onRed
   return (
     <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
       <div className="mb-1 flex items-center gap-2 text-sm font-semibold"><Landmark size={15} style={{ color: colors.slate }} /> Connecter mon compte bancaire</div>
-      <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Pour que tes clients paient tes factures en ligne par carte. L'argent arrive directement sur ton compte bancaire, via un compte Stripe à ton nom : il ne transite jamais par la plateforme.</p>
-      {backFromStripe && isOwner && <p className="mb-3 text-xs font-medium" style={{ color: colors.moss }}>De retour de Stripe : état du compte actualisé.</p>}
+      <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Pour que tes clients paient tes factures en ligne par carte. L'argent arrive directement sur ton compte bancaire, via un compte de paiement à ton nom : il ne transite jamais par la plateforme.</p>
+      {backFromStripe && isOwner && <p className="mb-3 text-xs font-medium" style={{ color: colors.moss }}>De retour du prestataire de paiement : état du compte actualisé.</p>}
       {body}
     </div>
   );
@@ -15476,7 +15476,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
       )}
       {stripeReturnMsg === "succes" && (
         <div className="mx-auto mb-6 max-w-lg rounded-xl p-3 text-center text-sm" style={{ background: `${colors.moss}15`, color: colors.moss, border: `1px solid ${colors.moss}40` }}>
-          Merci ! Ton paiement par carte a été confirmé par Stripe. L'activation du forfait peut prendre quelques instants — recharge la page si besoin.
+          Merci ! Ton paiement par carte a été confirmé. L'activation du forfait peut prendre quelques instants — recharge la page si besoin.
         </div>
       )}
       {stripeReturnMsg === "annule" && (
@@ -15745,7 +15745,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
         <div>
           <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Commission sur les paiements en ligne (%)</label>
           <input type="number" min="0" max="20" step="0.1" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.connectFeePercent ?? 0} onChange={(e) => patch({ connectFeePercent: Math.min(20, Math.max(0, Number(e.target.value) || 0)) })} />
-          <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Stripe Connect : part du montant de chaque facture payée en ligne prélevée pour la plateforme, en plus des frais Stripe à la charge de l'artisan. 0 = aucune commission. Une commission est un service facturé à l'artisan : à prévoir dans les CGV et à facturer avec TVA.</p>
+          <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Part du montant de chaque facture payée en ligne prélevée pour la plateforme, en plus des frais du prestataire de paiement à la charge de l'artisan. 0 = aucune commission. Une commission est un service facturé à l'artisan : à prévoir dans les CGV et à facturer avec TVA.</p>
         </div>
         <div>
           <label className="mb-2 block text-xs font-medium" style={{ color: colors.inkSoft }}>Logo du site</label>
@@ -16534,15 +16534,15 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
             ))}
           </CollapsibleSection>
 
-          <CollapsibleSection title="Paiement — carte bancaire (Stripe)" icon={CreditCard}>
+          <CollapsibleSection title="Paiement — carte bancaire" icon={CreditCard}>
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-              Colle ici l'identifiant de prix Stripe ("price_...") créé pour chaque forfait — le bouton "Payer par carte" n'apparaît que si un identifiant est renseigné ET que l'affichage est activé ci-dessous.
+              Colle ici l'identifiant de prix ("price_...") créé chez le prestataire de paiement par carte pour chaque forfait — le bouton "Payer par carte" n'apparaît que si un identifiant est renseigné ET que l'affichage est activé ci-dessous.
             </p>
             {plans.filter((p) => p.monthly !== null).map((plan) => (
               <div key={plan.id} className="flex flex-wrap items-center gap-4 border-b px-4 py-3" style={{ borderColor: colors.line }}>
                 <div className="min-w-0 basis-28 shrink-0 text-sm font-medium">{plan.name}</div>
-                <StripeIdField label="ID prix Stripe (mensuel)" value={plan.stripePriceIdMonthly} onSave={(v) => onUpdatePlanStripeId(plan.id, "monthly", v)} />
-                <StripeIdField label="ID prix Stripe (annuel)" value={plan.stripePriceIdAnnual} onSave={(v) => onUpdatePlanStripeId(plan.id, "annual", v)} />
+                <StripeIdField label="ID prix carte (mensuel)" value={plan.stripePriceIdMonthly} onSave={(v) => onUpdatePlanStripeId(plan.id, "monthly", v)} />
+                <StripeIdField label="ID prix carte (annuel)" value={plan.stripePriceIdAnnual} onSave={(v) => onUpdatePlanStripeId(plan.id, "annual", v)} />
                 <div className="ml-auto flex items-center gap-1.5">
                   <span className="text-xs font-medium" style={{ color: plan.cardPaymentEnabled ? colors.moss : colors.inkSoft }}>{plan.cardPaymentEnabled ? "Affiché" : "Masqué"}</span>
                   <button

@@ -70,7 +70,9 @@ describe("paiement en ligne ajouté à la liste (webhooks)", () => {
     const d = facture({ payments: [pays[0]] });
     const first = addOnlinePayment(d, "cs_1", 5000, "2026-10-02T09:00:00.000Z");
     expect(first.payments).toHaveLength(2);
-    expect(first.payments[1]).toMatchObject({ id: "pay_stripe_cs_1", date: "2026-10-02", amount: 50, method: "Carte bancaire (en ligne)" });
+    expect(first.payments[1]).toMatchObject({ id: "pay_stripe_cs_1", date: "2026-10-02", amount: 50, method: "Carte bancaire (en ligne)", note: "" });
+    // Le nom du prestataire n'apparaît ni sur la facture ni dans le PDF.
+    expect(textOf(pdf(first))).not.toMatch(/stripe/i);
     expect(first.status).not.toBe("payée");
     const again = addOnlinePayment(first, "cs_1", 5000, "2026-10-02T09:00:00.000Z");
     expect(again.payments).toHaveLength(2);
@@ -163,7 +165,7 @@ describe("éditeur — paiements en ligne repris à l'ouverture", () => {
   const noop = () => {};
   const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
   const common = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow", landingPageVersion: "classique" }, isLocked: false, isViewer: false, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients: [], products: [], stockByProduct: {}, companyProfile: emptyCompanyProfile(), onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, onChange: noop };
-  const online = { id: "pay_stripe_cs_9", date: "2026-09-22", amount: 9, method: "Carte bancaire (en ligne)", note: "Stripe" };
+  const online = { id: "pay_stripe_cs_9", date: "2026-09-22", amount: 9, method: "Carte bancaire (en ligne)", note: "" };
   it("facture pas soldée : vérification demandée avec son identifiant, paiement reçu affiché sans enregistrement local", async () => {
     const doc = facture({ payments: [] });
     const asked = [];

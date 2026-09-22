@@ -48,7 +48,7 @@ export function addOnlinePayment(doc: any, sessionId: string, amountCents: numbe
   const payments = Array.isArray(doc?.payments) ? doc.payments : [];
   const id = `pay_stripe_${sessionId}`;
   const amount = Math.round(Math.max(0, num(amountCents))) / 100;
-  const next = payments.some((p: any) => p?.id === id) ? payments : [...payments, { id, date: dateIso.slice(0, 10), amount, method: "Carte bancaire (en ligne)", note: "Stripe" }];
+  const next = payments.some((p: any) => p?.id === id) ? payments : [...payments, { id, date: dateIso.slice(0, 10), amount, method: "Carte bancaire (en ligne)", note: "" }];
   const updated = { ...doc, payments: next, updatedAt: Date.now() };
   if (amountDueOf(updated) <= 0.005) { updated.status = "payée"; updated.paidAt = dateIso; }
   return updated;

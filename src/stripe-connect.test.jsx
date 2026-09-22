@@ -42,21 +42,22 @@ async function mount(element) {
 const buttonByText = (c, text) => [...c.querySelectorAll("button")].find((b) => b.textContent.trim() === text);
 
 describe("carte Connecter mon compte bancaire", () => {
-  it("non connecté : explication, frais, bouton « Connecter avec Stripe » ; état demandé au serveur avec le jeton", async () => {
+  it("non connecté : explication, frais, bouton « Connecter mon compte de paiement » ; état demandé au serveur avec le jeton ; le nom du prestataire n'apparaît jamais", async () => {
     const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
     const text = container.textContent;
     expect(text).toContain("Connecter mon compte bancaire");
-    expect(text).toContain("il ne te reste que la date de naissance, l'acceptation des conditions de Stripe");
+    expect(text).toContain("il ne te reste que la date de naissance, l'acceptation de ses conditions");
+    expect(text).not.toMatch(/stripe/i);
     expect(text).toContain("Aucune commission de la plateforme.");
     expect(text).toContain("le bouton « Payer en ligne » apparaît sur la page de tes factures");
-    expect(buttonByText(container, "Connecter avec Stripe")).toBeTruthy();
+    expect(buttonByText(container, "Connecter mon compte de paiement")).toBeTruthy();
     expect(calls).toEqual([{ name: "connect-onboarding", body: { organizationId: "org", action: "status" }, auth: "Bearer jeton" }]);
     await unmount();
   }, 30000);
   it("clic sur Connecter : action start, puis redirection vers le lien Stripe", async () => {
     const redirects = [];
     const { container, unmount } = await mount(<StripeConnectCard account={owner} onRedirect={(u) => redirects.push(u)} />);
-    await click(buttonByText(container, "Connecter avec Stripe"));
+    await click(buttonByText(container, "Connecter mon compte de paiement"));
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
     expect(calls.at(-1)).toMatchObject({ body: { organizationId: "org", action: "start" } });
     expect(redirects).toEqual(["https://connect.stripe.com/setup/s/test"]);
@@ -66,11 +67,12 @@ describe("carte Connecter mon compte bancaire", () => {
     state.status = { connected: true, chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false, requirementsDue: 3, disabledReason: "requirements.past_due" };
     const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
     const text = container.textContent;
-    expect(text).toContain("Configuration à terminer chez Stripe");
-    expect(text).toContain("3 informations attendues par Stripe.");
-    expect(text).toContain("Stripe attend des informations ou une vérification.");
+    expect(text).toContain("Configuration à terminer auprès du prestataire de paiement");
+    expect(text).toContain("3 informations attendues par le prestataire de paiement.");
+    expect(text).toContain("Le prestataire de paiement attend des informations ou une vérification.");
+    expect(text).not.toMatch(/stripe/i);
     expect(buttonByText(container, "Reprendre la configuration")).toBeTruthy();
-    expect(buttonByText(container, "Connecter avec Stripe")).toBeUndefined();
+    expect(buttonByText(container, "Connecter mon compte de paiement")).toBeUndefined();
     expect(container.querySelector('a[href="https://dashboard.stripe.com"]')).toBeTruthy();
     await unmount();
   }, 30000);
@@ -97,14 +99,14 @@ describe("carte Connecter mon compte bancaire", () => {
     const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
     expect(container.textContent).toContain("base de données à préparer");
     expect(buttonByText(container, "Réessayer")).toBeTruthy();
-    expect(buttonByText(container, "Connecter avec Stripe")).toBeUndefined();
+    expect(buttonByText(container, "Connecter mon compte de paiement")).toBeUndefined();
     await unmount();
   }, 30000);
   it("retour de Stripe (?stripe-connect=retour) : adresse nettoyée, mention affichée, état relu", async () => {
     window.history.replaceState({}, "", "/?stripe-connect=retour&autre=1");
     state.status = { connected: true, chargesEnabled: true, payoutsEnabled: true, detailsSubmitted: true, requirementsDue: 0, disabledReason: null };
     const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
-    expect(container.textContent).toContain("De retour de Stripe : état du compte actualisé.");
+    expect(container.textContent).toContain("De retour du prestataire de paiement : état du compte actualisé.");
     expect(window.location.search).toBe("?autre=1");
     expect(calls).toHaveLength(1);
     await unmount();
@@ -165,7 +167,7 @@ describe("carte Connecter mon compte bancaire", () => {
     await click(buttonByText(container, "Recommencer à zéro"));
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
     expect(calls.map((c) => c.body.action)).toEqual(["status", "reset", "status"]);
-    expect(buttonByText(container, "Connecter avec Stripe")).toBeTruthy(); // repart de zéro
+    expect(buttonByText(container, "Connecter mon compte de paiement")).toBeTruthy(); // repart de zéro
     confirmSpy.mockRestore();
     await unmount();
     state.status = { connected: true, chargesEnabled: true, payoutsEnabled: false, detailsSubmitted: true, requirementsDue: 1, disabledReason: null };
