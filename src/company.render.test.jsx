@@ -3,9 +3,12 @@
 // juridique, capital, RCS/RM, mention EI, assurance décennale, médiateur).
 // Vérifie le formulaire, le résumé, les libellés imprimables, et qu'un profil
 // existant sans ces champs s'ouvre sans erreur ni perte.
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+// Base simulée : la carte « Connecter mon compte bancaire » de Mon
+// entreprise interroge le serveur au montage (voir stripe-connect.test.jsx).
+vi.mock("./client.js", () => ({ db: { functions: { invoke: async () => ({ data: { connected: false }, error: null }) }, auth: { getSession: async () => ({ data: { session: { access_token: "jeton" } } }) }, rpc: async () => ({ data: [], error: null }) } }));
 import { CompanyView, emptyCompanyProfile, companyLegalFormLabel, companyInsuranceLabel } from "./App.jsx";
 
 beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; });

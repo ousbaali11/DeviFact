@@ -14415,6 +14415,153 @@ function companyInsuranceLabel(p) {
   return parts.join(", ");
 }
 
+// ---------------------------------------------------------------------------
+// Stripe Connect, livraison 1 : connexion du compte bancaire de l'artisan.
+// Le compte Stripe connecté appartient à l'organisation (colonnes
+// organizations.stripe_*, écrites uniquement par la fonction Edge
+// connect-onboarding). Configuration validée : tableau de bord Stripe
+// complet pour l'artisan, frais payés par l'artisan, Stripe responsable des
+// soldes négatifs (ancien « Standard »). L'argent des factures ne transite
+// jamais par le compte de la plateforme.
+// ---------------------------------------------------------------------------
+const STRIPE_DASHBOARD_URL = "https://dashboard.stripe.com";
+async function callConnectOnboarding(organizationId, action) {
+  const { data: { session } } = await db.auth.getSession();
+  const { data, error } = await db.functions.invoke("connect-onboarding", {
+    body: { organizationId, action },
+    headers: { Authorization: `Bearer ${session?.access_token}` },
+  });
+  if (error || data?.error) {
+    // Le SDK masque le vrai message derrière une erreur générique en cas
+    // de statut non-2xx — on va le chercher dans la réponse brute.
+    let message = data?.error;
+    if (!message && error?.context) {
+      try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ }
+    }
+    throw new Error(message || error?.message || "Erreur inconnue");
+  }
+  return data || {};
+}
+// Libellé lisible des motifs de blocage renvoyés par Stripe.
+function stripeDisabledReasonLabel(reason) {
+  if (!reason) return "";
+  if (/past_due|pending_verification|listed|fields_needed/.test(reason)) return "Stripe attend des informations ou une vérification.";
+  if (/rejected/.test(reason)) return "Stripe a refusé le compte : contacte le support Stripe depuis ton tableau de bord.";
+  if (/under_review/.test(reason)) return "Compte en cours d'examen par Stripe.";
+  return `Motif Stripe : ${reason}`;
+}
+function StripeConnectCard({ account, onRedirect = (url) => { window.location.href = url; } }) {
+  const isOwner = account?.role === "owner";
+  const organizationId = account?.organizationId;
+  const [status, setStatus] = useState(null); // null = vérification en cours
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [backFromStripe, setBackFromStripe] = useState(false);
+
+  async function load() {
+    setError("");
+    try {
+      setStatus(await callConnectOnboarding(organizationId, "status"));
+    } catch (err) {
+      console.error("État Stripe Connect indisponible", err);
+      setStatus({ unavailable: true });
+      setError(err.message || "Impossible de vérifier le compte pour l'instant.");
+    }
+  }
+  useEffect(() => {
+    if (!isOwner || !organizationId) return;
+    // Retour de l'inscription Stripe (?stripe-connect=retour ou =reprise) :
+    // l'adresse est nettoyée et l'état relu.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("stripe-connect")) {
+        setBackFromStripe(true);
+        params.delete("stripe-connect");
+        const qs = params.toString();
+        window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+      }
+    } catch { /* adresse non modifiable : sans conséquence */ }
+    load();
+  }, [isOwner, organizationId]);
+
+  async function start() {
+    setBusy(true);
+    setError("");
+    try {
+      const { url } = await callConnectOnboarding(organizationId, "start");
+      if (!url) throw new Error("Lien d'inscription manquant.");
+      onRedirect(url);
+    } catch (err) {
+      console.error("Connexion Stripe impossible", err);
+      setError(err.message || "Impossible de démarrer la connexion pour l'instant.");
+      setBusy(false);
+    }
+  }
+
+  if (!organizationId) return null;
+  const active = !!status?.connected && status.chargesEnabled && status.payoutsEnabled;
+  const secondary = { border: `1px solid ${colors.line}`, color: colors.slate };
+  let body;
+  if (!isOwner) {
+    body = <p className="text-sm" style={{ color: colors.inkSoft }}>Seul le propriétaire de l'organisation peut connecter le compte bancaire.</p>;
+  } else if (status === null) {
+    body = <p className="flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}><Loader2 size={14} className="animate-spin" /> Vérification du compte…</p>;
+  } else if (status.unavailable) {
+    body = (
+      <div className="space-y-2">
+        <p className="text-sm" style={{ color: colors.brick }}>{error || "Impossible de vérifier le compte pour l'instant."}</p>
+        <button onClick={load} className="rounded-lg px-3 py-2 text-xs font-medium" style={secondary}>Réessayer</button>
+      </div>
+    );
+  } else if (!status.connected) {
+    body = (
+      <div className="space-y-3">
+        <p className="text-sm">Stripe te demandera, en quelques minutes : une pièce d'identité, ton SIRET, ton IBAN et un numéro de téléphone. Tu gardes ensuite un accès complet à ton tableau de bord Stripe (encaissements, virements, remboursements).</p>
+        <p className="text-xs" style={{ color: colors.inkSoft }}>Frais Stripe à ta charge sur chaque paiement par carte (environ 1,5 % + 0,25 € pour une carte européenne). Aucune commission de la plateforme.</p>
+        {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
+        <button onClick={start} disabled={busy} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}>
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Landmark size={15} />} {busy ? "Redirection vers Stripe…" : "Connecter avec Stripe"}
+        </button>
+      </div>
+    );
+  } else {
+    const badge = active
+      ? { color: colors.moss, text: "Compte connecté : paiements en ligne actifs" }
+      : status.chargesEnabled
+        ? { color: colors.brassDark, text: "Paiements actifs, virements en attente : informations à compléter chez Stripe" }
+        : { color: colors.brassDark, text: "Configuration à terminer chez Stripe" };
+    body = (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium" style={{ color: badge.color }}>
+          {active ? <Check size={16} /> : <AlertTriangle size={16} />} {badge.text}
+        </div>
+        {!active && status.requirementsDue > 0 && <p className="text-xs" style={{ color: colors.inkSoft }}>{status.requirementsDue} information{status.requirementsDue > 1 ? "s" : ""} attendue{status.requirementsDue > 1 ? "s" : ""} par Stripe.</p>}
+        {!active && stripeDisabledReasonLabel(status.disabledReason) && <p className="text-xs" style={{ color: colors.inkSoft }}>{stripeDisabledReasonLabel(status.disabledReason)}</p>}
+        {status.stale && <p className="text-xs" style={{ color: colors.inkSoft }}>Dernier état connu (Stripe injoignable pour l'instant).</p>}
+        {active && <p className="text-xs" style={{ color: colors.inkSoft }}>Tes clients pourront payer tes factures en ligne depuis le lien ou le QR code de la facture, dès la mise en service du paiement direct.</p>}
+        {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          {!active && (
+            <button onClick={start} disabled={busy} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Landmark size={15} />} {busy ? "Redirection vers Stripe…" : "Reprendre la configuration"}
+            </button>
+          )}
+          <a href={STRIPE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className="rounded-lg px-3 py-2 text-xs font-medium" style={secondary}>Ouvrir mon tableau de bord Stripe</a>
+          <button onClick={load} className="rounded-lg px-3 py-2 text-xs font-medium" style={secondary}>Actualiser</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+      <div className="mb-1 flex items-center gap-2 text-sm font-semibold"><Landmark size={15} style={{ color: colors.slate }} /> Connecter mon compte bancaire</div>
+      <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Pour que tes clients paient tes factures en ligne par carte. L'argent arrive directement sur ton compte bancaire, via un compte Stripe à ton nom : il ne transite jamais par la plateforme.</p>
+      {backFromStripe && isOwner && <p className="mb-3 text-xs font-medium" style={{ color: colors.moss }}>De retour de Stripe : état du compte actualisé.</p>}
+      {body}
+    </div>
+  );
+}
+
 function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, isViewer, onGoToPricing }) {
   const [local, setLocal] = useState(() => withGeoCountry(profile));
   const [editing, setEditing] = useState(!profile.name);
@@ -14659,6 +14806,8 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
           </div>
         </div>
       )}
+
+      <StripeConnectCard account={account} />
 
       <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
         <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.brick }}>
@@ -17875,5 +18024,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

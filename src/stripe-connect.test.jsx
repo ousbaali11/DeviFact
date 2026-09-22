@@ -1,0 +1,123 @@
+// @vitest-environment jsdom
+// Stripe Connect, livraison 1 : carte « Connecter mon compte bancaire »
+// dans Mon entreprise — états (non connecté, à terminer, actif, erreur),
+// démarrage de l'inscription, retour de Stripe, réservé au propriétaire.
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
+
+const calls = [];
+const state = { status: { connected: false }, startUrl: "https://connect.stripe.com/setup/s/test", fail: null };
+vi.mock("./client.js", () => ({
+  db: {
+    functions: {
+      invoke: async (name, opts) => {
+        calls.push({ name, body: opts?.body, auth: opts?.headers?.Authorization });
+        if (state.fail) return { data: { error: state.fail }, error: null };
+        if (opts?.body?.action === "status") return { data: state.status, error: null };
+        if (opts?.body?.action === "start") return { data: { url: state.startUrl }, error: null };
+        return { data: { error: "action inconnue" }, error: null };
+      },
+    },
+    auth: { getSession: async () => ({ data: { session: { access_token: "jeton" } } }) },
+    rpc: async () => ({ data: [], error: null }),
+  },
+}));
+import { StripeConnectCard, CompanyView, emptyCompanyProfile } from "./App.jsx";
+
+beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = () => {}; });
+beforeEach(() => { calls.length = 0; state.status = { connected: false }; state.fail = null; window.history.replaceState({}, "", "/"); });
+
+const owner = { id: "u1", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "patron@exemple.fr", memberships: [] };
+const click = (el) => act(async () => { el.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+async function mount(element) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => { root.render(element); });
+  await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+  return { container, unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); } };
+}
+const buttonByText = (c, text) => [...c.querySelectorAll("button")].find((b) => b.textContent.trim() === text);
+
+describe("carte Connecter mon compte bancaire", () => {
+  it("non connecté : explication, frais, bouton « Connecter avec Stripe » ; état demandé au serveur avec le jeton", async () => {
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
+    const text = container.textContent;
+    expect(text).toContain("Connecter mon compte bancaire");
+    expect(text).toContain("pièce d'identité, ton SIRET, ton IBAN");
+    expect(text).toContain("Aucune commission de la plateforme.");
+    expect(buttonByText(container, "Connecter avec Stripe")).toBeTruthy();
+    expect(calls).toEqual([{ name: "connect-onboarding", body: { organizationId: "org", action: "status" }, auth: "Bearer jeton" }]);
+    await unmount();
+  }, 30000);
+  it("clic sur Connecter : action start, puis redirection vers le lien Stripe", async () => {
+    const redirects = [];
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} onRedirect={(u) => redirects.push(u)} />);
+    await click(buttonByText(container, "Connecter avec Stripe"));
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(calls.at(-1)).toMatchObject({ body: { organizationId: "org", action: "start" } });
+    expect(redirects).toEqual(["https://connect.stripe.com/setup/s/test"]);
+    await unmount();
+  }, 30000);
+  it("configuration à terminer : badge orange, informations attendues, bouton Reprendre ; jamais de bouton Connecter", async () => {
+    state.status = { connected: true, chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false, requirementsDue: 3, disabledReason: "requirements.past_due" };
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
+    const text = container.textContent;
+    expect(text).toContain("Configuration à terminer chez Stripe");
+    expect(text).toContain("3 informations attendues par Stripe.");
+    expect(text).toContain("Stripe attend des informations ou une vérification.");
+    expect(buttonByText(container, "Reprendre la configuration")).toBeTruthy();
+    expect(buttonByText(container, "Connecter avec Stripe")).toBeUndefined();
+    expect(container.querySelector('a[href="https://dashboard.stripe.com"]')).toBeTruthy();
+    await unmount();
+  }, 30000);
+  it("paiements actifs mais virements en attente : badge dédié et bouton Reprendre", async () => {
+    state.status = { connected: true, chargesEnabled: true, payoutsEnabled: false, detailsSubmitted: true, requirementsDue: 1, disabledReason: null };
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
+    expect(container.textContent).toContain("Paiements actifs, virements en attente");
+    expect(buttonByText(container, "Reprendre la configuration")).toBeTruthy();
+    await unmount();
+  }, 30000);
+  it("compte actif : badge vert, tableau de bord, Actualiser (nouvelle lecture de l'état), pas de bouton Reprendre", async () => {
+    state.status = { connected: true, chargesEnabled: true, payoutsEnabled: true, detailsSubmitted: true, requirementsDue: 0, disabledReason: null };
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
+    expect(container.textContent).toContain("Compte connecté : paiements en ligne actifs");
+    expect(buttonByText(container, "Reprendre la configuration")).toBeUndefined();
+    await click(buttonByText(container, "Actualiser"));
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(calls.filter((c) => c.body.action === "status")).toHaveLength(2);
+    await unmount();
+  }, 30000);
+  it("erreur du serveur (ex. script SQL non appliqué) : message et bouton Réessayer", async () => {
+    state.fail = "Connexion bancaire pas encore disponible : base de données à préparer (script SQL Stripe Connect).";
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
+    expect(container.textContent).toContain("base de données à préparer");
+    expect(buttonByText(container, "Réessayer")).toBeTruthy();
+    expect(buttonByText(container, "Connecter avec Stripe")).toBeUndefined();
+    await unmount();
+  }, 30000);
+  it("retour de Stripe (?stripe-connect=retour) : adresse nettoyée, mention affichée, état relu", async () => {
+    window.history.replaceState({}, "", "/?stripe-connect=retour&autre=1");
+    state.status = { connected: true, chargesEnabled: true, payoutsEnabled: true, detailsSubmitted: true, requirementsDue: 0, disabledReason: null };
+    const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
+    expect(container.textContent).toContain("De retour de Stripe : état du compte actualisé.");
+    expect(window.location.search).toBe("?autre=1");
+    expect(calls).toHaveLength(1);
+    await unmount();
+  }, 30000);
+  it("membre non propriétaire : note seulement, aucun appel au serveur", async () => {
+    const { container, unmount } = await mount(<StripeConnectCard account={{ ...owner, role: "editor" }} />);
+    expect(container.textContent).toContain("Seul le propriétaire de l'organisation peut connecter le compte bancaire.");
+    expect(calls).toHaveLength(0);
+    await unmount();
+  }, 30000);
+  it("Mon entreprise affiche la carte au-dessus de la zone de test", async () => {
+    const noop = () => {};
+    const { container, unmount } = await mount(<CompanyView profile={{ ...emptyCompanyProfile(), name: "Bâti Plus" }} saving={false} onSave={noop} onReset={noop} documentCount={0} clientCount={0} account={owner} isLocked={false} isViewer={false} onGoToPricing={noop} />);
+    const text = container.textContent;
+    expect(text.indexOf("Connecter mon compte bancaire")).toBeGreaterThan(-1);
+    expect(text.indexOf("Connecter mon compte bancaire")).toBeLessThan(text.indexOf("Zone de test"));
+    await unmount();
+  }, 30000);
+});
