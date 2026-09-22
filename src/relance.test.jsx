@@ -110,7 +110,8 @@ describe("éditeur", () => {
   it("nouveau courrier vide : bouton bloqué avec la liste ; titre selon le niveau", async () => {
     const fresh = await renderOnce(<RelanceFormelleEditor {...props} doc={newRelanceFormelleDocument([])} />);
     expect(fresh.disabled).toBe(true);
-    expect(fresh.text).toContain("Champs obligatoires manquants : Facture concernée (référence), Montant dû, Nom du client débiteur, Nom de l'entreprise");
+    // Le nom de l'entreprise est repris de Mon entreprise (props.companyProfile) : plus réclamé.
+    expect(fresh.text).toContain("Champs obligatoires manquants : Facture concernée (référence), Montant dû, Nom du client débiteur");
     expect(fresh.text).toContain("Mise en demeure de payer");
     const r1 = await renderOnce(<RelanceFormelleEditor {...props} doc={full({ niveau: "relance1" })} />);
     expect(r1.text).toContain("Première relance de paiement");

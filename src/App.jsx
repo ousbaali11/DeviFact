@@ -868,6 +868,53 @@ function companySnapshotOf(profile) {
   for (const k of COMPANY_SNAPSHOT_EXCLUDED) delete out[k];
   return out;
 }
+// Champs de l'émetteur et du client repris des fiches (Mon entreprise, fiche
+// client liée par clientId ou par nom identique). Seuls les champs VIDES du
+// document sont complétés — jamais une valeur saisie ; le type
+// (entreprise / particulier) suit la fiche seulement s'il n'est pas déjà
+// posé. Importer un client ou son entreprise ne réclame donc rien de plus.
+const DOC_COMPANY_FIELDS = ["type", "name", "siret", "tva", "address", "postalCode", "city", "country", "email", "phone", "logo"];
+const DOC_CLIENT_FIELDS = ["type", "name", "address", "postalCode", "city", "country", "email", "phone", "siret", "tva"];
+const isBlankValue = (v) => v === undefined || v === null || (typeof v === "string" && !v.trim());
+function fillBlankFields(target, source, fields) {
+  if (!source) return target;
+  let out = target;
+  for (const f of fields) {
+    if (isBlankValue(target?.[f]) && !isBlankValue(source[f])) {
+      if (out === target) out = { ...(target || {}) };
+      out[f] = source[f];
+    }
+  }
+  return out;
+}
+// Fiche client d'un document : liée par clientId, sinon nom identique.
+function clientRecordOf(doc, clients) {
+  if (!doc) return null;
+  const list = Array.isArray(clients) ? clients : [];
+  return list.find((c) => c.id === doc.clientId) || (doc.client?.name ? findClientByName(list, doc.client.name) : null) || null;
+}
+function completeDocumentFromRecords(doc, companyProfile, clients) {
+  if (!doc) return doc;
+  let next = doc;
+  if (doc.company && companyProfile && String(companyProfile.name || "").trim()) {
+    const company = fillBlankFields(doc.company, companyProfile, DOC_COMPANY_FIELDS);
+    if (company !== doc.company) next = { ...next, company };
+  }
+  const record = clientRecordOf(doc, clients);
+  if (record && doc.client) {
+    const client = fillBlankFields(doc.client, record, DOC_CLIENT_FIELDS);
+    if (client !== doc.client) next = { ...next, client };
+    if (!doc.clientId) next = { ...next, clientId: record.id };
+  }
+  return next;
+}
+// Client choisi ou reconnu par son nom : toute sa fiche est reprise (type,
+// pays, ville, SIRET…), les champs déjà saisis dans le document sont gardés.
+function mergeClientRecord(current, record, name) {
+  const cur = { ...(current || {}), name };
+  if (!record) return cur;
+  return { ...fillBlankFields(cur, record, DOC_CLIENT_FIELDS), ...(record.type ? { type: record.type } : {}), name };
+}
 // Client enregistré dont le nom correspond (sans tenir compte de la casse ni
 // des espaces) : sert à lier automatiquement les documents des éditeurs
 // spécialisés, qui n'ont pas de sélecteur de client.
@@ -2007,17 +2054,22 @@ const REQUIRED_FIELD_RULES = {
     { label: "Au moins une ligne avec une désignation", test: hasOneLine },
   ],
 };
-function documentFieldGaps(doc) {
+// context = { companyProfile, clients } : les champs vides de l'émetteur et
+// du client sont d'abord complétés depuis les fiches (voir
+// completeDocumentFromRecords), pour ne jamais réclamer une information
+// déjà enregistrée dans Mon entreprise ou dans la fiche client.
+function documentFieldGaps(doc, context = null) {
   if (!doc) return [];
-  return (REQUIRED_FIELD_RULES[doc.type] || []).filter((r) => !r.test(doc)).map((r) => r.label);
+  const d = context ? completeDocumentFromRecords(doc, context.companyProfile, context.clients) : doc;
+  return (REQUIRED_FIELD_RULES[d.type] || []).filter((r) => !r.test(d)).map((r) => r.label);
 }
 // Bloquant : documents créés avec la version courante du modèle.
-function documentValidationErrors(doc) {
-  return isStrictDocument(doc) ? documentFieldGaps(doc) : [];
+function documentValidationErrors(doc, context = null) {
+  return isStrictDocument(doc) ? documentFieldGaps(doc, context) : [];
 }
 // Invitation seulement : documents plus anciens, qui restent enregistrables.
-function documentSuggestedFields(doc) {
-  return isStrictDocument(doc) ? [] : documentFieldGaps(doc);
+function documentSuggestedFields(doc, context = null) {
+  return isStrictDocument(doc) ? [] : documentFieldGaps(doc, context);
 }
 
 // Facture d'acompte : la ligne facturée est GÉNÉRÉE par le bloc acompte
@@ -4125,6 +4177,14 @@ function DeviFactAppInner() {
   }
   function openDoc(id) {
     const target = documents.find((d) => d.id === id);
+    // Champs vides de l'émetteur et du client repris des fiches (Mon
+    // entreprise, fiche client liée) : un document créé avant que les
+    // fiches soient complètes ne réclame rien de plus. Documents terminés
+    // laissés tels quels.
+    if (target && target.workStage !== "termine" && !isLocked) {
+      const completed = completeDocumentFromRecords(target, companyProfile, clients);
+      if (completed !== target) persist(documents.map((d) => (d.id === id ? { ...completed, updatedAt: Date.now() } : d)));
+    }
     setActiveId(id);
     setView(target?.type === "revision" ? "revision-editor" : target?.type === "situation" ? "situation-editor" : target?.type === "pv_reception" ? "pv-editor" : target?.type === "rapport" ? "rapport-editor" : target?.type === "contrat" ? "contrat-editor" : target?.type === "relance" ? "relance-editor" : target?.type === "planning" ? "planning-editor" : "editor");
   }
@@ -4213,7 +4273,7 @@ function DeviFactAppInner() {
       alert("Il n'y a encore rien à enregistrer — remplis au moins un champ avant.");
       return;
     }
-    const missing = documentValidationErrors(doc);
+    const missing = documentValidationErrors(doc, { companyProfile, clients });
     if (missing.length) {
       alert(`Champs obligatoires manquants :\n- ${missing.join("\n- ")}`);
       return;
@@ -7964,9 +8024,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   const clientListId = `df-clients-${localDoc.id}`;
   function setClientName(name) {
     const match = findClientByName(clients, name);
-    const cur = localDoc.client || {};
-    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
-    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
+    patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
   }
   function patchDeep(field, p) {
     patch({ [field]: { ...localDoc[field], ...p } });
@@ -8532,7 +8590,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintRevision ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -8730,9 +8788,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   const clientListId = `df-clients-${localDoc.id}`;
   function setClientName(name) {
     const match = findClientByName(clients, name);
-    const cur = localDoc.client || {};
-    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
-    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
+    patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function patchLine(id, p) { patch({ items: localDoc.items.map((l) => (l.id === id ? { ...l, ...p } : l)) }); }
@@ -9044,7 +9100,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintSituation ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} companyProfile={companyProfile} />
     </div>
   );
@@ -9218,9 +9274,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
   const clientListId = `df-clients-${localDoc.id}`;
   function setClientName(name) {
     const match = findClientByName(clients, name);
-    const cur = localDoc.client || {};
-    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
-    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
+    patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addReserve() { patch({ reserves: [...(localDoc.reserves || []), emptyReserve()] }); }
@@ -9483,7 +9537,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
     </div>
   );
@@ -9740,9 +9794,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
   const clientListId = `df-clients-${localDoc.id}`;
   function setClientName(name) {
     const match = findClientByName(clients, name);
-    const cur = localDoc.client || {};
-    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
-    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
+    patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addMateriel() { patch({ materielsUtilises: [...(localDoc.materielsUtilises || []), emptyMaterielUtilise()] }); }
@@ -10006,7 +10058,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
     </div>
   );
@@ -10159,9 +10211,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
   const clientListId = `df-clients-${localDoc.id}`;
   function setClientName(name) {
     const match = findClientByName(clients, name);
-    const cur = localDoc.client || {};
-    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
-    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
+    patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
 
@@ -10390,7 +10440,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintContrat ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} companyProfile={companyProfile} />
     </div>
   );
@@ -10524,9 +10574,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
   const clientListId = `df-clients-${localDoc.id}`;
   function setClientName(name) {
     const match = findClientByName(clients, name);
-    const cur = localDoc.client || {};
-    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
-    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
+    patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
 
@@ -10725,7 +10773,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintRelance ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} companyProfile={companyProfile} />
     </div>
   );
@@ -10884,9 +10932,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
   const clientListId = `df-clients-${localDoc.id}`;
   function setClientName(name) {
     const match = findClientByName(clients, name);
-    const cur = localDoc.client || {};
-    const fill = (field) => (String(cur[field] || "").trim() ? cur[field] : match?.[field] || "");
-    patch({ client: { ...cur, name, ...(match ? { address: fill("address"), email: fill("email"), phone: fill("phone") } : {}) }, clientId: match ? match.id : null });
+    patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
   function addTache() { patch({ taches: [...(localDoc.taches || []), emptyTachePlanning((localDoc.taches || []).length)] }); }
@@ -11102,7 +11148,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
         </div>
       </div>
 
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintPlanning ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
     </div>
   );
@@ -12979,9 +13025,15 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>{clients.some((c) => c.id === editing.id) ? "Modifier le client" : "Nouveau client"}</span>
             <button onClick={() => setEditing(null)} style={{ color: colors.inkSoft }}><X size={16} /></button>
           </div>
+          <div className="mb-3 flex items-center gap-2 text-xs">
+            <span style={{ color: colors.inkSoft }}>Type :</span>
+            {[["entreprise", "Entreprise"], ["particulier", "Particulier"]].map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setEditing({ ...editing, type: id })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: (editing.type || "entreprise") === id ? colors.ink : "transparent", color: (editing.type || "entreprise") === id ? "white" : colors.inkSoft, border: `1px solid ${colors.line}` }}>{label}</button>
+            ))}
+          </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
-              <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${nameError ? colors.brick : colors.line}` }} placeholder="Nom / raison sociale" value={editing.name} onChange={(e) => { setEditing({ ...editing, name: e.target.value }); if (nameError) setNameError(false); }} />
+              <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${nameError ? colors.brick : colors.line}` }} placeholder={(editing.type || "entreprise") === "particulier" ? "Nom et prénom" : "Nom / raison sociale"} value={editing.name} onChange={(e) => { setEditing({ ...editing, name: e.target.value }); if (nameError) setNameError(false); }} />
               {nameError && <p className="mt-1 text-xs" style={{ color: colors.brick }}>Le nom est obligatoire.</p>}
             </div>
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Adresse" value={editing.address} onChange={(e) => setEditing({ ...editing, address: e.target.value })} />
@@ -12989,8 +13041,11 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Téléphone" value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Code postal (facturation électronique)" value={editing.postalCode || ""} onChange={(e) => setEditing({ ...editing, postalCode: e.target.value })} />
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Ville (facturation électronique)" value={editing.city || ""} onChange={(e) => setEditing({ ...editing, city: e.target.value })} />
+            <div title="Pays du client (imprimé sur la facture, requis pour Factur-X)"><CountrySelect value={editing.country || ""} onChange={(v) => setEditing({ ...editing, country: v })} placeholder="Pays" /></div>
+            {(editing.type || "entreprise") !== "particulier" && (<>
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="SIRET (14 chiffres, si professionnel)" value={editing.siret || ""} onChange={(e) => setEditing({ ...editing, siret: e.target.value })} />
             <input className="df-input rounded-md px-2 py-1.5 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="N° TVA intracommunautaire (si professionnel)" value={editing.tva || ""} onChange={(e) => setEditing({ ...editing, tva: e.target.value })} />
+            </>)}
           </div>
           <button onClick={save} className="mt-3 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Enregistrer</button>
         </div>
@@ -16911,7 +16966,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     patch({ items: localDoc.items.map((it) => (it.id === id ? { ...it, ...itemPatch } : it)) });
   }
   function selectClient(c) {
-    patch({ client: { name: c.name, address: c.address, email: c.email, phone: c.phone, siret: c.siret || "", tva: c.tva || "", postalCode: c.postalCode || "", city: c.city || "" }, clientId: c.id });
+    // Toute la fiche est reprise (type, pays, ville, SIRET…) : rien à ressaisir.
+    patch({ client: { ...(localDoc.client || {}), type: c.type || "entreprise", name: c.name, address: c.address || "", email: c.email || "", phone: c.phone || "", siret: c.siret || "", tva: c.tva || "", postalCode: c.postalCode || "", city: c.city || "", country: c.country || "" }, clientId: c.id });
     setClientQuery("");
     setClientPickerOpen(false);
   }
@@ -18395,7 +18451,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           </div>
         </div>
       </div>
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc)} hints={documentSuggestedFields(localDoc)} />
+      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
 
       {presentationMode && (
@@ -18421,5 +18477,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

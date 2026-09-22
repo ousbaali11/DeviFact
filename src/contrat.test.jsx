@@ -107,6 +107,7 @@ describe("éditeur", () => {
   it("nouveau contrat vide : bouton bloqué avec la liste", async () => {
     const { text, disabled } = await renderOnce(<ContratChantierEditor {...props} doc={newContratChantierDocument([])} />);
     expect(disabled).toBe(true);
-    expect(text).toContain("Champs obligatoires manquants : Nom de l'entreprise, Nom du maître d'ouvrage, Objet des travaux, Lieu des travaux, Montant total HT");
+    // Le nom de l'entreprise est repris de Mon entreprise (props.companyProfile) : plus réclamé.
+    expect(text).toContain("Champs obligatoires manquants : Nom du maître d'ouvrage, Objet des travaux, Lieu des travaux, Montant total HT");
   });
 });
