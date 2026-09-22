@@ -45,7 +45,7 @@ describe("carte Connecter mon compte bancaire", () => {
     const { container, unmount } = await mount(<StripeConnectCard account={owner} />);
     const text = container.textContent;
     expect(text).toContain("Connecter mon compte bancaire");
-    expect(text).toContain("pièce d'identité, ton SIRET, ton IBAN");
+    expect(text).toContain("il ne te reste que la date de naissance, l'acceptation des conditions de Stripe");
     expect(text).toContain("Aucune commission de la plateforme.");
     expect(text).toContain("le bouton « Payer en ligne » apparaît sur la page de tes factures");
     expect(buttonByText(container, "Connecter avec Stripe")).toBeTruthy();

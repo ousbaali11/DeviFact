@@ -14803,8 +14803,11 @@ function stripeDisabledReasonLabel(reason) {
   if (/under_review/.test(reason)) return "Compte en cours d'examen par Stripe.";
   return `Motif Stripe : ${reason}`;
 }
-function StripeConnectCard({ account, siteSettings = null, onRedirect = (url) => { window.location.href = url; } }) {
+function StripeConnectCard({ account, siteSettings = null, profile = null, onRedirect = (url) => { window.location.href = url; } }) {
   const isOwner = account?.role === "owner";
+  // Ce que la page Stripe trouvera déjà rempli (depuis Mon entreprise).
+  const prefilled = [profile?.name ? (profile.type === "particulier" ? "nom" : "raison sociale") : "", profile?.type !== "particulier" && profile?.siret ? "SIRET" : "", profile?.address ? "adresse" : "", profile?.iban ? "IBAN" : ""].filter(Boolean);
+  const ibanMissing = !!profile && !String(profile.iban || "").trim();
   const feePercent = Number(siteSettings?.connectFeePercent) || 0;
   const organizationId = account?.organizationId;
   const [status, setStatus] = useState(null); // null = vérification en cours
@@ -14870,7 +14873,8 @@ function StripeConnectCard({ account, siteSettings = null, onRedirect = (url) =>
   } else if (!status.connected) {
     body = (
       <div className="space-y-3">
-        <p className="text-sm">Une fois ton compte connecté et vérifié par Stripe, le bouton « Payer en ligne » apparaît sur la page de tes factures. Stripe te demandera, en quelques minutes : une pièce d'identité, ton SIRET, ton IBAN et un numéro de téléphone. Tu gardes ensuite un accès complet à ton tableau de bord Stripe (encaissements, virements, remboursements).</p>
+        <p className="text-sm">Une fois ton compte connecté et vérifié par Stripe, le bouton « Payer en ligne » apparaît sur la page de tes factures. Chantiflow envoie d'avance à Stripe ce que tu as déjà saisi dans Mon entreprise{prefilled.length ? ` (${prefilled.join(", ")})` : ""} : il ne te reste que la date de naissance, l'acceptation des conditions de Stripe et, si Stripe l'exige, une photo de pièce d'identité. Deux à trois minutes, rien à retaper.</p>
+        {ibanMissing && <p className="text-xs" style={{ color: colors.brassDark }}>Astuce : renseigne ton IBAN dans Mon entreprise (bouton Modifier) avant de cliquer, il sera pré-rempli chez Stripe.</p>}
         <p className="text-xs" style={{ color: colors.inkSoft }}>Frais Stripe à ta charge sur chaque paiement par carte (environ 1,5 % + 0,25 € pour une carte européenne). {feePercent > 0 ? `Commission de la plateforme : ${String(feePercent).replace(".", ",")} % du montant payé, prélevée automatiquement.` : "Aucune commission de la plateforme."}</p>
         {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
         <button onClick={start} disabled={busy} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}>
@@ -15171,7 +15175,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
         </div>
       )}
 
-      <StripeConnectCard account={account} siteSettings={siteSettings} />
+      <StripeConnectCard account={account} siteSettings={siteSettings} profile={profile} />
 
       <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
         <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.brick }}>

@@ -23,6 +23,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
+import { buildConnectAccountParams, withoutBankAccount } from "../_shared/connect.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY")!, { httpClient: Stripe.createFetchHttpClient() });
 const dbAdmin = createClient(
@@ -131,21 +132,25 @@ serve(async (req) => {
 
     // action "start" : création du compte si besoin, puis lien d'inscription.
     if (!account) {
-      // Pays fixé à la France (immuable ensuite) : le service s'adresse aux
-      // artisans français. Nom de l'entreprise et e-mail pré-remplis, le
-      // reste (identité, SIRET, IBAN…) est collecté par Stripe.
-      account = await stripe.accounts.create({
-        country: "FR",
-        email: user.email || undefined,
-        business_profile: org.name ? { name: org.name } : undefined,
-        controller: {
-          fees: { payer: "account" },
-          losses: { payments: "stripe" },
-          stripe_dashboard: { type: "full" },
-          requirement_collection: "stripe",
-        },
-        metadata: { organizationId: org.id },
-      });
+      // Pays fixé à la France (immuable ensuite). Tout ce que Chantiflow
+      // connaît est pré-rempli (Mon entreprise : type, nom, SIRET, adresse,
+      // téléphone, IBAN ; profil : prénom et nom) pour que la page Stripe ne
+      // demande que le reste. Stripe porte les pertes et collecte lui-même
+      // les vérifications ; la plateforme ne paie rien.
+      const { data: profileRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", org.id).eq("key", "company-profile").eq("shared", false).maybeSingle();
+      const rawProfile = profileRow?.value;
+      const companyProfile = typeof rawProfile === "string" ? JSON.parse(rawProfile) : (rawProfile || {});
+      const { data: userRow } = await dbAdmin.from("profiles").select("first_name, last_name").eq("id", user.id).maybeSingle();
+      const params = buildConnectAccountParams({ profile: companyProfile, email: user.email, firstName: userRow?.first_name, lastName: userRow?.last_name, organizationId: org.id, organizationName: org.name });
+      try {
+        account = await stripe.accounts.create(params);
+      } catch (err) {
+        // IBAN refusé par Stripe (format, titulaire…) : compte créé sans
+        // coordonnées bancaires, Stripe les demandera sur sa page.
+        if (!params.external_account) throw err;
+        console.warn("Compte connecté : IBAN pré-rempli refusé, nouvel essai sans", err);
+        account = await stripe.accounts.create(withoutBankAccount(params));
+      }
       await saveAccountState(org.id, account);
     }
 
