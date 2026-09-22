@@ -14516,7 +14516,7 @@ function StripeConnectCard({ account, onRedirect = (url) => { window.location.hr
   } else if (!status.connected) {
     body = (
       <div className="space-y-3">
-        <p className="text-sm">Stripe te demandera, en quelques minutes : une pièce d'identité, ton SIRET, ton IBAN et un numéro de téléphone. Tu gardes ensuite un accès complet à ton tableau de bord Stripe (encaissements, virements, remboursements).</p>
+        <p className="text-sm">Connecte ton compte dès maintenant pour être prêt : tes clients pourront payer directement en ligne dès la prochaine mise à jour du site. Stripe te demandera, en quelques minutes : une pièce d'identité, ton SIRET, ton IBAN et un numéro de téléphone. Tu gardes ensuite un accès complet à ton tableau de bord Stripe (encaissements, virements, remboursements).</p>
         <p className="text-xs" style={{ color: colors.inkSoft }}>Frais Stripe à ta charge sur chaque paiement par carte (environ 1,5 % + 0,25 € pour une carte européenne). Aucune commission de la plateforme.</p>
         {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
         <button onClick={start} disabled={busy} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}>
@@ -14538,7 +14538,7 @@ function StripeConnectCard({ account, onRedirect = (url) => { window.location.hr
         {!active && status.requirementsDue > 0 && <p className="text-xs" style={{ color: colors.inkSoft }}>{status.requirementsDue} information{status.requirementsDue > 1 ? "s" : ""} attendue{status.requirementsDue > 1 ? "s" : ""} par Stripe.</p>}
         {!active && stripeDisabledReasonLabel(status.disabledReason) && <p className="text-xs" style={{ color: colors.inkSoft }}>{stripeDisabledReasonLabel(status.disabledReason)}</p>}
         {status.stale && <p className="text-xs" style={{ color: colors.inkSoft }}>Dernier état connu (Stripe injoignable pour l'instant).</p>}
-        {active && <p className="text-xs" style={{ color: colors.inkSoft }}>Tes clients pourront payer tes factures en ligne depuis le lien ou le QR code de la facture, dès la mise en service du paiement direct.</p>}
+        {active && <p className="text-xs" style={{ color: colors.inkSoft }}>Tu es prêt : tes clients pourront payer directement en ligne dès la prochaine mise à jour du site.</p>}
         {error && <p className="text-xs" style={{ color: colors.brick }}>{error}</p>}
         <div className="flex flex-wrap items-center gap-2">
           {!active && (
