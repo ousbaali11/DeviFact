@@ -74,25 +74,27 @@ describe("barre Classique (menu déroulant)", () => {
   });
 });
 
-describe("Atelier (menu Plus)", () => {
+describe("Atelier (barre principale)", () => {
   const account = { id: "u", organizationId: "org", plan: "pro", role: "owner", email: "t@e.fr", firstName: "Thomas", memberships: [{ organizationId: "org", role: "owner", name: "Org" }] };
   const shell = (view, setView = () => {}) => (
     <AtelierShell view={view} setView={setView} account={account} siteSettings={{ name: "Chantiflow", landingPageVersion: "atelier" }} darkMode={false} setDarkMode={() => {}} onLogout={() => {}} onSwitchOrganization={() => {}} onCreateOwnOrg={() => {}} creatingOwnOrg={false} onOpenCreate={() => {}} commandPaletteOpen={false} setCommandPaletteOpen={() => {}} paletteCommands={[]}>
       <div>page</div>
     </AtelierShell>
   );
-  const openMore = async (container) => { await click([...container.querySelectorAll("button")].find((b) => b.getAttribute("title") === "Menu" || /Menu/i.test(b.textContent))); };
-  it("une seule entrée « Gestion de stock » dans le menu Plus, qui se déplie sur les six entrées dans l'ordre", async () => {
+  const openMore = async (container) => { await click([...container.querySelectorAll("button")].find((b) => b.getAttribute("title") === "Menu")); };
+  const headerNav = (c) => c.querySelector("header nav");
+  // Libellé d'un bouton de l'en-tête : titre, sinon premier span (les onglets
+  // ont deux spans, grand et petit écran, avec le même texte).
+  const labelOf = (b) => b.getAttribute("title") || b.querySelector("span")?.textContent.trim() || b.textContent.trim();
+  it("en-tête : « Gestion de stock » juste après Clients, au même niveau, déroulant sur les six entrées ; absent du menu Plus", async () => {
     const views = [];
     const { container, unmount } = await mount(shell("dashboard", (v) => views.push(v)));
+    const nav = headerNav(container);
+    expect([...nav.querySelectorAll(":scope > button, :scope > div > button")].map(labelOf)).toEqual(["Accueil", "Documents", "Chantiers", "Clients", "Gestion de stock"]);
     await openMore(container);
-    // Le menu Plus est rendu deux fois (en-tête bureau et barre mobile) : on
-    // raisonne sur le premier ; chacun ne contient qu'une entrée « Gestion de stock ».
-    const labels = buttons(container);
-    expect(labels.filter((l) => l.startsWith("Gestion de stock"))).toHaveLength(2);
-    expect(labels.filter((l) => l.startsWith("Gestion de stock ·"))).toHaveLength(0);
-    expect(labels).not.toContain("Produits");
-    await click(stockButton(container));
+    expect([...container.querySelectorAll("button")].filter((b) => b.getAttribute("title") === "Gestion de stock")).toHaveLength(2); // en-tête + onglet « Stock » du bas, rien dans le menu Plus
+    expect(buttons(container)).not.toContain("Produits");
+    await click(stockButton(nav));
     const after = buttons(container);
     for (const l of ORDER) expect(after, l).toContain(l);
     expect(ORDER.map((l) => after.indexOf(l))).toEqual([...ORDER.map((l) => after.indexOf(l))].sort((a, b) => a - b));
@@ -100,10 +102,23 @@ describe("Atelier (menu Plus)", () => {
     expect(views).toEqual(["stock-documents"]);
     await unmount();
   });
-  it("déplié d'office sur une page du stock", async () => {
-    const { container, unmount } = await mount(shell("stock-produits"));
-    await openMore(container);
-    expect(buttons(container)).toContain("Produits");
+  it("téléphone : sixième onglet « Stock » dans la barre du bas, volet avec les six entrées, actif sur une page du stock", async () => {
+    const views = [];
+    const { container, unmount } = await mount(shell("stock-produits", (v) => views.push(v)));
+    const bottom = container.querySelector("nav.grid");
+    expect(bottom.className).toContain("grid-cols-6");
+    expect([...bottom.querySelectorAll("button")].map((b) => b.textContent.trim())).toEqual(["Accueil", "Documents", "Créer", "Chantiers", "Clients", "Stock"]);
+    const stockTab = [...bottom.querySelectorAll("button")].find((b) => b.textContent.trim() === "Stock");
+    expect(stockTab.getAttribute("title")).toBe("Gestion de stock");
+    const clientsTab = [...bottom.querySelectorAll("button")].find((b) => b.textContent.trim() === "Clients");
+    expect(stockTab.style.color).not.toBe(clientsTab.style.color); // onglet actif (page du stock ouverte)
+    expect(container.querySelector('[role="dialog"][aria-label="Gestion de stock"]')).toBeNull();
+    await click(stockTab);
+    const sheet = container.querySelector('[role="dialog"][aria-label="Gestion de stock"]');
+    expect(sheet).toBeTruthy();
+    expect([...sheet.querySelectorAll("button")].map((b) => b.textContent.trim()).filter(Boolean)).toEqual(ORDER);
+    await click([...sheet.querySelectorAll("button")].find((b) => b.textContent.trim() === "Sortie"));
+    expect(views).toEqual(["stock-sortie"]);
     await unmount();
   });
 });

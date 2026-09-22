@@ -2772,6 +2772,39 @@ function applyCachedSiteAppearance() {
 }
 applyCachedSiteAppearance();
 
+// Lien du logo / nom du site (les trois versions) : une vraie balise <a>
+// avec un href, pour que le clic droit propose « Ouvrir dans un nouvel
+// onglet » et que Ctrl/Cmd-clic et clic molette ouvrent le site nativement.
+// Le clic gauche simple navigue en interne vers l'accueil, sans
+// rechargement (le site n'a pas de routeur : une seule adresse, une vue en
+// mémoire). « /?accueil » force le tableau de bord au chargement, au lieu
+// de la dernière vue mémorisée sur l'appareil (voir initialView).
+const HOME_HREF = "/?accueil";
+function HomeLink({ setView, className, style, title = "Retour à l'accueil", children }) {
+  function handleClick(e) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return; // comportement natif
+    e.preventDefault();
+    setView("dashboard");
+  }
+  return <a href={HOME_HREF} className={className} style={style} title={title} onClick={handleClick}>{children}</a>;
+}
+// Vue de départ : « /?accueil » → tableau de bord (paramètre retiré de
+// l'adresse) ; sinon la dernière vue mémorisée sur l'appareil.
+function initialView() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("accueil")) {
+      params.delete("accueil");
+      const qs = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+      return "dashboard";
+    }
+  } catch { /* adresse non lisible : vue mémorisée */ }
+  const restored = localStorage.getItem("devifact_lastView") || "dashboard";
+  console.log("[Position] Vue restaurée au chargement :", restored);
+  return restored;
+}
+
 function DeviFactAppInner() {
   // Repère de diagnostic temporaire : affiche dans la console (F12)
   // l'heure exacte à laquelle l'application démarre. Si cette ligne
@@ -2790,9 +2823,7 @@ function DeviFactAppInner() {
     // atterrir sur la page Tarifs (pour voir la confirmation), même si
     // une autre page était mémorisée avant de partir payer.
     if (new URLSearchParams(window.location.search).get("paiement")) return "pricing";
-    const restored = localStorage.getItem("devifact_lastView") || "dashboard";
-    console.log("[Position] Vue restaurée au chargement :", restored);
-    return restored;
+    return initialView();
   });
   const [documents, setDocuments] = useState([]);
   // Toujours la liste la plus récente, y compris depuis une fonction
@@ -7114,14 +7145,14 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
       <>
         {/* ───── Barre latérale — grand écran uniquement ───── */}
         <div className="df-sidebar-nav hidden lg:flex" style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: "264px", background: navBg, borderRight: `1px solid ${navLine}`, flexDirection: "column", zIndex: 30 }}>
-          <button onClick={() => setView("dashboard")} className="flex items-center gap-2.5 px-5 py-5" title="Retour à l'accueil">
+          <HomeLink setView={setView} className="flex items-center gap-2.5 px-5 py-5">
             {siteSettings?.logo ? (
               <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
             ) : (
               <div className="flex h-8 w-8 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
             )}
             <span className="df-display truncate text-sm font-semibold" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
-          </button>
+          </HomeLink>
 
           <div className="px-4 pb-4">
             <button onClick={onNewDevis} className="flex w-full items-center justify-center gap-2 rounded-xl py-2 text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>
@@ -7227,14 +7258,14 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
 
         {/* ───── Barre du haut — petit écran uniquement ───── */}
         <div className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden" style={{ background: navBg, borderBottom: `1px solid ${navLine}` }}>
-          <button onClick={() => setView("dashboard")} className="flex min-w-0 flex-1 items-center gap-2.5" title="Retour à l'accueil">
+          <HomeLink setView={setView} className="flex min-w-0 flex-1 items-center gap-2.5">
             {siteSettings?.logo ? (
               <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
             ) : (
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
             )}
             <span className="df-display truncate text-xs font-semibold" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
-          </button>
+          </HomeLink>
           <div className="flex shrink-0 items-center gap-2">
             <button onClick={onNewDevis} className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium" style={{ background: adv.accent, color: "white" }}><Plus size={13} /> Devis</button>
             <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{mobileNavOpen ? <X size={19} /> : <Menu size={19} />}</button>
@@ -7282,14 +7313,14 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: navBg }}>
       <div className="flex min-w-0 grow items-center gap-6">
-        <button onClick={() => setView("dashboard")} className="flex shrink-0 items-center gap-3" title="Retour à l'accueil">
+        <HomeLink setView={setView} className="flex shrink-0 items-center gap-3">
           {siteSettings?.logo ? (
             <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
           ) : (
             <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: isAdvanced ? adv.accent : colors.brass, color: isAdvanced ? "white" : colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
           )}
           <span className="df-display text-lg font-semibold tracking-wide text-white">{siteSettings?.name || "Chantiflow"}</span>
-        </button>
+        </HomeLink>
         <div className="hidden min-w-0 grow items-center justify-between gap-3 lg:flex">
           <div className="flex items-center gap-1">
             {mainTabs.map(({ id, label, icon: Icon }) =>
@@ -7476,8 +7507,8 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           style={{ background: "rgba(255,255,255,0.1)", color: "white" }}
         >
           <span className="flex items-center gap-2">
-            {(() => { const Current = tabs.find((t) => t.id === view)?.icon || LayoutDashboard; return <Current size={15} />; })()}
-            {tabs.find((t) => t.id === view)?.label || "Menu"}
+            {(() => { const Current = tabs.find((t) => t.id === view)?.icon || (isStockView(view) ? Package : LayoutDashboard); return <Current size={15} />; })()}
+            {tabs.find((t) => t.id === view)?.label || (isStockView(view) ? "Gestion de stock" : "Menu")}
           </span>
           {mobileNavOpen ? <X size={16} /> : <Menu size={16} />}
         </button>
@@ -11336,12 +11367,12 @@ function AtelierCreateSheet({ open, onClose, visibleServices, onCreate, darkMode
 function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkMode, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, onOpenCreate, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, children }) {
   const tone = atelierTone(darkMode);
   const [moreOpen, setMoreOpen] = useState(false);
-  // Sous-menu « Gestion de stock » du menu Plus : déplié d'office quand une
-  // page du stock est ouverte.
-  const [stockOpen, setStockOpen] = useState(isStockView(view));
-  useEffect(() => { if (isStockView(view)) setStockOpen(true); }, [view]);
+  // Volet « Gestion de stock » de la barre du bas (téléphone).
+  const [stockSheetOpen, setStockSheetOpen] = useState(false);
   useEscapeToClose(moreOpen, () => setMoreOpen(false));
-  useEffect(() => { setMoreOpen(false); }, [view]);
+  useEscapeToClose(stockSheetOpen, () => setStockSheetOpen(false));
+  useEffect(() => { setMoreOpen(false); setStockSheetOpen(false); }, [view]);
+  const stockLocked = !hasAccess(account, "pro");
   const activeTab = atelierTabFor(view);
   const memberships = account?.memberships || [];
   const hasOwnOrg = memberships.some((m) => m.role === "owner");
@@ -11350,7 +11381,6 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   const moreItems = [
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
-    { id: "stock", label: "Gestion de stock", icon: Package, locked: !hasAccess(account, "pro"), children: STOCK_MENU },
     { id: "planning-equipe", label: "Planning d'équipe", icon: Calendar },
     { id: "pricing", label: "Abonnement", icon: CreditCard },
     { id: "account", label: "Mon compte", icon: UserCircle },
@@ -11362,14 +11392,14 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   const tabStyle = (active) => (active ? { background: tone.accentSoft, color: tone.accent } : { color: tone.inkSoft });
 
   const logo = (
-    <button onClick={() => setView("dashboard")} className="flex items-center gap-2" title="Accueil">
+    <HomeLink setView={setView} className="flex items-center gap-2" title="Accueil">
       {siteSettings?.logo ? (
         <img src={siteSettings.logo} alt="" style={{ width: siteSettings.logoWidth || 36, height: siteSettings.logoHeight || 36, objectFit: "contain" }} />
       ) : (
         <span className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ background: tone.accent }}><HardHat size={18} /></span>
       )}
       <span className="df-display text-base font-bold" style={{ color: tone.ink }}>{siteSettings?.name || "Chantiflow"}</span>
-    </button>
+    </HomeLink>
   );
 
   const moreMenu = moreOpen && (
@@ -11405,22 +11435,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
             </div>
           )}
           <div className="px-2 py-1">
-            {moreItems.map(({ id, label, icon: Icon, locked, children }) => children ? (
-              <Fragment key={id}>
-                <button onClick={() => setStockOpen((v) => !v)} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={isStockView(view) && !stockOpen ? tabStyle(true) : { color: tone.ink }} aria-expanded={stockOpen}>
-                  <Icon size={18} style={{ color: isStockView(view) ? tone.accent : tone.inkSoft }} />
-                  <span className="flex-1">{label}</span>
-                  {locked && <Lock size={14} style={{ color: tone.inkSoft }} />}
-                  <ChevronDown size={16} style={{ color: tone.inkSoft, transform: stockOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-                </button>
-                {stockOpen && children.map(({ id: cid, label: clabel, icon: CIcon }) => (
-                  <button key={cid} onClick={() => { setMoreOpen(false); setView(cid); }} className="df-at-tap flex w-full items-center gap-3 rounded-lg py-2 pl-9 pr-2 text-left text-[15px]" style={view === cid ? tabStyle(true) : { color: tone.ink }}>
-                    <CIcon size={16} style={{ color: view === cid ? tone.accent : tone.inkSoft }} />
-                    <span className="flex-1">{clabel}</span>
-                  </button>
-                ))}
-              </Fragment>
-            ) : (
+            {moreItems.map(({ id, label, icon: Icon, locked }) => (
               <button key={id} onClick={() => { setMoreOpen(false); setView(id); }} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={view === id ? tabStyle(true) : { color: tone.ink }}>
                 <Icon size={18} style={{ color: view === id ? tone.accent : tone.inkSoft }} />
                 <span className="flex-1">{label}</span>
@@ -11460,14 +11475,17 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
         {logo}
         <nav className="ml-2 flex items-center gap-1">
           {ATELIER_TABS.map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setView(id)} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium" style={tabStyle(activeTab === id)}>
-              <Icon size={18} /> <span className="hidden lg:inline">{label}</span><span className="lg:hidden">{label}</span>
+            <button key={id} onClick={() => setView(id)} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium lg:px-2 xl:px-3" style={tabStyle(activeTab === id)} title={label}>
+              <Icon size={18} /> <span className="hidden lg:inline">{label}</span>
             </button>
           ))}
+          {/* Gestion de stock : même niveau que Clients — icône seule sur
+              tablette, « Stock » sur portable, « Gestion de stock » sur grand écran */}
+          <StockMenu variant="dropdown" view={view} setView={setView} locked={stockLocked} styleFor={tabStyle} iconColor={tone.accent} buttonClass="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium lg:px-2 xl:px-3" iconSize={18} responsiveLabel />
         </nav>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setCommandPaletteOpen(true)} className="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-sm" style={{ color: tone.inkSoft, border: `1px solid ${tone.line}` }} title="Rechercher ou aller quelque part (Ctrl+K)">
-            <Search size={16} /> <span className="hidden lg:inline">Rechercher</span> <kbd className="hidden rounded px-1 text-[11px] lg:inline" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>Ctrl K</kbd>
+            <Search size={16} /> <span className="hidden xl:inline">Rechercher</span> <kbd className="hidden rounded px-1 text-[11px] xl:inline" style={{ background: tone.paper, border: `1px solid ${tone.line}` }}>Ctrl K</kbd>
           </button>
           <button onClick={onOpenCreate} className="df-at-tap flex items-center gap-2 rounded-lg px-4 py-2 text-[15px] font-bold" style={{ background: tone.action, color: "#1C2733" }}>
             <Plus size={18} /> Créer
@@ -11475,7 +11493,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
           <div className="relative">
             <button onClick={() => setMoreOpen((v) => !v)} className="df-at-tap flex items-center gap-2 rounded-lg px-2 py-1.5" style={{ color: tone.ink, border: `1px solid ${moreOpen ? tone.accent : tone.line}` }} title="Menu">
               <span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: tone.accent }}>{initials}</span>
-              <span className="hidden max-w-[120px] truncate text-sm lg:inline">{firstName || "Menu"}</span>
+              <span className="hidden max-w-[120px] truncate text-sm xl:inline">{firstName || "Menu"}</span>
               <ChevronDown size={14} style={{ color: tone.inkSoft }} />
             </button>
             {moreMenu}
@@ -11495,7 +11513,24 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
       {children}
 
       {/* Barre d'onglets en bas — téléphone */}
-      <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t md:hidden" style={{ background: tone.surface, borderColor: tone.line, paddingBottom: "env(safe-area-inset-bottom, 0px)", visibility: moreOpen ? "hidden" : "visible" }}>
+      {stockSheetOpen && (
+        <>
+          <div className="fixed inset-0 z-40 md:hidden" style={{ background: "rgba(28,39,51,0.35)" }} onClick={() => setStockSheetOpen(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t px-2 pt-2 md:hidden" role="dialog" aria-label="Gestion de stock" style={{ background: tone.surface, borderColor: tone.line, color: tone.ink, paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}>
+            <div className="flex items-center justify-between px-2 pb-1">
+              <span className="flex items-center gap-2 text-sm font-semibold"><Package size={18} style={{ color: tone.accent }} /> Gestion de stock {stockLocked && <Lock size={14} style={{ color: tone.inkSoft }} />}</span>
+              <button onClick={() => setStockSheetOpen(false)} className="df-at-tap flex h-11 w-11 items-center justify-center rounded-lg" style={{ color: tone.inkSoft }} title="Fermer"><X size={20} /></button>
+            </div>
+            {STOCK_MENU.map(({ id, label, icon: CIcon }) => (
+              <button key={id} onClick={() => { setStockSheetOpen(false); setView(id); }} className="df-at-tap flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-[15px]" style={view === id ? tabStyle(true) : { color: tone.ink }}>
+                <CIcon size={18} style={{ color: view === id ? tone.accent : tone.inkSoft }} />
+                <span className="flex-1">{label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t md:hidden" style={{ background: tone.surface, borderColor: tone.line, paddingBottom: "env(safe-area-inset-bottom, 0px)", visibility: moreOpen ? "hidden" : "visible" }}>
         {ATELIER_TABS.slice(0, 2).map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setView(id)} className="flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium" style={{ color: activeTab === id ? tone.accent : tone.inkSoft, minHeight: 56 }}>
             <Icon size={22} /> {label}
@@ -11510,6 +11545,9 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
             <Icon size={22} /> {label}
           </button>
         ))}
+        <button onClick={() => setStockSheetOpen(true)} className="flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium" style={{ color: isStockView(view) ? tone.accent : tone.inkSoft, minHeight: 56 }} title="Gestion de stock" aria-expanded={stockSheetOpen}>
+          <Package size={22} /> Stock
+        </button>
       </nav>
 
       <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} commands={paletteCommands} />
@@ -12917,7 +12955,7 @@ function productAvailability(p, stockByProduct) {
 
 // Sous-menu « Gestion de stock » dans les navigations (déroulant sur grand
 // écran, liste indentée sur mobile). `variant` : "dropdown" | "inline".
-function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconColor, onNavigate, itemClass = "px-3 py-2 text-xs" }) {
+function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconColor, onNavigate, itemClass = "px-3 py-2 text-xs", buttonClass = "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium", iconSize = 15, responsiveLabel = false }) {
   const active = isStockView(view);
   // Déplié d'office quand une page du stock est ouverte (sidebar et mobile).
   const [open, setOpen] = useState(variant !== "dropdown" && active);
@@ -12930,8 +12968,9 @@ function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconCo
   if (variant === "dropdown") {
     return (
       <div className="relative">
-        <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={styleFor(active)} aria-expanded={open}>
-          <Package size={15} /> <span className="truncate">Gestion de stock</span>
+        <button onClick={() => setOpen((v) => !v)} className={buttonClass} style={styleFor(active)} aria-expanded={open} title="Gestion de stock">
+          <Package size={iconSize} />
+          {responsiveLabel ? <><span className="hidden truncate xl:inline">Gestion de stock</span><span className="hidden truncate lg:inline xl:hidden">Stock</span></> : <span className="truncate">Gestion de stock</span>}
           {chevron}
         </button>
         {open && (
@@ -18052,5 +18091,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
