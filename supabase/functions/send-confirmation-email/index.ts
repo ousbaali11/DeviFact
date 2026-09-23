@@ -63,18 +63,7 @@ serve(async (req) => {
     // (bouton "Relancer"), ou l'inscription toute fraîche de ce compte
     // précis (quelques minutes) — jamais un appel ciblant un compte
     // existant au hasard, sans lien avec l'appelant.
-    const authHeader = req.headers.get("Authorization") || "";
-    const authClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-    const { data: { user: caller } } = await authClient.auth.getUser();
-    let isAllowed = false;
-    if (caller) {
-      const { data: callerProfile } = await dbAdmin.from("profiles").select("is_admin").eq("id", caller.id).maybeSingle();
-      isAllowed = !!callerProfile?.is_admin;
-    }
+    let isAllowed = callerIsAdmin;
     if (!isAllowed) {
       const ageMinutes = (Date.now() - new Date(profile.created_at).getTime()) / 60000;
       isAllowed = ageMinutes <= 10;
@@ -93,9 +82,11 @@ serve(async (req) => {
 
     // Génère un nouveau token à chaque envoi — invalide l'ancien lien
     // au passage, ce qui évite qu'un vieux lien traîne indéfiniment.
+    // La date d'envoi n'est posée qu'une fois l'email réellement parti :
+    // un envoi raté ne bloque pas la relance suivante pendant une minute.
     const { data: updated, error: updateError } = await dbAdmin
       .from("profiles")
-      .update({ confirmation_token: crypto.randomUUID(), last_confirmation_sent_at: new Date().toISOString() })
+      .update({ confirmation_token: crypto.randomUUID() })
       .eq("id", profile.id)
       .select("confirmation_token")
       .single();
@@ -124,9 +115,17 @@ serve(async (req) => {
     });
     if (!emailResp.ok) {
       const errText = await emailResp.text();
-      console.error("Erreur d'envoi Resend :", errText);
-      return new Response(JSON.stringify({ error: "Erreur d'envoi de l'email. Réessaie dans un instant." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      console.error("Erreur d'envoi Resend :", emailResp.status, errText);
+      // L'administrateur voit la raison exacte (domaine non vérifié, clé
+      // invalide, quota…) ; tout autre appelant reçoit un message neutre.
+      let detail = "";
+      if (callerIsAdmin) {
+        try { detail = String(JSON.parse(errText)?.message || errText).slice(0, 300); } catch { detail = errText.slice(0, 300); }
+      }
+      const message = callerIsAdmin ? `Le service d'envoi a refusé l'email (${emailResp.status}) : ${detail}` : "Erreur d'envoi de l'email. Réessaie dans un instant.";
+      return new Response(JSON.stringify({ error: message }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    await dbAdmin.from("profiles").update({ last_confirmation_sent_at: new Date().toISOString() }).eq("id", profile.id);
 
     return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

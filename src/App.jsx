@@ -3385,7 +3385,14 @@ function DeviFactAppInner() {
     try {
       const { data, error } = await db.functions.invoke("send-confirmation-email", { body: { userId } });
       if (error || data?.error) {
-        alert(`Impossible d'envoyer l'email : ${data?.error || error?.message || "erreur inconnue"}`);
+        // Le SDK cache la raison (« non-2xx status code ») : elle est dans
+        // le corps de la réponse (déjà confirmé, envoi trop rapproché,
+        // domaine d'envoi non vérifié…).
+        let message = data?.error;
+        if (!message && error?.context) {
+          try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ }
+        }
+        alert(`Impossible d'envoyer l'email : ${message || error?.message || "erreur inconnue"}`);
       } else {
         alert("Email de confirmation renvoyé.");
         await loadAllUsers();
