@@ -5259,7 +5259,7 @@ function DeviFactAppInner() {
       <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
         <GlobalStyle />
         <TopNav {...navProps} />
-        <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
           <button onClick={backToDashboard} className="no-print mb-4 flex items-center gap-1 text-sm" style={{ color: colors.inkSoft }}><ArrowLeft size={15} /> Retour</button>
           <h1 className="df-display mb-1 text-2xl font-semibold">Nouvelle révision de prix</h1>
           <p className="mb-6 text-sm" style={{ color: colors.inkSoft }}>Choisis le pays, puis le secteur concerné.</p>
@@ -12061,7 +12061,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
   ];
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-6">
         <h1 className="df-display text-2xl font-bold sm:text-3xl">Bonjour{firstName ? ` ${firstName}` : ""}</h1>
         <p className="text-sm capitalize" style={{ color: tone.inkSoft }}>{today}</p>
@@ -12242,7 +12242,7 @@ function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset,
   const canEdit = !isLocked && !isViewer;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="df-display text-2xl font-bold">Documents</h1>
@@ -12498,7 +12498,7 @@ function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLo
   const canEdit = !isLocked && !isViewer;
   const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="df-display text-2xl font-bold">Chantiers</h1>
@@ -12621,7 +12621,7 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
   );
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <button onClick={onBack} className="df-at-tap mb-3 flex items-center gap-1 text-sm font-medium" style={{ color: tone.inkSoft }}><ArrowLeft size={16} /> Tous les chantiers</button>
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
@@ -13021,7 +13021,7 @@ function AtelierRevisionSectorPicker({ revisionCountry, setRevisionCountry, onPi
   const tone = atelierTone(darkMode);
   const countryInfo = getRevisionCountryInfo(revisionCountry);
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <button onClick={onBack} className="df-at-tap mb-3 flex items-center gap-1 text-sm font-medium" style={{ color: tone.inkSoft }}><ArrowLeft size={16} /> Retour</button>
       <h1 className="df-display mb-1 text-2xl font-bold">Nouvelle révision de prix</h1>
       <p className="mb-6 text-sm" style={{ color: tone.inkSoft }}>Choisis le pays, puis le secteur concerné.</p>
@@ -13068,7 +13068,7 @@ function ChantiersView({ documents, siteSettings, darkMode, onOpenDoc }) {
   const isAdvanced = siteSettings?.landingPageVersion === "avancee";
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {isAdvanced && (
           <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><MapPinned size={18} /></div>
@@ -13158,7 +13158,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="df-display text-2xl font-semibold">Clients</h1>
@@ -13548,7 +13548,7 @@ function WarehousesView({ warehouses, products, stockDetail, canEdit, siteSettin
     finally { setSaving(false); }
   }
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Warehouse size={18} /></div>}
@@ -13680,7 +13680,7 @@ function StockMovementView({ kind, products, warehouses, stockDetail, canEdit, s
   }
   const Icon = kind === "entree" ? ArrowDownToLine : ArrowUpFromLine;
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Icon size={18} /></div>}
         <h1 className="df-display text-2xl font-semibold">{meta.verb}</h1>
@@ -13783,7 +13783,7 @@ function StockDocumentsView({ movements, loading, products, warehouses, account,
   }
   const kindColor = (k) => (k === "entree" ? colors.moss : k === "sortie" ? colors.brick : colors.slate);
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Archive size={18} /></div>}
@@ -14416,7 +14416,7 @@ function AccountView({ account, siteSettings }) {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
           <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><UserCircle size={18} /></div>
@@ -14593,7 +14593,7 @@ function ApiView({ account, siteSettings }) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
           <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><KeyRound size={18} /></div>
@@ -14776,7 +14776,7 @@ function TeamView({ account, siteSettings }) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         {siteSettings?.landingPageVersion === "avancee" && (
           <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><Users size={18} /></div>
@@ -15127,7 +15127,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="df-display text-2xl font-semibold">{(editing ? local.type : profile.type) === "particulier" ? "Mes informations" : "Mon entreprise"}</h1>
@@ -15498,7 +15498,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
   const visiblePlans = plans.filter((p) => !p.hidden);
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 text-center">
         {siteSettings?.landingPageVersion === "avancee" && (
           <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><CreditCard size={18} /></div>
