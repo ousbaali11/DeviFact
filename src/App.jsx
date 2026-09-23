@@ -16004,7 +16004,7 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
   const isAdvanced = siteSettings?.landingPageVersion === "avancee";
 
   return (
-    <div className={isAdvanced ? "mx-auto max-w-6xl px-4 py-8 sm:px-6" : "mx-auto max-w-4xl px-4 py-8 sm:px-6"}>
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
         <h1 className="df-display flex items-center gap-2 text-2xl font-semibold"><Shield size={22} style={{ color: isAdvanced ? adv.accent : colors.brassDark }} /> Espace Admin</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Vue d'ensemble, gestion des forfaits et du compte.</p>
