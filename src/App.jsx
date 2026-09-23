@@ -3059,6 +3059,9 @@ function DeviFactAppInner() {
   const [companyProfile, setCompanyProfile] = useState(emptyCompanyProfile());
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Connexion réussie mais compte impossible à charger (réseau, droits) :
+  // message montré sur l'écran de connexion.
+  const [sessionError, setSessionError] = useState(null);
   // Empêche d'afficher la page d'accueil (ou toute page) avec la
   // version par défaut ("classique") pendant la fraction de seconde où
   // le vrai réglage n'est pas encore arrivé de la base de données —
@@ -3137,6 +3140,12 @@ function DeviFactAppInner() {
   // connexion, si un événement concerne vraiment un changement de
   // compte ou juste une revalidation de la même session.
   const currentUserIdRef = useRef(null);
+  // Chargement de compte en cours ({ userId, promise }) et fin de la
+  // vérification initiale : l'écouteur d'événements ne coupe jamais l'écran
+  // d'attente pendant le démarrage (sinon la page d'accueil apparaît un
+  // instant à quelqu'un de connecté qui rouvre le site).
+  const sessionLoadRef = useRef(null);
+  const bootDoneRef = useRef(false);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("tous");
   const [stageFilter, setStageFilter] = useState("tous"); // tous | brouillon | termine
@@ -3646,6 +3655,47 @@ function DeviFactAppInner() {
     }
   }
 
+  // Établit le compte d'une personne authentifiée : profil, organisation,
+  // données. Le repère d'utilisateur n'est posé qu'une fois TOUT chargé :
+  // un chargement raté (réseau coupé au démarrage) ne laisse jamais croire
+  // que la session est établie — avant, une connexion suivante était alors
+  // ignorée comme « même personne », et il fallait recharger la page.
+  // Un chargement déjà en cours pour la même personne est réutilisé.
+  function establishSession(user) {
+    if (sessionLoadRef.current?.userId === user.id) return sessionLoadRef.current.promise;
+    const promise = (async () => {
+      const profile = await loadProfile(user.id, user.email);
+      setActiveOrganization(profile?.organizationId || null);
+      await loadUserData();
+      currentUserIdRef.current = user.id;
+      setSessionError(null);
+      setAccount(profile);
+      syncOnlinePayments();
+    })();
+    const entry = { userId: user.id, promise };
+    sessionLoadRef.current = entry;
+    promise.finally(() => { if (sessionLoadRef.current === entry) sessionLoadRef.current = null; }).catch(() => {});
+    return promise;
+  }
+  // Connexion (ou inscription) réussie depuis le formulaire : le compte est
+  // chargé tout de suite, sans dépendre de l'arrivée d'un événement de la
+  // bibliothèque d'authentification.
+  async function signInUser(user) {
+    if (!user?.id || currentUserIdRef.current === user.id) return;
+    setLoading(true);
+    try {
+      if (currentUserIdRef.current) clearUserData();
+      await establishSession(user);
+    } catch (err) {
+      console.error("Erreur lors du chargement du compte après connexion :", err);
+      currentUserIdRef.current = null;
+      setAccount(null);
+      setSessionError("Connexion réussie, mais impossible de charger ton espace pour l'instant. Vérifie ta connexion internet et réessaie.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       try {
@@ -3669,20 +3719,14 @@ function DeviFactAppInner() {
     (async () => {
       try {
         const { data: { session } } = await db.auth.getSession();
-        if (session?.user) {
-          currentUserIdRef.current = session.user.id;
-          const profile = await loadProfile(session.user.id, session.user.email);
-          setActiveOrganization(profile?.organizationId || null);
-          await loadUserData();
-          setAccount(profile);
-          syncOnlinePayments();
-        } else {
-          setAccount(null);
-        }
+        if (session?.user) await establishSession(session.user);
+        else setAccount(null);
       } catch (err) {
         console.error("Erreur lors de la vérification initiale de la session :", err);
+        currentUserIdRef.current = null;
         setAccount(null);
       } finally {
+        bootDoneRef.current = true;
         setLoading(false);
       }
     })();
@@ -3691,12 +3735,17 @@ function DeviFactAppInner() {
     // se déclenche à l'ouverture (avec la session actuelle, s'il y en a
     // une), à chaque connexion/inscription, et à chaque déconnexion —
     // qu'il s'agisse du même utilisateur ou d'un utilisateur différent.
-    const { data: authListener } = db.auth.onAuthStateChange(async (_event, session) => {
+    const { data: authListener } = db.auth.onAuthStateChange((_event, session) => {
       // "INITIAL_SESSION" est déjà géré ci-dessus, de façon plus fiable
       // (vérification directe, pas dépendante de l'ordre d'arrivée des
       // événements) — ne le retraite jamais ici, pour ne jamais annuler
       // par erreur ce qui vient d'être établi juste au-dessus.
       if (_event === "INITIAL_SESSION") return;
+      // Différé (recommandation officielle de la bibliothèque) : cet
+      // écouteur est appelé pendant que la bibliothèque tient son verrou
+      // interne ; attendre ici d'autres appels (profil, données) pouvait
+      // rester bloqué — connexion qui « ne rentre pas » sans recharger.
+      setTimeout(async () => {
       try {
         if (_event === "PASSWORD_RECOVERY") setRecoveryMode(true);
         if (session?.user) {
@@ -3709,18 +3758,14 @@ function DeviFactAppInner() {
           // chargé, on ne touche à rien — ça couvre aussi bien le retour
           // sur l'onglet après une mise en veille que le rafraîchissement
           // automatique du jeton de session.
-          if (currentUserIdRef.current === session.user.id) {
-            setLoading(false);
-            return;
-          }
-          currentUserIdRef.current = session.user.id;
+          if (currentUserIdRef.current === session.user.id) return;
+          // Chargement déjà en cours pour cette personne (démarrage,
+          // connexion depuis le formulaire) : on le laisse finir, sans
+          // couper l'écran d'attente.
+          if (sessionLoadRef.current?.userId === session.user.id) return;
           setLoading(true);
-          clearUserData();
-          const profile = await loadProfile(session.user.id, session.user.email);
-          setActiveOrganization(profile?.organizationId || null);
-          await loadUserData();
-          setAccount(profile);
-          syncOnlinePayments();
+          if (currentUserIdRef.current) clearUserData();
+          await establishSession(session.user);
         } else {
           // Ne traite "pas de session" comme vraiment définitif que pour
           // une vraie déconnexion explicite — la vérification initiale
@@ -3730,7 +3775,6 @@ function DeviFactAppInner() {
             clearUserData();
             setAccount(null);
           } else {
-            setLoading(false);
             return;
           }
         }
@@ -3738,10 +3782,15 @@ function DeviFactAppInner() {
         // Ne doit jamais laisser l'écran de connexion bloqué indéfiniment,
         // même si une étape du chargement échoue de façon inattendue.
         console.error("Erreur lors du chargement de la session :", err);
+        currentUserIdRef.current = null;
         setAccount(null);
+        setSessionError("Connexion réussie, mais impossible de charger ton espace pour l'instant. Vérifie ta connexion internet et réessaie.");
       } finally {
-        setLoading(false);
+        // Jamais pendant la vérification initiale : c'est elle qui lève
+        // l'écran d'attente, une fois le compte affiché.
+        if (bootDoneRef.current) setLoading(false);
       }
+      }, 0);
     });
     return () => authListener?.subscription?.unsubscribe();
   }, []);
@@ -4778,7 +4827,7 @@ function DeviFactAppInner() {
         />
       );
     }
-    return <AuthScreen initialMode={authMode} onBack={() => setPreAuthView("landing")} siteSettings={siteSettings} onLegal={setPreAuthView} />;
+    return <AuthScreen initialMode={authMode} onBack={() => setPreAuthView("landing")} siteSettings={siteSettings} onLegal={setPreAuthView} onSignedIn={signInUser} sessionError={sessionError} />;
   }
 
   // Le prix de son forfait est passé de 0€ à un prix réel depuis son
@@ -7071,7 +7120,7 @@ function RegularizationScreen({ account, plans, siteSettings, onLogout, onContac
   );
 }
 
-function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
+function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onSignedIn = null, sessionError = null }) {
   const [mode, setMode] = useState(initialMode);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -7082,6 +7131,11 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
+  // Connexion réussie mais compte impossible à charger : message affiché
+  // ici et formulaire de nouveau utilisable.
+  useEffect(() => {
+    if (sessionError) { setError(sessionError); setBusy(false); }
+  }, [sessionError]);
 
   async function handleForgotPassword() {
     setError("");
@@ -7205,10 +7259,11 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
           setBusy(false);
           return;
         }
-        // Sinon : session créée immédiatement, l'écouteur onAuthStateChange
-        // dans le composant principal prend le relais automatiquement.
+        // Sinon : session créée immédiatement — le compte est chargé tout
+        // de suite (l'écran reste en attente jusqu'à son affichage).
+        if (data.user && onSignedIn) onSignedIn(data.user);
       } else {
-        const { error: signInError } = await db.auth.signInWithPassword({ email: cleanEmail, password });
+        const { data: signInData, error: signInError } = await db.auth.signInWithPassword({ email: cleanEmail, password });
         if (signInError) {
           console.error("[Connexion] Erreur exacte de Supabase :", signInError);
           // Message précis selon la vraie cause plutôt qu'un message
@@ -7226,7 +7281,11 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal }) {
           setBusy(false);
           return;
         }
-        setBusy(false);
+        // Connexion réussie : le compte est chargé tout de suite, sans
+        // dépendre de l'écouteur d'événements. L'écran reste en attente
+        // jusqu'à l'affichage du compte (ou jusqu'à un message d'erreur).
+        if (signInData?.user && onSignedIn) onSignedIn(signInData.user);
+        else setBusy(false);
       }
     } catch (err) {
       console.error(err);
