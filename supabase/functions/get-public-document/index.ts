@@ -11,6 +11,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { isPayableDoc } from "../_shared/totals.ts";
 import { syncOnlinePayments } from "../_shared/online-payments.ts";
+import { INVOICE_ONLINE_PAYMENTS_ENABLED } from "../_shared/payments-flags.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -60,14 +61,16 @@ serve(async (req) => {
     // connecté dont les encaissements sont actifs (Stripe Connect). Sinon
     // — y compris si la colonne n'existe pas encore — jamais : l'argent
     // d'une facture ne transite pas par le compte de la plateforme.
-    const { data: orgRow } = await dbAdmin.from("organizations").select("stripe_account_id, stripe_charges_enabled").eq("id", link.organization_id).maybeSingle();
+    // Paiement en ligne désactivé (voir _shared/payments-flags.ts) : les
+    // indicateurs Stripe Connect ne sont plus lus, Stripe n'est plus appelé.
+    const { data: orgRow } = INVOICE_ONLINE_PAYMENTS_ENABLED ? await dbAdmin.from("organizations").select("stripe_account_id, stripe_charges_enabled").eq("id", link.organization_id).maybeSingle() : { data: null };
 
     // Un paiement a été lancé sur ce lien (retour du client après Stripe,
     // ou paiement en cours) : on vérifie directement auprès de Stripe s'il
     // est terminé et on l'enregistre sur la facture sans attendre le
     // webhook. Si rien n'est arrivé après 15 minutes, le verrou est levé.
     let paidAt = link.paid_at;
-    if (link.payment_pending_at && stripe && orgRow?.stripe_account_id) {
+    if (INVOICE_ONLINE_PAYMENTS_ENABLED && link.payment_pending_at && stripe && orgRow?.stripe_account_id) {
       try {
         const sync = await syncOnlinePayments(dbAdmin, stripe, link.organization_id, orgRow.stripe_account_id, { documentId: link.document_id });
         if (sync.documents) documents = sync.documents;
@@ -97,10 +100,26 @@ serve(async (req) => {
     }
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name, logo_url").limit(1).maybeSingle();
 
-    const onlinePaymentEnabled = isPayableDoc(doc) && !!orgRow?.stripe_account_id && orgRow?.stripe_charges_enabled === true;
+    const onlinePaymentEnabled = INVOICE_ONLINE_PAYMENTS_ENABLED && isPayableDoc(doc) && !!orgRow?.stripe_account_id && orgRow?.stripe_charges_enabled === true;
+
+    // Règlement par virement : coordonnées bancaires de l'artisan, lues dans
+    // sa fiche Mon entreprise (nom ou raison sociale, IBAN, BIC — rien
+    // d'autre), uniquement pour un document à payer.
+    let paymentInfo: { type: string; name: string; iban: string; bic: string } | null = null;
+    if (isPayableDoc(doc)) {
+      const { data: profileRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", link.organization_id).eq("key", "company-profile").eq("shared", false).maybeSingle();
+      const p: any = profileRow?.value && typeof profileRow.value === "object" ? profileRow.value : {};
+      const clean = (v: unknown) => String(v ?? "").trim();
+      paymentInfo = {
+        type: clean(p.type) === "particulier" ? "particulier" : "entreprise",
+        name: clean(p.name) || clean(doc.company?.name),
+        iban: clean(p.iban) || clean(doc.company?.iban),
+        bic: clean(p.bic) || clean(doc.company?.bic),
+      };
+    }
 
     return new Response(
-      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled }),
+      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled, paymentInfo }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {

@@ -143,50 +143,30 @@ describe("correction d'un paiement par le gestionnaire", () => {
   }, 30000);
 });
 
-describe("page publique : paiement partiel et mise à jour automatique", () => {
-  const base = { siteName: "Chantiflow", signedAt: null, paidAt: null, onlinePaymentEnabled: true };
-  it("le client choisit un montant partiel : bouton et appel serveur avec ce montant ; vide = tout le reste", async () => {
+describe("page publique : règlement par virement", () => {
+  const base = { siteName: "Chantiflow", signedAt: null, paidAt: null, onlinePaymentEnabled: true, paymentInfo: { type: "entreprise", name: "Bâti Plus", iban: "FR76 1234 5678", bic: "AGRIFRPP" } };
+  it("facture avec un paiement déjà reçu : reste à payer dans le bloc virement, jamais de bouton de paiement même si le serveur annonçait le paiement en ligne", async () => {
     publicState.invoked.length = 0;
     publicState.response = { ...base, document: facture({ payments: [{ id: "p", amount: 20 }] }) };
     const { container, unmount } = await mount(<PublicDocumentView token="abc" />);
-    const text = () => container.textContent.replace(/[  ]/g, " ");
-    expect(text()).toContain("reste à régler 100,00 €");
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent.replace(/[  ]/g, " ").trim() === "Payer 100,00 € en ligne")).toBe(true);
-    // Un montant supérieur au reste est ramené au reste
-    await act(async () => { setValue(byLabel(container, "Montant à payer maintenant"), "500"); });
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent.replace(/[  ]/g, " ").trim() === "Payer 100,00 € en ligne")).toBe(true);
-    await act(async () => { setValue(byLabel(container, "Montant à payer maintenant"), "40"); });
-    const pay = [...container.querySelectorAll("button")].find((b) => b.textContent.replace(/[  ]/g, " ").trim() === "Payer 40,00 € en ligne");
-    expect(pay).toBeTruthy();
-    await click(pay);
-    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
-    expect(publicState.invoked.find((c) => c.name === "create-invoice-payment").body).toEqual({ token: "abc", amount: 40 });
+    const text = container.textContent.replace(/[\u00A0\u202F]/g, " ");
+    expect(text).toContain("Payer par virement bancaire");
+    expect(text).toContain("Montant100,00 €");
+    expect(text).toContain("RéférenceF-001");
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent.startsWith("Payer"))).toBe(false);
+    expect(container.querySelector("input[type=number]")).toBeNull();
+    expect(publicState.invoked.map((c) => c.name)).toEqual(["get-public-document"]);
     await unmount();
   }, 30000);
-  it("retour de Stripe après un paiement partiel : confirmation dès que le paiement apparaît, puis nouveau bouton pour le reste", async () => {
-    window.history.replaceState({}, "", "/?voir-document=abc&paiement=ok");
-    try {
-      let reads = 0;
-      publicState.response = () => { reads += 1; return { ...base, document: facture({ payments: reads >= 2 ? [{ id: "pay_stripe_cs_1", date: "2026-09-22", amount: 40, method: "Carte bancaire (en ligne)" }] : [] }) }; };
-      const { container, unmount } = await mount(<PublicDocumentView token="abc" />);
-      const text = () => container.textContent.replace(/[  ]/g, " ");
-      expect(text()).toContain("Paiement transmis, merci !");
-      await act(async () => { await new Promise((r) => setTimeout(r, 3100)); });
-      await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
-      expect(text()).toContain("Paiement reçu, merci ! Il reste 80,00 € à régler.");
-      expect(text()).not.toContain("Paiement transmis");
-      expect([...container.querySelectorAll("button")].some((b) => b.textContent.replace(/[  ]/g, " ").trim() === "Payer 80,00 € en ligne")).toBe(true);
-      await unmount();
-    } finally { window.history.replaceState({}, "", "/"); }
-  }, 30000);
-  it("situation valant facture sur la page publique : montant de la situation et reste à régler", async () => {
+  it("situation valant facture sur la page publique : montant de la situation et reste à régler par virement", async () => {
     publicState.response = { ...base, document: situation({ payments: [{ id: "p", amount: 100 }] }) };
     const { container, unmount } = await mount(<PublicDocumentView token="abc" />);
-    const text = container.textContent.replace(/[  ]/g, " ");
+    const text = container.textContent.replace(/[\u00A0\u202F]/g, " ");
     expect(text).toContain("Gros œuvre");
     expect(text).toContain("300,00 € HT");
     expect(text).toContain("Net à payer 342,00 € − déjà payé 100,00 €"); // retenue de garantie 5 % déduite
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent.replace(/[  ]/g, " ").trim() === "Payer 242,00 € en ligne")).toBe(true);
+    expect(text).toContain("Montant242,00 €");
+    expect(text).toContain("IBANFR76 1234 5678");
     await unmount();
   }, 30000);
 });

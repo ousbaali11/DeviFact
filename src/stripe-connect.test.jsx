@@ -117,12 +117,13 @@ describe("carte Connecter mon compte bancaire", () => {
     expect(calls).toHaveLength(0);
     await unmount();
   }, 30000);
-  it("Mon entreprise affiche la carte au-dessus de la zone de test", async () => {
+  it("paiement en ligne désactivé : Mon entreprise n'affiche plus la carte (composant conservé), la zone de test reste", async () => {
     const noop = () => {};
     const { container, unmount } = await mount(<CompanyView profile={{ ...emptyCompanyProfile(), name: "Bâti Plus" }} saving={false} onSave={noop} onReset={noop} documentCount={0} clientCount={0} account={owner} isLocked={false} isViewer={false} onGoToPricing={noop} />);
     const text = container.textContent;
-    expect(text.indexOf("Connecter mon compte bancaire")).toBeGreaterThan(-1);
-    expect(text.indexOf("Connecter mon compte bancaire")).toBeLessThan(text.indexOf("Zone de test"));
+    expect(text).not.toContain("Connecter mon compte bancaire");
+    expect(text).not.toMatch(/stripe|paiement en ligne/i);
+    expect(text).toContain("Zone de test");
     await unmount();
   }, 30000);
   it("commission réglée dans Admin : annoncée sur la carte", async () => {
@@ -131,27 +132,10 @@ describe("carte Connecter mon compte bancaire", () => {
     expect(container.textContent).not.toContain("Aucune commission");
     await unmount();
   }, 30000);
-  it("Admin, Identité du site : champ commission (0 à 20 %), enregistré avec les autres réglages", async () => {
-    let saved = null;
-    const { container, unmount } = await mount(<SiteIdentitySettings siteSettings={{ name: "Chantiflow", contactEmail: "c@e.fr", connectFeePercent: 0 }} saving={false} onSave={(s) => { saved = s; }} />);
-    const input = container.querySelector('input[type="number"][max="20"]');
-    expect(input).toBeTruthy();
-    expect(container.textContent).toContain("Commission sur les paiements en ligne (%)");
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "1.5");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "35");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    expect(input.value).toBe("20"); // borné
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "1.5");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await click(buttonByText(container, "Enregistrer"));
-    expect(saved).toMatchObject({ name: "Chantiflow", connectFeePercent: 1.5 });
+  it("paiement en ligne désactivé : Admin, Identité du site n'affiche plus le champ commission", async () => {
+    const { container, unmount } = await mount(<SiteIdentitySettings siteSettings={{ name: "Chantiflow", contactEmail: "c@e.fr", connectFeePercent: 0 }} saving={false} onSave={() => {}} />);
+    expect(container.querySelector('input[type="number"][max="20"]')).toBeNull();
+    expect(container.textContent).not.toContain("Commission sur les paiements en ligne");
     await unmount();
   }, 30000);
   it("compte inachevé : « Recommencer à zéro » détache le compte (après confirmation) et relit l'état ; absent quand les paiements sont actifs", async () => {

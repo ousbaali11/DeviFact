@@ -9,6 +9,7 @@
 // c'est cette fonction, pas le navigateur, qui décide.
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
+import { CARD_SUBSCRIPTIONS_ENABLED } from "../_shared/payments-flags.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { safeOrigin } from "../_shared/stripe.ts";
@@ -28,6 +29,8 @@ const corsHeaders = {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  // Désactivé (voir _shared/payments-flags.ts) : abonnements par PayPal uniquement.
+  if (!CARD_SUBSCRIPTIONS_ENABLED) return new Response(JSON.stringify({ error: "Le paiement par carte n'est plus proposé : utilise PayPal." }), { status: 410, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
     const authHeader = req.headers.get("Authorization") || "";

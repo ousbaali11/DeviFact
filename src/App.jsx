@@ -879,6 +879,14 @@ function companySnapshotOf(profile) {
 // document sont complétés — jamais une valeur saisie ; le type
 // (entreprise / particulier) suit la fiche seulement s'il n'est pas déjà
 // posé. Importer un client ou son entreprise ne réclame donc rien de plus.
+// Paiements par carte (Stripe) désactivés le 24/09/2026 : abonnements par
+// PayPal uniquement, factures réglées par virement (coordonnées de l'artisan
+// affichées sur la page publique). Le code Stripe et Stripe Connect reste en
+// place (bouton carte, carte « Connecter mon compte de paiement », page
+// publique, réglages Admin, rapprochement) : repasser à true le réactive.
+// Même décision côté serveur : supabase/functions/_shared/payments-flags.ts.
+const ONLINE_PAYMENTS_ENABLED = false;
+
 const DOC_COMPANY_FIELDS = ["type", "name", "siret", "tva", "address", "postalCode", "city", "country", "email", "phone", "logo"];
 const DOC_CLIENT_FIELDS = ["type", "name", "address", "postalCode", "city", "country", "email", "phone", "siret", "tva"];
 const isBlankValue = (v) => v === undefined || v === null || (typeof v === "string" && !v.trim());
@@ -2894,7 +2902,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
               <div style={{ width: "2cm" }}>
                 <img src={publicQr.dataUrl} alt="QR code" style={{ width: "2cm", height: "2cm", display: "block" }} />
                 <div style={{ fontSize: "6.5pt", color: inkSoft, marginTop: "3px", lineHeight: 1.2, textAlign: "center" }}>
-                  {doc.type === "devis" ? "Scannez pour signer en ligne" : "Scannez pour consulter en ligne"}
+                  {doc.type === "devis" ? "Scannez pour signer en ligne" : isPayableDoc(doc) ? "Scannez pour voir les informations de paiement" : "Scannez pour consulter en ligne"}
                 </div>
               </div>
             )}
@@ -3571,6 +3579,7 @@ function DeviFactAppInner() {
   // manquait, la liste des documents est relue depuis le serveur ; renvoie
   // le document à jour quand un identifiant est donné, sinon null.
   async function syncOnlinePayments(documentId = null) {
+    if (!ONLINE_PAYMENTS_ENABLED) return null;
     const orgId = getActiveOrganization();
     if (!orgId) return null;
     try {
@@ -5864,7 +5873,7 @@ export default function DeviFactApp() {
 // besoin d'un compte. Permet de consulter un devis/facture, de le
 // signer, ou de le payer en ligne selon son type et son statut.
 function PublicDocumentView({ token }) {
-  const [state, setState] = useState({ loading: true, error: null, document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
+  const [state, setState] = useState({ loading: true, error: null, document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false, paymentInfo: null });
   const [signatureName, setSignatureName] = useState("");
   const [secondSigner, setSecondSigner] = useState(false);
   const [secondSignatureName, setSecondSignatureName] = useState("");
@@ -5875,7 +5884,7 @@ function PublicDocumentView({ token }) {
   const [payError, setPayError] = useState(null);
   // Retour de Stripe après paiement (success_url de create-invoice-payment).
   const [paymentReturn] = useState(() => {
-    try { return new URLSearchParams(window.location.search).get("paiement") === "ok"; } catch { return false; }
+    try { return ONLINE_PAYMENTS_ENABLED && new URLSearchParams(window.location.search).get("paiement") === "ok"; } catch { return false; }
   });
   const [reloadTick, setReloadTick] = useState(0);
   // Paiement partiel : montant choisi par le client (vide = tout le reste) ;
@@ -5903,6 +5912,12 @@ function PublicDocumentView({ token }) {
   const paymentConfirmed = paymentReturn && (sessionPaymentSeen || (paidBaseline !== null && (!!state.paidAt || state.document?.status === "payée" || totalPaid > paidBaseline + 0.005)));
   const awaitingConfirmation = paymentReturn && !paymentConfirmed && reloadTick < 5;
   const canPay = payable && state.document.status !== "payée" && !state.paidAt && amountDue > 0.005 && !awaitingConfirmation;
+  // Règlement par virement : coordonnées bancaires de l'artisan (fiche Mon
+  // entreprise, renvoyées par le serveur), tant qu'il reste à payer.
+  const awaitingTransfer = payable && state.document.status !== "payée" && !state.paidAt && amountDue > 0.005;
+  const transferIban = String(state.paymentInfo?.iban || "").trim();
+  const transferBic = String(state.paymentInfo?.bic || "").trim();
+  const transferName = String(state.paymentInfo?.name || state.document?.company?.name || "").trim();
   // Signature à distance : saisie du nom (par défaut) ou dessin à main
   // levée — même technique que le dessin dans l'éditeur (canvas 2D,
   // image PNG envoyée à sign-public-document dans signatureDrawing).
@@ -5957,7 +5972,7 @@ function PublicDocumentView({ token }) {
         if (data?.error) throw new Error(data.error);
         // Paiement en ligne : uniquement si le serveur l'annonce (compte
         // Stripe connecté et actif pour cet artisan) — jamais par défaut.
-        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true });
+        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true , paymentInfo: data.paymentInfo || null});
         if (paymentReturn) setPaidBaseline((b) => (b === null ? documentPaidTotal(data.document) : b));
       } catch (err) {
         setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
@@ -6144,12 +6159,12 @@ function PublicDocumentView({ token }) {
             )}
 
             {/* Retour de Stripe après paiement, en attendant la confirmation */}
-            {awaitingConfirmation && (
+            {ONLINE_PAYMENTS_ENABLED && awaitingConfirmation && (
               <div className="mt-6 flex items-center gap-2 rounded-xl p-4" style={{ background: `${colors.moss}0D` }}>
                 <Loader2 size={18} className="animate-spin" style={{ color: colors.moss }} /> <p className="text-sm font-medium" style={{ color: colors.moss }}>Paiement transmis, merci ! La confirmation arrive dans quelques instants.</p>
               </div>
             )}
-            {paymentConfirmed && !state.paidAt && state.document.status !== "payée" && (
+            {ONLINE_PAYMENTS_ENABLED && paymentConfirmed && !state.paidAt && state.document.status !== "payée" && (
               <div className="mt-6 flex items-center gap-2 rounded-xl p-4" style={{ background: `${colors.moss}0D` }}>
                 <Check size={18} style={{ color: colors.moss }} /> <p className="text-sm font-medium" style={{ color: colors.moss }}>Paiement reçu, merci ! Il reste {formatMoney(amountDue, state.document.currency)} à régler.</p>
               </div>
@@ -6157,15 +6172,26 @@ function PublicDocumentView({ token }) {
             {/* Paiement — uniquement pour une facture pas encore payée, et
                 seulement si le paiement en ligne est disponible pour cet
                 artisan (compte Stripe connecté et actif) ; sinon, virement. */}
-            {canPay && !state.onlinePayment && (
+            {awaitingTransfer && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
-                <p className="flex items-start gap-2 text-sm" style={{ color: colors.inkSoft }}>
-                  <Landmark size={16} className="mt-0.5 shrink-0" style={{ color: colors.slate }} />
-                  <span>Règlement par virement bancaire : les coordonnées (IBAN) figurent sur la facture. Le paiement en ligne n'est pas disponible pour cette facture.</span>
-                </p>
+                <p className="mb-3 flex items-center gap-2 text-sm font-semibold"><Landmark size={16} style={{ color: colors.slate }} /> Payer par virement bancaire</p>
+                {transferIban ? (
+                  <>
+                    <dl className="grid gap-2 text-sm">
+                      <div className="flex flex-wrap gap-x-3"><dt className="w-28 shrink-0" style={{ color: colors.inkSoft }}>Bénéficiaire</dt><dd className="font-medium">{transferName}</dd></div>
+                      <div className="flex flex-wrap gap-x-3"><dt className="w-28 shrink-0" style={{ color: colors.inkSoft }}>IBAN</dt><dd className="df-mono">{transferIban}</dd></div>
+                      {transferBic && <div className="flex flex-wrap gap-x-3"><dt className="w-28 shrink-0" style={{ color: colors.inkSoft }}>BIC</dt><dd className="df-mono">{transferBic}</dd></div>}
+                      <div className="flex flex-wrap gap-x-3"><dt className="w-28 shrink-0" style={{ color: colors.inkSoft }}>Montant</dt><dd className="df-mono font-semibold">{formatMoney(amountDue, state.document.currency)}</dd></div>
+                      <div className="flex flex-wrap gap-x-3"><dt className="w-28 shrink-0" style={{ color: colors.inkSoft }}>Référence</dt><dd className="df-mono">{state.document.docNumber}</dd></div>
+                    </dl>
+                    <p className="mt-3 text-xs" style={{ color: colors.inkSoft }}>Indique la référence dans le libellé du virement : le paiement sera rapproché de cette facture.</p>
+                  </>
+                ) : (
+                  <p className="text-sm" style={{ color: colors.inkSoft }}>Coordonnées bancaires à demander à {transferName || "l'émetteur de la facture"} : elles ne sont pas encore renseignées.</p>
+                )}
               </div>
             )}
-            {canPay && state.onlinePayment && (
+            {ONLINE_PAYMENTS_ENABLED && canPay && state.onlinePayment && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
                 <label className="mb-3 block text-xs" style={{ color: colors.inkSoft }}>
                   Montant à payer maintenant ({currencyLabel(state.document.currency || "EUR")}) — tout ou une partie, reste à régler {formatMoney(amountDue, state.document.currency)}
@@ -6245,7 +6271,7 @@ function ContactView({ siteSettings, onBack, onLegal }) {
         )}
         <h1 className="df-display mb-2 text-3xl font-semibold">Nous contacter</h1>
         <p className="mb-6 text-sm" style={{ color: colors.inkSoft }}>
-          Une question, besoin d'aide pour ton abonnement, ou tu ne peux pas payer par carte ou PayPal depuis ton pays ? Écris-nous, on te répond directement.
+          Une question, besoin d'aide pour ton abonnement, ou tu ne peux pas payer par PayPal depuis ton pays ? Écris-nous, on te répond directement.
         </p>
 
         <div className="mb-8 flex gap-3">
@@ -6363,7 +6389,7 @@ const LEGAL_FIELDS = [
   { id: "pricesTaxNote", group: "Tarifs et facturation", kind: "text", label: "Précision sur les tarifs (HT / TTC, TVA)", help: "Ex. « Tarifs indiqués hors taxes, TVA de 20 % en sus » ou « TVA non applicable, article 293 B du CGI ». Vide : rien n'est affiché.", pages: ["cgu"], empty: "hide" },
   // Points à valider avec un professionnel
   { id: "processorClause", group: "Points à valider avec un professionnel", kind: "textarea", label: "Responsabilité du traitement pour les données de vos clients", help: "Paragraphe expliquant que l'artisan est responsable du traitement des données de ses propres clients et que le site agit comme sous-traitant. Vide : le paragraphe n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
-  { id: "thirdPartyTransfers", group: "Points à valider avec un professionnel", kind: "textarea", label: "Localisation des prestataires et transferts hors UE", help: "Pays d'établissement des prestataires (paiement par carte, PayPal, envoi d'e-mails, Google…) et garanties de transfert (clauses contractuelles types). Vide : le paragraphe n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
+  { id: "thirdPartyTransfers", group: "Points à valider avec un professionnel", kind: "textarea", label: "Localisation des prestataires et transferts hors UE", help: "Pays d'établissement des prestataires (PayPal, envoi d'e-mails, Google…) et garanties de transfert (clauses contractuelles types). Vide : le paragraphe n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
   { id: "paypalCookies", group: "Points à valider avec un professionnel", kind: "textarea", label: "Cookies déposés par le script PayPal", help: "À vérifier puis décrire : quels cookies, à quelle fin, et l'information donnée au visiteur. Vide : la phrase n'apparaît pas.", pages: ["confidentialite"], empty: "hide" },
   { id: "signatureLegalValue", group: "Points à valider avec un professionnel", kind: "textarea", label: "Valeur juridique de la signature électronique", help: "Valeur probante de la signature « simple » (nom saisi ou dessin) et mentions à ajouter. Vide : le paragraphe n'apparaît pas.", pages: ["cgu"], empty: "hide" },
   { id: "withdrawalRefund", group: "Points à valider avec un professionnel", kind: "textarea", label: "Droit de rétractation et remboursement", help: "Règle applicable aux professionnels (et aux consommateurs si le service leur est ouvert). Vide : le paragraphe n'apparaît pas.", pages: ["cgu"], empty: "hide" },
@@ -6483,7 +6509,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Signatures : nom saisi ou image de la signature (dessinée à l'écran ou importée), y compris lors d'une signature à distance par le client via un lien ou un QR code, avec la date de signature.",
               "Photos de chantier ajoutées aux rapports d'intervention, PV de réception et situations de travaux (fichiers image, réduits avant envoi).",
               "Équipe et planning : email des membres invités, rôle, créneaux du planning (titre, dates, membre, chantier).",
-              "Abonnement : forfait, cycle de facturation, identifiants techniques de client et d'abonnement chez le prestataire de paiement par carte ou PayPal, dates de paiement et d'expiration. Aucun numéro de carte bancaire n'est stocké par le site.",
+              "Abonnement : forfait, cycle de facturation, identifiants techniques de client et d'abonnement chez PayPal, dates de paiement et d'expiration. Aucun numéro de carte bancaire n'est stocké par le site.",
               "Formulaire de contact : prénom, nom, email, téléphone (optionnel), objet et message, enregistrés en base et transmis par email à l'éditeur.",
               "Clés d'accès API (forfait Entreprise) : nom de la clé, empreinte hachée (jamais la clé en clair), date de dernière utilisation, compteur d'appels par minute.",
               "Liens publics de signature ou de paiement : jeton aléatoire, dates de signature et de paiement.",
@@ -6502,7 +6528,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
             <LegalP>Le site fait appel aux prestataires suivants.</LegalP>
             <LegalUl items={[
               "Supabase (hébergement de la base de données, authentification, stockage des photos, fonctions serveur) : ensemble des données, région Union européenne (Stockholm, Suède).",
-              "Prestataire de paiement par carte : votre adresse email et l'identifiant de votre organisation lors de la souscription d'un abonnement ; pour le paiement d'une facture par un client, le numéro de la facture et son montant. Les données de carte sont saisies directement sur les pages sécurisées du prestataire.",
+              "PayPal (paiement de l'abonnement) : votre adresse email et l'identifiant de votre organisation lors de la souscription. Les données de paiement sont saisies directement sur les pages sécurisées de PayPal. Le règlement d'une facture par un client se fait par virement, directement à l'artisan : le service ne traite aucune donnée bancaire du client.",
               "PayPal (paiement de l'abonnement) : identifiant de votre organisation ; le paiement se fait sur les pages de PayPal, dont le script est chargé sur la page Tarifs.",
               "Resend (envoi des emails) : adresse email du destinataire, contenu de l'email (numéro de facture, montant, nom du client, lien d'avis, votre message de contact).",
               "Google (Gemini, intelligence artificielle) : uniquement le texte de description du chantier que vous saisissez dans la fenêtre « Suggestions IA ». Aucune donnée de compte, de client ni de montant n'est envoyée.",
@@ -6528,7 +6554,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Abonnement résilié : l'accès est maintenu jusqu'à la fin de la période payée, puis le compte repasse automatiquement au forfait Gratuit ; les données ne sont pas supprimées.",
               <>Factures : en tant qu'émetteur, vous devez conserver vos factures pendant la durée légale (10 ans au titre des obligations comptables).{v("invoiceRetention") && <> Après suppression d'un compte : {v("invoiceRetention")}.</>}</>,
               <>Messages du formulaire de contact : <LegalValue info={info} id="contactMessagesRetention" />.</>,
-              "Données de facturation de l'abonnement (chez le prestataire de paiement par carte et PayPal) : selon leurs propres politiques et les obligations comptables.",
+              "Données de facturation de l'abonnement (chez PayPal) : selon leurs propres politiques et les obligations comptables.",
             ]} />
             <LegalH2>7. Vos droits</LegalH2>
             <LegalP>Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation, d'opposition et de portabilité de vos données, ainsi que du droit de définir des directives après votre décès. Vous pouvez modifier vous-même la plupart de vos données depuis l'application (Mon entreprise, Mon compte, Clients). Pour exercer un autre droit, notamment la suppression complète de votre compte, écrivez à {contactEmail} : la demande est traitée {v("rightsResponseDelay") ? <>dans un délai de {v("rightsResponseDelay")}</> : <>dans le délai prévu par le RGPD</>}. Vous pouvez aussi introduire une réclamation auprès de la CNIL (cnil.fr).</LegalP>
@@ -6553,7 +6579,7 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
             <LegalUl items={[
               "Forfait Gratuit : sans carte bancaire, limité à un nombre de documents indiqué sur la page Tarifs (3 par défaut). Au-delà, le compte passe en lecture seule jusqu'au choix d'un forfait payant.",
               <>Forfaits payants (Essentiel, Pro, Entreprise) : abonnement mensuel ou annuel, aux tarifs affichés sur la page Tarifs au moment de la souscription — ces tarifs font foi.{v("pricesTaxNote") && <> {v("pricesTaxNote")}</>}</>,
-              "Le paiement s'effectue par carte bancaire via notre prestataire de paiement ou via PayPal. L'abonnement se renouvelle automatiquement à chaque échéance jusqu'à résiliation.",
+              "Le paiement s'effectue via PayPal. L'abonnement se renouvelle automatiquement à chaque échéance jusqu'à résiliation.",
               "Résiliation : possible à tout moment depuis la page Abonnement. L'accès aux fonctionnalités du forfait est conservé jusqu'à la fin de la période déjà payée, puis le compte repasse automatiquement au forfait Gratuit, sans suppression des données.",
               <>L'éditeur peut modifier les tarifs ; les nouveaux tarifs s'appliquent au renouvellement suivant, après information préalable{v("priceChangeNotice") && <> avec un préavis de {v("priceChangeNotice")}</>}.</>,
             ]} />
@@ -6564,8 +6590,8 @@ function LegalView({ kind, siteSettings, onBack, onLegal }) {
               "Ne pas saisir de contenu illicite, ne pas usurper l'identité d'un tiers, ne pas tenter d'accéder aux données d'autres organisations, ne pas surcharger ou contourner le service (y compris via l'API).",
               "Recueillir, lorsque c'est nécessaire, le consentement de vos clients avant de leur envoyer des emails depuis le service (relances, demande d'avis) et respecter vos propres obligations en matière de données personnelles.",
             ]} />
-            <LegalH2>5. Signature et paiement en ligne</LegalH2>
-            <LegalP>Le service permet à vos clients de signer un devis (nom saisi ou signature dessinée) et de payer une facture depuis un lien ou un QR code, sans compte. La signature enregistrée est une signature électronique « simple » : le service conserve le nom ou le dessin, la date et le lien utilisé. Le paiement est réalisé par un prestataire de paiement agréé ; le service n'encaisse pas les fonds pour votre compte.</LegalP>
+            <LegalH2>5. Signature en ligne et règlement des factures</LegalH2>
+            <LegalP>Le service permet à vos clients de signer un devis (nom saisi ou signature dessinée) et de consulter une facture, avec vos coordonnées de virement, depuis un lien ou un QR code, sans compte. La signature enregistrée est une signature électronique « simple » : le service conserve le nom ou le dessin, la date et le lien utilisé. Le règlement se fait par virement bancaire directement sur votre compte ; le service n'encaisse jamais de fonds pour votre compte.</LegalP>
             <LegalCustom info={info} id="signatureLegalValue" />
             <LegalH2>6. Facturation électronique</LegalH2>
             <LegalP>Le service permet de télécharger vos factures au format Factur-X. La transmission à une plateforme agréée, prévue par la réforme de la facturation électronique, n'est pas encore assurée par le service et reste à votre charge tant qu'elle n'est pas proposée.</LegalP>
@@ -7086,7 +7112,7 @@ function RegularizationScreen({ account, plans, siteSettings, onLogout, onContac
   const price = billing === "annuel" ? plan?.annual : plan?.monthly;
   const paypalPlanId = billing === "annuel" ? plan?.paypalPlanIdAnnual : plan?.paypalPlanIdMonthly;
   const stripePriceId = billing === "annuel" ? plan?.stripePriceIdAnnual : plan?.stripePriceIdMonthly;
-  const showCard = plan?.cardPaymentEnabled && !!stripePriceId;
+  const showCard = ONLINE_PAYMENTS_ENABLED && plan?.cardPaymentEnabled && !!stripePriceId;
   const showPaypal = !!paypalPlanId && plan?.paypalPaymentEnabled;
 
   return (
@@ -8902,7 +8928,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
 
 function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null, clients = [], onSyncOnlinePayments = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
-  useOnlinePaymentsSync(doc, onSyncOnlinePayments, setLocalDoc);
+  useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
   const pendingPatchRef = useRef(null);
@@ -9177,6 +9203,11 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                 <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du maître d'œuvre" value={localDoc.visaMaitreOeuvre || ""} onChange={(e) => patch({ visaMaitreOeuvre: e.target.value })} />
               </div>
             </div>
+            {localDoc.vautFacture === true && !String(companyProfile?.iban || "").trim() && (
+              <p className="mb-3 flex items-start gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: `${colors.brass}1A`, color: colors.brassDark }}>
+                <Landmark size={14} className="mt-0.5 shrink-0" /> <span>IBAN manquant dans Mon entreprise : tes clients ne verront pas de coordonnées de virement sur le lien ni le QR code de cette situation.</span>
+              </p>
+            )}
             {localDoc.vautFacture === true && <PaymentsEditor doc={localDoc} totals={{ totalPaid: s.totalPaid, montantARegler: s.montantARegler }} onPatch={patch} disabled={isLocked || isViewer} />}
           </div>
 
@@ -12738,7 +12769,7 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
 // qui convainc : promesse, les 15 documents, comment ça marche, ce qui
 // change au quotidien, tarifs complets, questions, appel final.
 const ATELIER_LANDING_FEATURES = [
-  { icon: FileSignature, title: "Signature et paiement en ligne", text: "Tu envoies un lien ou un QR code : ton client signe le devis ou paie la facture depuis son téléphone, sans créer de compte." },
+  { icon: FileSignature, title: "Signature en ligne et règlement", text: "Tu envoies un lien ou un QR code : ton client signe le devis, ou retrouve tes coordonnées de virement pour régler la facture, depuis son téléphone et sans créer de compte." },
   { icon: Receipt, title: "Prêt pour la facture électronique", text: "Chaque facture peut être téléchargée au format Factur-X, le format de la réforme 2026-2027. La connexion à une plateforme agréée est prévue." },
   { icon: Camera, title: "Photos de chantier", text: "Prends des photos directement depuis le rapport d'intervention, le PV de réception ou la situation de travaux : elles sont dans le PDF." },
   { icon: HardHat, title: "Chaque chantier au même endroit", text: "Devis, factures, planning de l'équipe et photos regroupés par chantier, avec le prévu, le facturé et l'écart." },
@@ -12902,7 +12933,7 @@ function LandingPageAtelier({ plans, siteSettings, onGetStarted, onLogin, onCont
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {[
               ["1", "Tu crées", "Appuie sur « Créer », choisis le document, remplis les lignes. Tes clients et tes prestations sont mémorisés pour la prochaine fois."],
-              ["2", "Ton client signe ou paie", "Envoie un lien ou imprime le QR code : il signe le devis ou paie la facture depuis son téléphone. Le devis signé devient une facture tout seul."],
+              ["2", "Ton client signe ou règle", "Envoie un lien ou imprime le QR code : il signe le devis, ou retrouve tes coordonnées de virement pour régler la facture, depuis son téléphone. Le devis signé devient une facture tout seul."],
               ["3", "Tu suis et tu relances", "Sur l'accueil, tu vois ce qui attend une réponse, ce qui est à encaisser et ce qui est en retard. Un clic pour relancer par email."],
             ].map(([n, title, text]) => (
               <div key={n} className="rounded-2xl p-6" style={card}>
@@ -15356,7 +15387,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
         </div>
       )}
 
-      <StripeConnectCard account={account} siteSettings={siteSettings} profile={profile} />
+      {ONLINE_PAYMENTS_ENABLED && <StripeConnectCard account={account} siteSettings={siteSettings} profile={profile} />}
 
       <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
         <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.brick }}>
@@ -15571,7 +15602,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
           const price = billing === "annuel" ? plan.annual : plan.monthly;
           const paypalPlanId = billing === "annuel" ? plan.paypalPlanIdAnnual : plan.paypalPlanIdMonthly;
           const stripePriceId = billing === "annuel" ? plan.stripePriceIdAnnual : plan.stripePriceIdMonthly;
-          const showCard = plan.cardPaymentEnabled && !!stripePriceId;
+          const showCard = ONLINE_PAYMENTS_ENABLED && plan.cardPaymentEnabled && !!stripePriceId;
           const showPaypal = !!paypalPlanId && plan.paypalPaymentEnabled;
           return (
             <div key={plan.id} className="flex w-full flex-col overflow-hidden rounded-2xl sm:w-[calc(50%-0.5rem)] lg:w-[calc(25%-0.75rem)]" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
@@ -15616,7 +15647,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
                   {showCard && <StripeCheckoutButton planId={plan.id} billingCycle={billing} organizationId={account?.organizationId} />}
                   {showPaypal && <PayPalButton planId={paypalPlanId} organizationId={account?.organizationId} onApproved={() => { setApprovedMsg(true); scheduleRefresh([3000, 8000, 15000, 30000, 60000]); }} />}
                   <p className="text-center text-xs" style={{ color: colors.inkSoft }}>
-                    Carte bancaire ou PayPal indisponible dans ton pays ?{" "}
+                    PayPal indisponible dans ton pays ?{" "}
                     <button onClick={onContact} className="underline" style={{ color: colors.slate }}>Contacte-nous</button>, on trouvera une solution.
                   </p>
                 </div>
@@ -15808,11 +15839,11 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
           <input type="url" className="df-input w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="https://instagram.com/tonsite" value={local.contactInstagramUrl || ""} onChange={(e) => patch({ contactInstagramUrl: e.target.value })} />
           <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Affiché sous forme d'icône sur la page "Nous contacter". Laisse vide pour ne pas l'afficher.</p>
         </div>
-        <div>
+        {ONLINE_PAYMENTS_ENABLED && <div>
           <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Commission sur les paiements en ligne (%)</label>
           <input type="number" min="0" max="20" step="0.1" className="df-input df-mono w-full max-w-xs rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.connectFeePercent ?? 0} onChange={(e) => patch({ connectFeePercent: Math.min(20, Math.max(0, Number(e.target.value) || 0)) })} />
           <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Part du montant de chaque facture payée en ligne prélevée pour la plateforme, en plus des frais du prestataire de paiement à la charge de l'artisan. 0 = aucune commission. Une commission est un service facturé à l'artisan : à prévoir dans les CGV et à facturer avec TVA.</p>
-        </div>
+        </div>}
         <div>
           <label className="mb-2 block text-xs font-medium" style={{ color: colors.inkSoft }}>Logo du site</label>
           <div className="flex flex-wrap items-center gap-4">
@@ -16600,7 +16631,7 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
             ))}
           </CollapsibleSection>
 
-          <CollapsibleSection title="Paiement — carte bancaire" icon={CreditCard}>
+          {ONLINE_PAYMENTS_ENABLED && <CollapsibleSection title="Paiement — carte bancaire" icon={CreditCard}>
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
               Colle ici l'identifiant de prix ("price_...") créé chez le prestataire de paiement par carte pour chaque forfait — le bouton "Payer par carte" n'apparaît que si un identifiant est renseigné ET que l'affichage est activé ci-dessous.
             </p>
@@ -16621,7 +16652,7 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
                 </div>
               </div>
             ))}
-          </CollapsibleSection>
+          </CollapsibleSection>}
         </div>
       )}
 
@@ -17080,14 +17111,14 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
         </div>
       )}
       {error && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{error}</p>}
-      <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Chaque paiement est déduit du montant à régler et imprimé sur le document. Les paiements en ligne s'ajoutent tout seuls ; tu peux corriger ou retirer n'importe quel paiement. Quand le total est atteint, le document passe en « payée ».</p>
+      <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Chaque paiement est déduit du montant à régler et imprimé sur le document. Tu peux corriger ou retirer n'importe quel paiement. Quand le total est atteint, le document passe en « payée ».</p>
     </div>
   );
 }
 
 function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
-  useOnlinePaymentsSync(doc, onSyncOnlinePayments, setLocalDoc);
+  useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const [clientQuery, setClientQuery] = useState("");
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [selectedLineIds, setSelectedLineIds] = useState([]);
@@ -18545,6 +18576,11 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 
           </>)}
 
+          {(localDoc.type === "facture" || localDoc.type === "acompte") && !String(companyProfile?.iban || "").trim() && (
+            <p className="mb-3 flex items-start gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: `${colors.brass}1A`, color: colors.brassDark }}>
+              <Landmark size={14} className="mt-0.5 shrink-0" /> <span>IBAN manquant dans Mon entreprise : tes clients ne verront pas de coordonnées de virement sur le lien ni le QR code de cette facture.</span>
+            </p>
+          )}
           {(localDoc.type === "facture" || localDoc.type === "acompte") && <PaymentsEditor doc={localDoc} totals={totals} onPatch={patch} disabled={isLocked || isViewer} />}
 
           <div className="mt-8 flex flex-wrap items-start justify-between gap-8 border-t pt-8" style={{ borderColor: colors.line }}>

@@ -14,6 +14,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { syncOnlinePayments } from "../_shared/online-payments.ts";
+import { INVOICE_ONLINE_PAYMENTS_ENABLED } from "../_shared/payments-flags.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
 const stripe = stripeKey ? new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient() }) : null;
@@ -24,6 +25,8 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  // Désactivé (voir _shared/payments-flags.ts) : rien à rapprocher, Stripe n'est pas appelé.
+  if (!INVOICE_ONLINE_PAYMENTS_ENABLED) return json({ checked: 0, added: 0, documentIds: [] });
 
   try {
     const authClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {

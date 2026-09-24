@@ -14,6 +14,7 @@
 // facultative (site_settings.connect_fee_percent, 0 par défaut).
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
+import { INVOICE_ONLINE_PAYMENTS_ENABLED } from "../_shared/payments-flags.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { amountDueOf, isPayableDoc, round2 } from "../_shared/totals.ts";
@@ -36,6 +37,8 @@ function applicationFeeCents(amountCents: number, percent: number): number {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  // Désactivé (voir _shared/payments-flags.ts) : factures réglées par virement.
+  if (!INVOICE_ONLINE_PAYMENTS_ENABLED) return new Response(JSON.stringify({ error: "Le paiement en ligne des factures est désactivé : règlement par virement, coordonnées sur la facture." }), { status: 410, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
     const { token, amount: requestedAmount } = await req.json();

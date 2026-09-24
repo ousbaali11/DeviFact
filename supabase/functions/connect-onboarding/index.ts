@@ -21,6 +21,7 @@
 // Secrets : STRIPE_SECRET_KEY (déjà utilisé par create-checkout-session).
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
+import { INVOICE_ONLINE_PAYMENTS_ENABLED } from "../_shared/payments-flags.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { buildConnectAccountParams, withoutBankAccount } from "../_shared/connect.ts";
@@ -73,6 +74,8 @@ async function saveAccountState(orgId: string, account: Stripe.Account) {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  // Désactivé (voir _shared/payments-flags.ts) : plus d'inscription Stripe Connect.
+  if (!INVOICE_ONLINE_PAYMENTS_ENABLED) return new Response(JSON.stringify({ error: "Le paiement en ligne des factures est désactivé : règlement par virement, coordonnées sur la facture." }), { status: 410, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
     // Identifie l'appelant à partir de son jeton de session.
