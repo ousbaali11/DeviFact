@@ -2242,6 +2242,39 @@ function documentAmountDue(doc) {
   if (!doc) return 0;
   return doc.type === "situation" ? computeSituation(doc).montantARegler : computeTotals(doc).montantARegler;
 }
+// Total « à régler » d'un document à encaisser (facture, acompte : TTC ;
+// situation valant facture : net à payer + acompte déjà versé), la valeur
+// mémorisée dans paidTotal au passage en « payée ».
+function documentSettledTotal(doc) {
+  if (!doc) return 0;
+  if (doc.type === "situation") { const s = computeSituation(doc); return Math.round((s.netAPayer + s.acompteVerse) * 100) / 100; }
+  return Math.round(computeTotals(doc).totalTTC * 100) / 100;
+}
+// Reste à payer RÉEL, toujours recalculé depuis les lignes et les paiements
+// reçus, y compris pour un document marqué « payée » : ce qui a été
+// considéré réglé au passage en « payée » (paidTotal, à défaut le total du
+// moment) reste acquis ; tout ce que le total dépasse depuis (lignes
+// ajoutées, remise retirée…) est dû.
+function documentOutstanding(doc) {
+  if (!isPayableDoc(doc)) return 0;
+  const total = documentSettledTotal(doc);
+  const received = documentPaidTotal(doc);
+  if (doc.status !== "payée") return Math.max(0, Math.round((total - received) * 100) / 100);
+  const settledRef = Number(doc.paidTotal) > 0 ? Number(doc.paidTotal) : total;
+  return Math.max(0, Math.round((total - Math.max(received, settledRef)) * 100) / 100);
+}
+// Document déjà « payée » que l'on modifie (sans toucher au statut) : si le
+// nouveau total dépasse ce qui a été réglé, il repasse en « envoyée »,
+// paiement et référence effacés, et l'éditeur l'annonce. Renvoie
+// { patch, notice } ou null si rien ne change.
+function paymentRevertPatch(original, patch) {
+  if (!original || original.status !== "payée" || patch.status !== undefined || !isPayableDoc(original)) return null;
+  const next = { ...original, ...patch };
+  const settledRef = Number(original.paidTotal) > 0 ? Number(original.paidTotal) : documentSettledTotal(original);
+  const outstanding = documentOutstanding({ ...next, status: "payée", paidTotal: settledRef });
+  if (outstanding <= 0.005) return null;
+  return { patch: { status: "envoyée", paidAt: null, paidTotal: null }, notice: { docNumber: next.docNumber || "", amount: outstanding } };
+}
 function documentPaidTotal(doc) {
   if (!doc) return 0;
   return doc.type === "situation" ? computeSituation(doc).totalPaid : computeTotals(doc).totalPaid;
@@ -2498,19 +2531,25 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   // remplacent les lignes correspondantes des mentions légales.
   const legalCo = legalCompanyOf(doc.company, companyProfile);
   const showPayment = isInvoiceLike && !hidePrices;
-  const isPaid = isInvoiceLike && doc.status === "payée";
+  const isMarkedPaid = isInvoiceLike && doc.status === "payée";
   const paidBefore = isInvoiceLike ? totals.acompteVerse || 0 : 0;
   const docPayments = isInvoiceLike ? (Array.isArray(doc.payments) ? doc.payments : []).filter((p) => p && (Number(p.amount) || 0) > 0) : [];
   const receivedTotal = paidBefore + docPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const amountToPay = isPaid ? 0 : totals.montantARegler;
-  const amountPaid = isPaid ? totalTTC : receivedTotal;
+  // Marquée payée alors que les paiements listés ne couvrent pas tout : le
+  // solde considéré réglé à ce moment-là (paidTotal, à défaut le total)
+  // est présenté comme reçu à la date de paiement. Tout ce que le total
+  // dépasse depuis (lignes ajoutées après paiement) reste « À payer » :
+  // jamais 0 par le seul effet du statut.
+  const settledRef = isMarkedPaid ? (Number(doc.paidTotal) > 0 ? Number(doc.paidTotal) : totalTTC) : 0;
+  const settledBalance = isMarkedPaid ? Math.max(0, settledRef - receivedTotal) : 0;
+  const amountPaid = receivedTotal + settledBalance;
+  const amountToPay = Math.max(0, Math.round((totalTTC - amountPaid) * 100) / 100);
+  const isPaid = isMarkedPaid && amountToPay <= 0.005;
   const paidDate = doc.paidAt ? new Date(doc.paidAt).toLocaleDateString("fr-FR") : "";
   const paymentsReceived = [];
   if (paidBefore > 0) paymentsReceived.push({ amount: paidBefore, label: "Acompte versé" });
   docPayments.forEach((p) => paymentsReceived.push({ amount: Number(p.amount) || 0, date: paymentDateLabel(p.date), label: [(p.method || "").trim(), (p.note || "").trim()].filter(Boolean).join(" · ") }));
-  // Marquée payée alors que les paiements listés ne couvrent pas tout :
-  // le solde est présenté comme reçu à la date de paiement.
-  if (isPaid && totalTTC - receivedTotal > 0.005) paymentsReceived.push({ amount: totalTTC - receivedTotal, date: paidDate, label: (doc.paymentMethod || "").trim() });
+  if (settledBalance > 0.005) paymentsReceived.push({ amount: settledBalance, date: paidDate, label: (doc.paymentMethod || "").trim() });
   const dueLabel = (Number(doc.dueDays) || 0) > 0 ? frLong(dueDate) : "À réception";
   const footerParts = legalCo.type !== "particulier" ? [
     companyDisplayName(legalCo),
@@ -3045,6 +3084,9 @@ function DeviFactAppInner() {
   // d'avis est renseigné dans Mon entreprise et que le client a un
   // email. Jamais envoyé sans un clic explicite.
   const [reviewNotice, setReviewNotice] = useState(null);
+  // Facture « payée » modifiée jusqu'à faire réapparaître un reste à payer :
+  // { docId, docNumber, amount }, annoncé dans l'éditeur.
+  const [paymentRevertNotice, setPaymentRevertNotice] = useState(null);
   async function sendReviewRequest() {
     if (!reviewNotice || reviewNotice.sending || reviewNotice.sent) return;
     setReviewNotice((n) => ({ ...n, sending: true, error: null }));
@@ -4315,6 +4357,17 @@ function DeviFactAppInner() {
         // Date de paiement : date de la vente pour les indicateurs (src/kpis.js).
         patch = { ...patch, paidAt: new Date().toISOString() };
       }
+      // Passage en « payée » (tout document à encaisser) : total considéré
+      // réglé mémorisé (paidTotal) — la référence qui permet, plus tard, de
+      // voir qu'une modification a fait réapparaître un reste à payer.
+      if (original && patch.status === "payée" && original.status !== "payée" && isPayableDoc(original)) {
+        patch = { ...patch, paidTotal: documentSettledTotal({ ...original, ...patch }), paidAt: patch.paidAt || new Date().toISOString() };
+      }
+      const revert = paymentRevertPatch(original, patch);
+      if (revert) {
+        patch = { ...patch, ...revert.patch };
+        setPaymentRevertNotice({ docId: id, ...revert.notice });
+      }
       persist(documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
       return;
     }
@@ -4818,6 +4871,8 @@ function DeviFactAppInner() {
         onDismissSplitNotice={() => setSplitNotice(null)}
         onGoToPricing={() => setView("pricing")}
         reviewNotice={reviewNotice?.docId === activeDoc.id ? reviewNotice : null}
+        paymentNotice={paymentRevertNotice?.docId === activeDoc.id ? paymentRevertNotice : null}
+        onDismissPaymentNotice={() => setPaymentRevertNotice(null)}
         onSendReview={sendReviewRequest}
         onDismissReview={() => setReviewNotice(null)}
         onSyncOnlinePayments={syncOnlinePayments}
@@ -4863,6 +4918,8 @@ function DeviFactAppInner() {
         onBack={backToDashboard}
         onCreateNext={createNextSituationDoc}
         onSyncOnlinePayments={syncOnlinePayments}
+        paymentNotice={paymentRevertNotice?.docId === activeDoc.id ? paymentRevertNotice : null}
+        onDismissPaymentNotice={() => setPaymentRevertNotice(null)}
         onGoToPricing={() => setView("pricing")}
       />
     );
@@ -5311,7 +5368,8 @@ function PublicDocumentView({ token }) {
   const canPay = payable && state.document.status !== "payée" && !state.paidAt && amountDue > 0.005 && !awaitingConfirmation;
   // Règlement par virement : coordonnées bancaires de l'artisan (fiche Mon
   // entreprise, renvoyées par le serveur), tant qu'il reste à payer.
-  const awaitingTransfer = payable && state.document.status !== "payée" && !state.paidAt && amountDue > 0.005;
+  const settledByStatus = payable && state.document?.status === "payée" && documentOutstanding(state.document) <= 0.005;
+  const awaitingTransfer = payable && !settledByStatus && !state.paidAt && amountDue > 0.005;
   const transferIban = String(state.paymentInfo?.iban || "").trim();
   const transferBic = String(state.paymentInfo?.bic || "").trim();
   const transferName = String(state.paymentInfo?.name || state.document?.company?.name || "").trim();
@@ -5600,7 +5658,7 @@ function PublicDocumentView({ token }) {
                 </button>
               </div>
             )}
-            {state.paidAt && (
+            {(state.paidAt || settledByStatus) && (
               <div className="mt-6 flex items-center gap-2 rounded-xl p-4" style={{ background: `${colors.moss}0D` }}>
                 <Check size={18} style={{ color: colors.moss }} /> <p className="text-sm font-medium" style={{ color: colors.moss }}>Facture déjà payée — merci !</p>
               </div>
@@ -7450,17 +7508,23 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
 
       {/* Facture de situation : paiements reçus (bas à gauche), tampon PAYÉ une fois réglée */}
       {vautFacture && (() => {
-        const isPaidSit = doc.status === "payée";
+        const markedPaidSit = doc.status === "payée";
+        const totalSit = s.netAPayer + s.acompteVerse;
+        const settledRefSit = markedPaidSit ? (Number(doc.paidTotal) > 0 ? Number(doc.paidTotal) : totalSit) : 0;
+        const settledBalanceSit = markedPaidSit ? Math.max(0, settledRefSit - s.totalPaid) : 0;
+        const amountPaidSit = s.totalPaid + settledBalanceSit;
+        const amountToPaySit = Math.max(0, Math.round((totalSit - amountPaidSit) * 100) / 100);
+        const isPaidSit = markedPaidSit && amountToPaySit <= 0.005;
         const paidDateSit = doc.paidAt ? new Date(doc.paidAt).toLocaleDateString("fr-FR") : "";
         const list = [];
         if (s.acompteVerse > 0) list.push({ amount: s.acompteVerse, label: "Acompte versé" });
         (Array.isArray(doc.payments) ? doc.payments : []).filter((p) => p && (Number(p.amount) || 0) > 0).forEach((p) => list.push({ amount: Number(p.amount) || 0, date: paymentDateLabel(p.date), label: [(p.method || "").trim(), (p.note || "").trim()].filter(Boolean).join(" · ") }));
-        if (isPaidSit && s.montantARegler > 0.005) list.push({ amount: s.montantARegler, date: paidDateSit, label: "" });
+        if (settledBalanceSit > 0.005) list.push({ amount: settledBalanceSit, date: paidDateSit, label: "" });
         return (
           <div className="print-payment" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "24px", marginTop: "14px", pageBreakInside: "avoid", position: "relative", zIndex: 1, fontSize: "9pt", lineHeight: 1.55 }}>
             <div style={{ flex: "0 0 60%" }}>
-              <div>À payer : <strong style={{ ...mono, fontSize: "12pt", color: isPaidSit ? PAID_GREEN : ink }}>{formatMoney(isPaidSit ? 0 : s.montantARegler, doc.currency)}</strong></div>
-              <div>Montant payé : <strong style={mono}>{formatMoney(isPaidSit ? s.netAPayer + s.acompteVerse : s.totalPaid, doc.currency)}</strong></div>
+              <div>À payer : <strong style={{ ...mono, fontSize: "12pt", color: isPaidSit ? PAID_GREEN : ink }}>{formatMoney(amountToPaySit, doc.currency)}</strong></div>
+              <div>Montant payé : <strong style={mono}>{formatMoney(amountPaidSit, doc.currency)}</strong></div>
               <div style={{ marginTop: "4px", fontSize: "7.5pt", textTransform: "uppercase", letterSpacing: "0.04em", color: inkSoft }}>Paiements reçus</div>
               <div style={{ border: `1px solid ${inkSoft}66`, borderRadius: "3px", padding: "4px 8px", marginTop: "2px" }}>
                 {list.length === 0 ? <span style={{ color: inkSoft }}>Aucun paiement reçu à ce jour.</span> : list.map((p, i) => <div key={i}><span style={mono}>{formatMoney(p.amount, doc.currency)}</span>{p.date ? ` le ${p.date}` : ""}{p.label ? ` - ${p.label}` : ""}</div>)}
@@ -7503,7 +7567,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   );
 });
 
-function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null, clients = [], onSyncOnlinePayments = null }) {
+function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null, clients = [], onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const saveTimer = useRef(null);
@@ -7775,6 +7839,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                 <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du maître d'œuvre" value={localDoc.visaMaitreOeuvre || ""} onChange={(e) => patch({ visaMaitreOeuvre: e.target.value })} />
               </div>
             </div>
+            {localDoc.vautFacture === true && <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />}
             {localDoc.vautFacture === true && !String(companyProfile?.iban || "").trim() && (
               <p className="mb-3 flex items-start gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: `${colors.brass}1A`, color: colors.brassDark }}>
                 <Landmark size={14} className="mt-0.5 shrink-0" /> <span>IBAN manquant dans Mon entreprise : tes clients ne verront pas de coordonnées de virement sur le lien ni le QR code de cette situation.</span>
@@ -10578,15 +10643,16 @@ function atelierCapitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1
 // pour un PV, un rapport, un planning, ou un document sans ligne).
 function atelierDocAmount(d) {
   if (d.type === "pv_reception" || d.type === "rapport" || d.type === "planning") return null;
-  if (d.type === "situation") { const s = computeSituation(d); return s.paymentsReceived > 0 && d.status !== "payée" ? { value: s.montantARegler, note: "reste" } : { value: s.netAPayer, note: "net" }; }
+  if (d.type === "situation") { const s = computeSituation(d); const due = documentOutstanding(d); return due > 0.005 && due < s.netAPayer - 0.005 ? { value: due, note: "reste" } : { value: s.netAPayer, note: "net" }; }
   if (d.type === "contrat") { const ht = Number(d.montantTotalHT) || 0; return ht ? { value: ht, note: "HT" } : null; }
   if (d.type === "relance") { const v = Number(d.montantDu) || 0; return v ? { value: v, note: "dû" } : null; }
   if (d.type === "revision") { const r = computeRevision(d); return r.valid ? { value: r.montantRevise, note: "révisé" } : null; }
   const hasLines = (d.items || []).some((it) => it.type === "line" && (it.designation || "").trim());
   if (!hasLines) return null;
   const t = computeTotals(d);
-  // Facture partiellement réglée : le reste à payer, pas le total.
-  if ((d.type === "facture" || d.type === "acompte") && t.totalPaid > 0 && d.status !== "payée") return { value: t.montantARegler, note: "reste" };
+  // Facture partiellement réglée (ou modifiée après paiement) : le reste
+  // réel à payer, pas le total.
+  if (d.type === "facture" || d.type === "acompte") { const due = documentOutstanding(d); if (due > 0.005 && due < t.totalTTC - 0.005) return { value: due, note: "reste" }; }
   return { value: t.totalTTC, note: "TTC" };
 }
 // Badge métier propre au type (état déjà saisi dans l'éditeur).
@@ -15238,6 +15304,21 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
+// Facture déjà réglée puis modifiée : elle repasse en « envoyée » avec le
+// reste à payer recalculé — rappel de la voie normale (avoir).
+function PaymentRevertNotice({ notice, onDismiss }) {
+  if (!notice) return null;
+  return (
+    <div className="no-print mb-4 flex flex-wrap items-start justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.brassDark}14`, border: `1px solid ${colors.brassDark}55` }} data-testid="payment-revert-notice">
+      <span className="flex items-start gap-2 text-sm" style={{ color: colors.brassDark }}>
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <span>Facture <strong>{notice.docNumber}</strong> modifiée après paiement : il reste <strong>{formatMoney(notice.amount)}</strong> à payer, elle repasse en « envoyée ». Pour corriger une facture déjà réglée, la voie habituelle est un avoir suivi d'une nouvelle facture.</span>
+      </span>
+      {onDismiss && <button onClick={onDismiss} style={{ color: colors.inkSoft }} aria-label="Fermer"><X size={15} /></button>}
+    </div>
+  );
+}
+
 function ReviewRequestNotice({ notice, onSend, onDismiss }) {
   if (!notice) return null;
   return (
@@ -15635,7 +15716,7 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
   );
 }
 
-function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null }) {
+function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const [clientQuery, setClientQuery] = useState("");
@@ -16333,6 +16414,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 
       <div className="no-print mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
+        <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />
         {splitNotice && (
           <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.moss}15`, border: `1px solid ${colors.moss}40` }}>
             <span className="text-sm" style={{ color: colors.moss }}>
@@ -17263,5 +17345,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

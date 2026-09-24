@@ -114,3 +114,20 @@ describe("QR code du PDF", () => {
     expect(pdfText({ ...newDocument("devis", []), docNumber: "D-1", items: [line] })).toContain("Scannez pour signer en ligne");
   });
 });
+
+describe("page publique : facture réglée puis modifiée", () => {
+  const entreprise2 = { type: "entreprise", name: "Bâti Plus SARL", iban: "FR76 3000 6000 0112 3456 7890 189", bic: "AGRIFRPP" };
+  it("statut « payée » et rien à payer d'après les paiements : « déjà payée », pas de bloc virement", async () => {
+    const paid = { ...facture, status: "payée", paidAt: "2026-09-22T10:00:00.000Z", paidTotal: 120, payments: [{ id: "p1", date: "2026-09-22", amount: 120, method: "Virement bancaire" }] };
+    const { text } = await renderPublic({ document: paid, siteName: "Chantiflow", signedAt: null, paidAt: null, paymentInfo: entreprise2 });
+    expect(text).toContain("Facture déjà payée");
+    expect(text).not.toContain("Payer par virement bancaire");
+  }, 30000);
+  it("statut « payée » mais lignes ajoutées depuis : le reste réel est demandé par virement", async () => {
+    const modified = { ...facture, status: "payée", paidAt: "2026-09-22T10:00:00.000Z", paidTotal: 120, payments: [{ id: "p1", date: "2026-09-22", amount: 120, method: "Virement bancaire" }], items: [...facture.items, { id: "l2", type: "line", designation: "Ajout", qty: 1, unitPrice: 50, tva: 20 }] };
+    const { text } = await renderPublic({ document: modified, siteName: "Chantiflow", signedAt: null, paidAt: null, paymentInfo: entreprise2 });
+    expect(text).not.toContain("Facture déjà payée");
+    expect(text).toContain("Payer par virement bancaire");
+    expect(text).toContain("Montant60,00 €");
+  }, 30000);
+});

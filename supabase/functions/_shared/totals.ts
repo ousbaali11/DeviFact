@@ -50,8 +50,15 @@ export function addOnlinePayment(doc: any, sessionId: string, amountCents: numbe
   const amount = Math.round(Math.max(0, num(amountCents))) / 100;
   const next = payments.some((p: any) => p?.id === id) ? payments : [...payments, { id, date: dateIso.slice(0, 10), amount, method: "Carte bancaire (en ligne)", note: "" }];
   const updated = { ...doc, payments: next, updatedAt: Date.now() };
-  if (amountDueOf(updated) <= 0.005) { updated.status = "payée"; updated.paidAt = dateIso; }
+  if (amountDueOf(updated) <= 0.005) { updated.status = "payée"; updated.paidAt = dateIso; updated.paidTotal = settledTotalOf(updated); }
   return updated;
+}
+// Total « à régler » mémorisé au passage en « payée » (paidTotal) — même
+// règle que documentSettledTotal côté site : facture/acompte = TTC,
+// situation = net à payer + acompte déjà versé.
+export function settledTotalOf(doc: any): number {
+  if (doc?.type === "situation") { const s = computeSituationTotals(doc); return round2(s.netAPayer + s.acompteVerse); }
+  return round2(computeDocTotals(doc).totalTTC);
 }
 export function globalDiscountRate(doc: any): number {
   const value = Math.max(0, num(doc?.globalDiscount));
