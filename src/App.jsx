@@ -15155,6 +15155,123 @@ function StripeConnectCard({ account, siteSettings = null, profile = null, onRed
   );
 }
 
+// ---------------------------------------------------------------------
+// Export comptable automatique (Mon entreprise) : e-mail de l'expert-
+// comptable, fréquence (mois ou trimestre), envoi immédiat pour tester.
+// Réglage enregistré dans la fiche entreprise (accountingExport) ; le
+// dernier envoi est lu dans la clé « accounting-export-state », écrite par
+// la fonction serveur send-accounting-exports (tâche quotidienne, envoi le
+// 3 du mois pour la période précédente).
+// ---------------------------------------------------------------------
+const EXPORT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function accountingExportPeriodLabel(id) {
+  if (!id) return "";
+  const q = String(id).match(/^(\d{4})-T([1-4])$/);
+  if (q) return `${q[2]}${q[2] === "1" ? "er" : "e"} trimestre ${q[1]}`;
+  const m = String(id).match(/^(\d{4})-(\d{2})$/);
+  if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1)).toLocaleDateString("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" });
+  return String(id);
+}
+function AccountingExportCard({ profile, account, isLocked, isViewer, saving, onSave }) {
+  const cfg = profile?.accountingExport || {};
+  const savedFrequency = cfg.frequency === "trimestriel" ? "trimestriel" : "mensuel";
+  const [draft, setDraft] = useState({ enabled: !!cfg.enabled, frequency: savedFrequency, email: cfg.email || "" });
+  const [state, setState] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState(null); // { kind: "ok" | "error", text }
+  const orgId = account?.organizationId || null;
+  const canEdit = !isLocked && !isViewer;
+  // Dernier envoi (relu après chaque envoi manuel : notice change).
+  useEffect(() => {
+    if (!orgId) return undefined;
+    let active = true;
+    Promise.resolve()
+      .then(() => window.storage.get("accounting-export-state", false))
+      .then((res) => { if (active) setState(JSON.parse(res.value)); })
+      .catch(() => { if (active) setState(null); });
+    return () => { active = false; };
+  }, [orgId, notice]);
+  // Pré-remplissage : e-mail du membre de rôle Expert-comptable, tant
+  // qu'aucune adresse n'est enregistrée ni saisie.
+  const savedEmail = cfg.email || "";
+  useEffect(() => {
+    if (!orgId || savedEmail) return undefined;
+    let active = true;
+    Promise.resolve()
+      .then(() => db.rpc("get_organization_members_with_profiles", { org_id: orgId }))
+      .then(({ data, error }) => {
+        if (error || !active) return;
+        const accountant = (data || []).find((m) => m.role === "comptable" && m.status === "active" && EXPORT_EMAIL_RE.test(String(m.email || "")));
+        if (accountant) setDraft((d) => (d.email.trim() ? d : { ...d, email: accountant.email }));
+      })
+      .catch(() => { /* liste des membres indisponible : saisie libre */ });
+    return () => { active = false; };
+  }, [orgId, savedEmail]);
+  const emailOk = EXPORT_EMAIL_RE.test(draft.email.trim());
+  const dirty = draft.enabled !== !!cfg.enabled || draft.frequency !== savedFrequency || draft.email.trim() !== (cfg.email || "");
+  const inputStyle = { border: `1px solid ${colors.line}` };
+  function save() {
+    if (draft.enabled && !emailOk) { setNotice({ kind: "error", text: "Indique une adresse e-mail valide pour l'expert-comptable." }); return; }
+    setNotice(null);
+    onSave({ enabled: draft.enabled, frequency: draft.frequency, email: draft.email.trim() });
+  }
+  async function sendNow() {
+    if (!emailOk || !orgId) return;
+    if (dirty) { setNotice({ kind: "error", text: "Enregistre d'abord le réglage, puis envoie." }); return; }
+    setSending(true);
+    setNotice(null);
+    try {
+      const { data, error } = await db.functions.invoke("send-accounting-exports", { body: { organizationId: orgId } });
+      if (error || data?.error) {
+        let message = data?.error;
+        if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
+        throw new Error(message || "Envoi impossible pour l'instant.");
+      }
+      setNotice({ kind: "ok", text: `Export ${data.label} envoyé à ${data.to} (${data.documentCount} document${data.documentCount > 1 ? "s" : ""}).` });
+    } catch (err) {
+      setNotice({ kind: "error", text: err?.message || "Envoi impossible pour l'instant." });
+    } finally {
+      setSending(false);
+    }
+  }
+  return (
+    <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+      <div className="mb-1 flex items-center gap-2 text-sm font-semibold"><Calculator size={15} style={{ color: colors.slate }} /> Export comptable automatique</div>
+      <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Le fichier Excel de l'export comptable (le même que sur la page Comptabilité) est envoyé à ton expert-comptable le 3 de chaque mois pour le mois précédent, ou le 3 du mois qui suit chaque trimestre. Tu reçois une copie à l'adresse e-mail de Mon entreprise.</p>
+      {canEdit ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="flex items-center gap-2 text-sm sm:pt-5">
+            <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft((d) => ({ ...d, enabled: e.target.checked }))} /> Envoi automatique activé
+          </label>
+          <label className="text-xs" style={{ color: colors.inkSoft }}>Fréquence
+            <select className="df-select mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, color: colors.ink }} value={draft.frequency} onChange={(e) => setDraft((d) => ({ ...d, frequency: e.target.value }))}>
+              <option value="mensuel">Chaque mois</option>
+              <option value="trimestriel">Chaque trimestre</option>
+            </select>
+          </label>
+          <label className="text-xs" style={{ color: colors.inkSoft }}>E-mail de l'expert-comptable
+            <input type="email" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, color: colors.ink }} placeholder="cabinet@expert-comptable.fr" value={draft.email} onChange={(e) => setDraft((d) => ({ ...d, email: e.target.value }))} />
+          </label>
+        </div>
+      ) : (
+        <p className="text-sm">{cfg.enabled ? `Activé (${savedFrequency === "trimestriel" ? "chaque trimestre" : "chaque mois"}) vers ${cfg.email || "adresse non renseignée"}.` : "Désactivé."}</p>
+      )}
+      {canEdit && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button onClick={save} disabled={saving || !dirty} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: saving || !dirty ? 0.6 : 1 }}>Enregistrer</button>
+          <button onClick={sendNow} disabled={sending || !emailOk} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={{ ...inputStyle, color: colors.ink, opacity: sending || !emailOk ? 0.6 : 1 }}>
+            {sending ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />} {sending ? "Envoi…" : "Envoyer maintenant"}
+          </button>
+          <span className="text-xs" style={{ color: colors.inkSoft }}>« Envoyer maintenant » envoie tout de suite la période précédente.</span>
+        </div>
+      )}
+      {notice && <p className="mt-2 text-xs font-medium" style={{ color: notice.kind === "ok" ? colors.moss : colors.brick }}>{notice.text}</p>}
+      {state?.lastSentAt && <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Dernier envoi : {accountingExportPeriodLabel(state.lastSentPeriod)}, le {new Date(state.lastSentAt).toLocaleDateString("fr-FR")}, à {state.lastSentTo}.</p>}
+      {state?.lastError && (!state.lastSentAt || state.lastErrorAt > state.lastSentAt) && <p className="mt-1 text-xs" style={{ color: colors.brick }}>Dernier essai en échec : {state.lastError}</p>}
+    </div>
+  );
+}
+
 function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, isViewer, onGoToPricing, siteSettings = null }) {
   const [local, setLocal] = useState(() => withGeoCountry(profile));
   const [editing, setEditing] = useState(!profile.name);
@@ -15411,6 +15528,8 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
       )}
 
       {ONLINE_PAYMENTS_ENABLED && <StripeConnectCard account={account} siteSettings={siteSettings} profile={profile} />}
+
+      <AccountingExportCard profile={profile} account={account} isLocked={isLocked} isViewer={isViewer} saving={saving} onSave={(cfg) => { patch({ accountingExport: cfg }); onSave({ ...profile, accountingExport: cfg }); }} />
 
       <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
         <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.brick }}>
@@ -19030,5 +19149,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
