@@ -10,7 +10,7 @@ const USER = { id: "u1", email: "test@exemple.fr" };
 const ORG = "252f0e0f-437c-4c98-bdde-aa2d39672dd7";
 // Comportement simulé de la table site_settings : liste de réponses
 // successives ("fail" ou "ok"), avec un délai optionnel.
-const state = { responses: ["ok"], delayMs: 0, calls: 0 };
+const state = { responses: ["ok"], delayMs: 0, calls: 0, visibleServices: null };
 const kv = { documents: [], clients: [], "company-profile": { type: "entreprise", name: "Test SARL" } };
 const fixtures = {
   profiles: () => [{ id: USER.id, email: USER.email, first_name: "Thomas", last_name: "T", is_admin: false, company_name: "" }],
@@ -28,7 +28,7 @@ function builder(table) {
       state.calls += 1;
       if (state.delayMs) await new Promise((r) => setTimeout(r, state.delayMs));
       if (mode === "fail") return { data: null, error: { message: "réseau indisponible (test)" } };
-      return { data: [{ id: 1, name: "Chantiflow", landing_page_version: "atelier", theme: "classique" }], error: null };
+      return { data: [{ id: 1, name: "Chantiflow", landing_page_version: "atelier", theme: "classique", visible_services: state.visibleServices || null }], error: null };
     }
     const rows = fixtures[table] ? fixtures[table](filters) : [];
     return { data: rows, error: null, count: rows.length };
@@ -57,7 +57,7 @@ beforeAll(() => {
   window.matchMedia = window.matchMedia || (() => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
   if (!window.HTMLCanvasElement.prototype.getContext) window.HTMLCanvasElement.prototype.getContext = () => null;
 });
-beforeEach(() => { localStorage.clear(); document.body.className = ""; state.calls = 0; state.delayMs = 0; state.responses = ["ok"]; localStorage.setItem("devifact_lastView", "dashboard"); });
+beforeEach(() => { localStorage.clear(); document.body.className = ""; state.calls = 0; state.delayMs = 0; state.responses = ["ok"]; state.visibleServices = null; localStorage.setItem("devifact_lastView", "dashboard"); });
 
 const isAtelierShown = (c) => document.body.classList.contains("df-atelier") && !!c.querySelector('button[title="Menu"]');
 const isClassicShown = (c) => [...c.querySelectorAll("button")].some((b) => b.textContent.trim() === "Tableau de bord") && !document.body.classList.contains("df-atelier");
@@ -109,5 +109,20 @@ describe("démarrage dans la bonne version", () => {
     expect(classicSeen).toBe(false);
     expect(state.calls).toBe(2);
     await unmount();
+  }, 30000);
+});
+
+describe("module Banque masqué : pas d'accès direct", () => {
+  it("vue « banque » mémorisée sur l'appareil : accueil affiché tant que l'Admin n'a pas activé le module, page Banque ensuite", async () => {
+    localStorage.setItem("devifact_lastView", "banque");
+    const { container, unmount } = await openApp();
+    expect(await waitFor(() => isAtelierShown(container))).toBe(true);
+    expect(container.textContent).not.toContain("Relevés importés et rapprochement avec tes factures");
+    await unmount();
+    state.visibleServices = ["devis", "facture", "banque"];
+    localStorage.setItem("devifact_lastView", "banque");
+    const on = await openApp();
+    expect(await waitFor(() => on.container.textContent.includes("Relevés importés et rapprochement avec tes factures"))).toBe(true);
+    await on.unmount();
   }, 30000);
 });

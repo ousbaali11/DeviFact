@@ -41,7 +41,7 @@ function builder(table) {
 }
 vi.mock("./client.js", () => ({ db: { from: (table) => builder(table), functions: { invoke: async () => ({ data: null, error: null }) }, auth: { getSession: async () => ({ data: { session: null } }) } } }));
 
-import { BankView, AtelierShell, newDocument, documentAmountDue, computeTotals } from "./App.jsx";
+import { BankView, AtelierShell, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, newDocument, documentAmountDue, computeTotals } from "./App.jsx";
 
 beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = () => {}; window.matchMedia = window.matchMedia || (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })); });
 beforeEach(() => { store.rows = []; store.calls = []; });
@@ -175,20 +175,49 @@ describe("import et rapprochement automatique", () => {
   });
 });
 
-describe("navigation : « Banque » dans le menu", () => {
+describe("module Banque : masqué par défaut, activé depuis Admin › Services", () => {
   const noop = () => {};
-  it("Atelier : entrée « Banque » dans le menu Plus", async () => {
+  const shell = (siteSettings, setView) => (
+    <AtelierShell view="dashboard" setView={setView} account={account} siteSettings={siteSettings} darkMode={false} setDarkMode={noop} onLogout={noop} onSwitchOrganization={noop} onCreateOwnOrg={noop} creatingOwnOrg={false} onOpenCreate={noop} commandPaletteOpen={false} setCommandPaletteOpen={noop} paletteCommands={[]}>
+      <div>page</div>
+    </AtelierShell>
+  );
+  it("masqué par défaut (réglage absent ou sans « banque ») : aucune entrée dans le menu Plus", async () => {
+    expect(bankModuleVisible({ name: "Chantiflow" })).toBe(false);
+    expect(bankModuleVisible({ visibleServices: ["devis", "facture"] })).toBe(false);
+    expect(bankModuleVisible({ visibleServices: ["devis", BANK_MODULE_ID] })).toBe(true);
+    for (const siteSettings of [{ name: "Chantiflow" }, { name: "Chantiflow", visibleServices: ["devis", "facture"] }]) {
+      const { container, unmount } = await mount(shell(siteSettings, noop));
+      await click(buttons(container).find((b) => b.getAttribute("title") === "Menu"));
+      expect(buttons(container).find((b) => b.textContent.trim() === "Banque")).toBeUndefined();
+      await unmount();
+    }
+  }, 30000);
+  it("activé : entrée « Banque » dans le menu Plus", async () => {
     const views = [];
-    const { container, unmount } = await mount(
-      <AtelierShell view="dashboard" setView={(v) => views.push(v)} account={account} siteSettings={{ name: "Chantiflow", landingPageVersion: "atelier" }} darkMode={false} setDarkMode={noop} onLogout={noop} onSwitchOrganization={noop} onCreateOwnOrg={noop} creatingOwnOrg={false} onOpenCreate={noop} commandPaletteOpen={false} setCommandPaletteOpen={noop} paletteCommands={[]}>
-        <div>page</div>
-      </AtelierShell>
-    );
+    const { container, unmount } = await mount(shell({ name: "Chantiflow", visibleServices: ["devis", "facture", BANK_MODULE_ID] }, (v) => views.push(v)));
     await click(buttons(container).find((b) => b.getAttribute("title") === "Menu"));
     const banque = buttons(container).find((b) => b.textContent.trim() === "Banque");
     expect(banque).toBeTruthy();
     await click(banque);
     expect(views).toEqual(["banque"]);
     await unmount();
+  }, 30000);
+  it("Admin › Services : interrupteur « Banque » sous les services, enregistré dans la liste des services visibles", async () => {
+    const saved = [];
+    const { container, unmount } = await mount(<ServicesVisibilitySettings siteSettings={{ name: "Chantiflow" }} saving={false} onSave={(s) => saved.push(s)} />);
+    expect(text(container)).toContain("Banque (rapprochement bancaire)");
+    const toggle = container.querySelector('button[aria-label="Module Banque"]');
+    expect(toggle.getAttribute("title")).toBe("Masqué");
+    await click(toggle);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].visibleServices).toContain(BANK_MODULE_ID);
+    expect(saved[0].visibleServices).toContain("facture"); // les services visibles par défaut sont conservés
+    await unmount();
+    const on = await mount(<ServicesVisibilitySettings siteSettings={{ visibleServices: ["devis", BANK_MODULE_ID] }} saving={false} onSave={(s) => saved.push(s)} />);
+    expect(on.container.querySelector('button[aria-label="Module Banque"]').getAttribute("title")).toBe("Visible pour tout le monde");
+    await click(on.container.querySelector('button[aria-label="Module Banque"]'));
+    expect(saved[1].visibleServices).toEqual(["devis"]);
+    await on.unmount();
   }, 30000);
 });

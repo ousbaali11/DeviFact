@@ -3130,7 +3130,7 @@ function DeviFactAppInner() {
       { id: "nav-chantiers", label: "Aller à Chantiers", icon: MapPinned, action: () => setView("chantiers") },
       { id: "nav-planning-equipe", label: "Aller au Planning d'équipe", icon: Calendar, action: () => setView("planning-equipe") },
       { id: "nav-clients", label: "Aller à Clients", icon: Users, action: () => setView("clients") },
-      { id: "nav-banque", label: "Aller à Banque (rapprochement bancaire)", icon: Landmark, keywords: "banque relevé virement rapprochement bancaire", action: () => setView("banque") },
+      ...(visibleServices.includes(BANK_MODULE_ID) ? [{ id: "nav-banque", label: "Aller à Banque (rapprochement bancaire)", icon: Landmark, keywords: "banque relevé virement rapprochement bancaire", action: () => setView("banque") },] : []),
       { id: "nav-stock-produits", label: "Aller à Produits (Gestion de stock)", icon: Package, keywords: "bibliothèque prestations stock", action: () => setView("stock-produits") },
       { id: "nav-stock-comptabilite", label: "Aller à Comptabilité (Gestion de stock)", icon: Calculator, keywords: "écritures comptes journal export comptable", action: () => setView("stock-comptabilite") },
       { id: "nav-company", label: "Aller à Mon entreprise", icon: Building2, action: () => setView("company") },
@@ -5052,7 +5052,7 @@ function DeviFactAppInner() {
     page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} darkMode={darkMode} />;
   } else if (view === "company") {
     page = <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} />;
-  } else if (view === "banque") {
+  } else if (view === "banque" && bankModuleVisible(siteSettings)) {
     page = <BankView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} onPatchDocument={updateDoc} />;
   } else if (view === "team") {
     page = <TeamView account={account} siteSettings={siteSettings} />;
@@ -10374,7 +10374,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   const firstName = account?.firstName || "";
   const initials = ((account?.firstName || "")[0] || "") + ((account?.lastName || "")[0] || "") || (account?.email || "?")[0].toUpperCase();
   const moreItems = [
-    { id: "banque", label: "Banque", icon: Landmark },
+    ...(bankModuleVisible(siteSettings) ? [{ id: "banque", label: "Banque", icon: Landmark }] : []),
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
     { id: "planning-equipe", label: "Planning d'équipe", icon: Calendar },
@@ -14275,6 +14275,15 @@ function StripeIdField({ label, value, onSave }) {
   );
 }
 
+// Module « Banque » (rapprochement bancaire) : masqué tant que l'Admin ne
+// l'a pas activé dans Services (identifiant « banque » dans la liste des
+// services visibles, à côté des types de documents). Masqué : ni menu, ni
+// palette de commandes, ni accès par la vue « banque », pour personne.
+const BANK_MODULE_ID = "banque";
+function bankModuleVisible(siteSettings) {
+  return Array.isArray(siteSettings?.visibleServices) && siteSettings.visibleServices.includes(BANK_MODULE_ID);
+}
+
 function ServicesVisibilitySettings({ siteSettings, saving, onSave }) {
   const current = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
   function toggle(id) {
@@ -14310,6 +14319,19 @@ function ServicesVisibilitySettings({ siteSettings, saving, onSave }) {
             </div>
           );
         })}
+      </div>
+      <div className="border-t px-4 py-2" style={{ borderColor: colors.line }}>
+        <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Modules</span>
+      </div>
+      <div className="flex items-center gap-3 border-t px-4 py-3" style={{ borderColor: colors.line }}>
+        <Landmark size={16} style={{ color: colors.brassDark }} />
+        <div className="min-w-0 grow">
+          <div className="text-sm font-medium">Banque (rapprochement bancaire)</div>
+          <div className="truncate text-xs" style={{ color: colors.inkSoft }}>Import des relevés et rapprochement des virements avec les factures. Masqué : ni menu, ni page, pour personne.</div>
+        </div>
+        <button onClick={() => toggle(BANK_MODULE_ID)} title={current.includes(BANK_MODULE_ID) ? "Visible pour tout le monde" : "Masqué"} aria-label="Module Banque">
+          {current.includes(BANK_MODULE_ID) ? <ToggleRight size={26} style={{ color: colors.moss }} /> : <ToggleLeft size={26} style={{ color: colors.inkSoft }} />}
+        </button>
       </div>
     </div>
   );
@@ -17241,5 +17263,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
