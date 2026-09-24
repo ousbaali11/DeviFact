@@ -8,6 +8,7 @@ import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOve
 import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
+import { parseStatement, transactionFingerprint, openInvoiceCandidates, suggestMatches, applyBankPayment, revertBankPayment } from "./bank-matching.js";
 import * as XLSX from "xlsx";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
@@ -2288,6 +2289,12 @@ function isPayableDoc(doc) {
   return !!doc && (doc.type === "facture" || doc.type === "acompte" || (doc.type === "situation" && doc.vautFacture === true));
 }
 // Total déjà réglé d'un document à payer (acompte versé + paiements reçus).
+// Reste à payer d'un document à encaisser (facture, acompte, situation
+// valant facture) — la même règle que le PDF et la page publique.
+function documentAmountDue(doc) {
+  if (!doc) return 0;
+  return doc.type === "situation" ? computeSituation(doc).montantARegler : computeTotals(doc).montantARegler;
+}
 function documentPaidTotal(doc) {
   if (!doc) return 0;
   return doc.type === "situation" ? computeSituation(doc).totalPaid : computeTotals(doc).totalPaid;
@@ -3187,6 +3194,7 @@ function DeviFactAppInner() {
       { id: "nav-chantiers", label: "Aller à Chantiers", icon: MapPinned, action: () => setView("chantiers") },
       { id: "nav-planning-equipe", label: "Aller au Planning d'équipe", icon: Calendar, action: () => setView("planning-equipe") },
       { id: "nav-clients", label: "Aller à Clients", icon: Users, action: () => setView("clients") },
+      { id: "nav-banque", label: "Aller à Banque (rapprochement bancaire)", icon: Landmark, keywords: "banque relevé virement rapprochement bancaire", action: () => setView("banque") },
       { id: "nav-stock-produits", label: "Aller à Produits (Gestion de stock)", icon: Package, keywords: "bibliothèque prestations stock", action: () => setView("stock-produits") },
       { id: "nav-stock-comptabilite", label: "Aller à Comptabilité (Gestion de stock)", icon: Calculator, keywords: "écritures comptes journal export comptable", action: () => setView("stock-comptabilite") },
       { id: "nav-company", label: "Aller à Mon entreprise", icon: Building2, action: () => setView("company") },
@@ -5140,6 +5148,8 @@ function DeviFactAppInner() {
       page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} darkMode={darkMode} />;
     } else if (view === "company") {
       page = <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} />;
+    } else if (view === "banque") {
+      page = <BankView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} onPatchDocument={updateDoc} />;
     } else if (view === "team") {
       page = <TeamView account={account} siteSettings={siteSettings} />;
     } else if (view === "planning-equipe") {
@@ -5343,6 +5353,16 @@ function DeviFactAppInner() {
         <GlobalStyle />
         <TopNav {...navProps} />
         <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} siteSettings={siteSettings} />
+      </div>
+    );
+  }
+
+  if (view === "banque") {
+    return (
+      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
+        <GlobalStyle />
+        <TopNav {...navProps} />
+        <BankView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} onPatchDocument={updateDoc} />
       </div>
     );
   }
@@ -7495,6 +7515,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
     { id: "planning-equipe", label: "Planning", icon: Calendar },
     { id: "clients", label: "Clients", icon: Users },
     { id: "stock", label: "Gestion de stock", icon: Package },
+    { id: "banque", label: "Banque", icon: Landmark },
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
     ...(account?.plan === "entreprise" && account?.role === "owner" ? [{ id: "api", label: "API", icon: KeyRound }] : []),
@@ -7770,7 +7791,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                 </div>
               ) : id === "team" ? (
                 <Fragment key={id}>
-                  <button onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
+                  <button onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium xl:px-3" style={tabStyle(view === id)}>
                     <Icon size={15} /> {label}
                   </button>
                   {(() => {
@@ -7822,10 +7843,11 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
                   })()}
                 </Fragment>
               ) : id === "stock" ? (
-                <StockMenu key={id} variant="dropdown" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} iconColor={colors.brassDark} />
+                <StockMenu key={id} variant="dropdown" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} iconColor={colors.brassDark} responsiveLabel buttonClass="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium xl:px-3" />
               ) : (
-                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
-                  <Icon size={15} /> {label}
+                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium xl:px-3" style={tabStyle(view === id)} title={id === "banque" ? label : undefined}>
+                  {/* Banque : icône seule sous 1280 px (xl), pour que la barre tienne sur un portable 1024 px. */}
+                  <Icon size={15} /> {id === "banque" ? <span className="hidden xl:inline">{label}</span> : label}
                 </button>
               )
             )}
@@ -7833,7 +7855,7 @@ function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewR
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1">
               {rightTabs.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
+                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium xl:px-3" style={tabStyle(view === id)}>
                   <Icon size={15} /> {label}
                 </button>
               ))}
@@ -11833,6 +11855,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
   const firstName = account?.firstName || "";
   const initials = ((account?.firstName || "")[0] || "") + ((account?.lastName || "")[0] || "") || (account?.email || "?")[0].toUpperCase();
   const moreItems = [
+    { id: "banque", label: "Banque", icon: Landmark },
     { id: "company", label: "Mon entreprise", icon: Building2 },
     { id: "team", label: "Équipe", icon: UserPlus },
     { id: "planning-equipe", label: "Planning d'équipe", icon: Calendar },
@@ -17008,6 +17031,261 @@ function ReviewRequestNotice({ notice, onSend, onDismiss }) {
 // fois ; chaque règlement (date, montant, mode, note) est déduit du montant
 // à régler et imprimé sur le PDF. Quand le total reçu couvre la facture,
 // elle passe automatiquement à « payée ».
+// ---------------------------------------------------------------------
+// Banque — rapprochement bancaire, livraison 1 : relevés importés (CSV,
+// OFX, CAMT.053) rapprochés avec les factures à encaisser. Disponible pour
+// tous les forfaits. Les opérations vivent dans la table bank_transactions
+// (supabase/migrations_audit/2026-09-24_rapprochement-bancaire-etape1.sql) ;
+// la lecture des fichiers et les propositions sont dans src/bank-matching.js.
+// Le paiement est écrit sur la facture par le mécanisme habituel
+// (onPatchDocument → updateDoc), donc visible partout : éditeur, PDF, page
+// publique, tableau de bord.
+// ---------------------------------------------------------------------
+async function fetchBankTransactions(organizationId) {
+  const { data, error } = await db.from("bank_transactions").select("*").eq("organization_id", organizationId).order("booked_at", { ascending: false }).order("created_at", { ascending: false }).limit(2000);
+  if (error) throw error;
+  return data || [];
+}
+// Relevé lu en UTF-8, ou en Windows-1252 (exports de certaines banques)
+// quand le fichier n'est pas de l'UTF-8 valide.
+async function readStatementFile(file) {
+  const buffer = await (file.arrayBuffer ? file.arrayBuffer() : new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsArrayBuffer(file); }));
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buffer); }
+  catch { return new TextDecoder("windows-1252").decode(buffer); }
+}
+const BANK_TABS = [{ id: "a_traiter", label: "À traiter" }, { id: "rapproche", label: "Rapprochées" }, { id: "ignore", label: "Ignorées" }];
+const bankTx = (row) => ({ id: row.id, bookedAt: row.booked_at, amount: Number(row.amount) || 0, label: row.label || "", reference: row.reference || "", counterparty: row.counterparty || "" });
+
+function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
+  const orgId = account?.organizationId || null;
+  const canEdit = !isLocked && !isViewer;
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [reloadTick, setReloadTick] = useState(0);
+  const [tab, setTab] = useState("a_traiter");
+  const [importing, setImporting] = useState(false);
+  const [report, setReport] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [actionError, setActionError] = useState("");
+  const [pick, setPick] = useState({});
+  const docsRef = useRef(documents);
+  docsRef.current = documents;
+
+  useEffect(() => {
+    if (!orgId) { setLoading(false); return undefined; }
+    let active = true;
+    setLoading(true);
+    setLoadError("");
+    fetchBankTransactions(orgId)
+      .then((list) => { if (active) setRows(list); })
+      .catch((err) => { console.error("Erreur de chargement des opérations bancaires", err); if (active) setLoadError("Impossible de charger les opérations bancaires pour l'instant (la table bank_transactions est-elle créée ?)."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [orgId, reloadTick]);
+  const reload = () => setReloadTick((t) => t + 1);
+
+  const candidates = useMemo(() => openInvoiceCandidates(documents, documentAmountDue), [documents]);
+  const docById = (id) => docsRef.current.find((d) => d.id === id);
+
+  // Paiement enregistré sur la facture, puis opération marquée rapprochée.
+  // workingDocs : copie de travail pendant un import, pour que deux virements
+  // successifs sur la même facture voient le reste à payer à jour.
+  async function reconcile(row, documentId, matchedBy, workingDocs = null) {
+    const list = workingDocs || docsRef.current;
+    const doc = list.find((d) => d.id === documentId);
+    if (!doc) throw new Error("Cette facture n'existe plus.");
+    const patch = applyBankPayment(doc, bankTx(row), documentAmountDue(doc));
+    if (patch) onPatchDocument(doc.id, patch);
+    const { error } = await db.from("bank_transactions").update({ status: "rapproche", document_id: doc.id, payment_id: `pay_bank_${row.id}`, matched_by: matchedBy }).eq("id", row.id);
+    if (error) throw error;
+    if (workingDocs && patch) { const i = workingDocs.findIndex((d) => d.id === doc.id); workingDocs[i] = { ...doc, ...patch }; }
+  }
+  async function setRowStatus(row, status) {
+    const { error } = await db.from("bank_transactions").update({ status, document_id: null, payment_id: null, matched_by: null }).eq("id", row.id);
+    if (error) throw error;
+  }
+  async function run(row, work) {
+    setBusyId(row.id);
+    setActionError("");
+    try { await work(); reload(); }
+    catch (err) { console.error("Erreur de rapprochement bancaire", err); setActionError(err?.message || "Action impossible pour l'instant."); }
+    finally { setBusyId(null); }
+  }
+  const ignore = (row) => run(row, () => setRowStatus(row, "ignore"));
+  const restore = (row) => run(row, () => setRowStatus(row, "a_traiter"));
+  const reconcileManual = (row, documentId) => run(row, () => reconcile(row, documentId, "manuel"));
+  const undo = (row) => run(row, async () => {
+    const doc = docById(row.document_id);
+    if (doc) {
+      const patch = revertBankPayment(doc, row.id, documentAmountDue(doc));
+      if (patch) onPatchDocument(doc.id, patch);
+    }
+    await setRowStatus(row, "a_traiter");
+  });
+
+  async function importFiles(fileList) {
+    const files = [...(fileList || [])];
+    if (!files.length || !orgId) return;
+    setImporting(true);
+    setReport(null);
+    setActionError("");
+    try {
+      const batch = Date.now().toString(36);
+      const all = [];
+      const warnings = [];
+      for (const file of files) {
+        const parsed = parseStatement(await readStatementFile(file), file.name);
+        warnings.push(...parsed.warnings.map((w) => `${file.name} : ${w}`));
+        for (const t of parsed.transactions) {
+          all.push({ organization_id: orgId, source: "import", fingerprint: transactionFingerprint(t), booked_at: t.bookedAt, amount: t.amount, currency: t.currency, label: t.label, counterparty: t.counterparty, reference: t.reference, import_batch: batch, created_by: account?.id || null });
+        }
+      }
+      // Doublons à l'intérieur du fichier lui-même, puis en base (empreinte).
+      const seen = new Set();
+      const unique = all.filter((r) => (seen.has(r.fingerprint) ? false : (seen.add(r.fingerprint), true)));
+      let inserted = [];
+      if (unique.length) {
+        const { data, error } = await db.from("bank_transactions").upsert(unique, { onConflict: "organization_id,fingerprint", ignoreDuplicates: true }).select("*");
+        if (error) throw error;
+        inserted = data || [];
+      }
+      // Correspondances sûres : paiement enregistré tout de suite.
+      const working = [...docsRef.current];
+      let cands = openInvoiceCandidates(working, documentAmountDue);
+      let matched = 0;
+      for (const row of inserted) {
+        if (!(Number(row.amount) > 0)) continue;
+        const [best] = suggestMatches(bankTx(row), cands);
+        if (best?.level !== "sur") continue;
+        await reconcile(row, best.id, "auto", working);
+        matched += 1;
+        cands = openInvoiceCandidates(working, documentAmountDue);
+      }
+      const credits = inserted.filter((r) => Number(r.amount) > 0).length;
+      setReport({ files: files.length, imported: inserted.length, duplicates: all.length - inserted.length, matched, toReview: credits - matched, warnings });
+      setTab("a_traiter");
+      reload();
+    } catch (err) {
+      console.error("Erreur d'import du relevé", err);
+      setReport({ error: err?.message ? `Import impossible : ${err.message}` : "Import impossible pour l'instant." });
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const counts = BANK_TABS.reduce((acc, t) => ({ ...acc, [t.id]: rows.filter((r) => r.status === t.id).length }), {});
+  const visible = rows.filter((r) => r.status === tab);
+  const smallBtn = { border: `1px solid ${colors.line}`, color: colors.ink };
+
+  function renderActions(row) {
+    const credit = Number(row.amount) > 0;
+    const busy = busyId === row.id;
+    if (!canEdit) {
+      if (row.status === "rapproche") return <span className="text-xs" style={{ color: colors.inkSoft }}>Facture {docById(row.document_id)?.docNumber || "supprimée"}</span>;
+      return null;
+    }
+    if (row.status === "rapproche") {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs" style={{ color: colors.inkSoft }}>Facture {docById(row.document_id)?.docNumber || "supprimée"}{row.matched_by === "auto" ? " · rapprochée automatiquement" : ""}</span>
+          <button onClick={() => undo(row)} disabled={busy} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={smallBtn}><RotateCcw size={12} /> Annuler</button>
+        </div>
+      );
+    }
+    if (row.status === "ignore") {
+      return <button onClick={() => restore(row)} disabled={busy} className="rounded-md px-2 py-1 text-xs font-medium" style={smallBtn}>Rétablir</button>;
+    }
+    if (!credit) {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs" style={{ color: colors.inkSoft }}>Débit : pas un encaissement de facture.</span>
+          <button onClick={() => ignore(row)} disabled={busy} className="rounded-md px-2 py-1 text-xs font-medium" style={smallBtn}>Ignorer</button>
+        </div>
+      );
+    }
+    const [best] = suggestMatches(bankTx(row), candidates);
+    return (
+      <div className="flex flex-col gap-1.5">
+        {best ? (
+          <>
+            <button onClick={() => reconcileManual(row, best.id)} disabled={busy} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold" style={{ background: best.level === "sur" ? colors.moss : colors.brass, color: best.level === "sur" ? "white" : colors.ink, opacity: busy ? 0.7 : 1 }}>
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Rapprocher avec {best.docNumber}
+              <span className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase" style={{ background: "rgba(255,255,255,0.25)" }}>{best.level === "sur" ? "sûr" : "probable"}</span>
+            </button>
+            <span className="text-xs" style={{ color: colors.inkSoft }}>{best.clientName} · reste {formatMoney(best.due, row.currency)} · {best.reasons.join(", ")}</span>
+          </>
+        ) : (
+          <span className="text-xs" style={{ color: colors.inkSoft }}>Aucune facture correspondante trouvée.</span>
+        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <select value={pick[row.id] || ""} onChange={(e) => setPick((p) => ({ ...p, [row.id]: e.target.value }))} className="df-select max-w-[16rem] rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${colors.line}` }} aria-label="Autre facture">
+            <option value="">Autre facture…</option>
+            {candidates.map((c) => <option key={c.doc.id} value={c.doc.id}>{c.docNumber} · {c.clientName} · reste {formatMoney(c.due, c.doc.currency)}</option>)}
+          </select>
+          {pick[row.id] && <button onClick={() => reconcileManual(row, pick[row.id])} disabled={busy} className="rounded-md px-2 py-1 text-xs font-medium" style={smallBtn}>Rapprocher</button>}
+          <button onClick={() => ignore(row)} disabled={busy} className="rounded-md px-2 py-1 text-xs font-medium" style={smallBtn}>Ignorer</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="df-display flex items-center gap-2 text-2xl font-semibold"><Landmark size={22} style={{ color: colors.slate }} /> Banque</h1>
+          <p className="text-sm" style={{ color: colors.inkSoft }}>Relevés importés et rapprochement avec tes factures.</p>
+        </div>
+        {canEdit && (
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: importing ? 0.7 : 1 }}>
+            {importing ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />} {importing ? "Import en cours…" : "Importer un relevé"}
+            <input type="file" accept=".csv,.txt,.ofx,.qfx,.xml" multiple className="sr-only" disabled={importing} onChange={(e) => { importFiles(e.target.files); e.target.value = ""; }} />
+          </label>
+        )}
+      </div>
+      <div className="mb-6 rounded-2xl p-5 text-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        <p style={{ color: colors.inkSoft }}>Exporte le relevé de ton compte professionnel depuis le site de ta banque (CSV, OFX ou CAMT.053), puis importe-le ici. Chaque virement reçu est comparé à tes factures à encaisser : une correspondance sûre (numéro de facture dans le libellé, ou montant exact et nom du client) est enregistrée tout de suite comme paiement sur la facture ; une correspondance probable est proposée, à confirmer d'un clic. Le même relevé importé deux fois n'ajoute rien.</p>
+        {report && (report.error
+          ? <p className="mt-2 text-sm font-medium" style={{ color: colors.brick }}>{report.error}</p>
+          : <p className="mt-2 text-sm font-medium">Import terminé : {report.imported} opération{report.imported > 1 ? "s" : ""} ajoutée{report.imported > 1 ? "s" : ""}{report.duplicates ? `, ${report.duplicates} déjà connue${report.duplicates > 1 ? "s" : ""}` : ""}, {report.matched} paiement{report.matched > 1 ? "s" : ""} enregistré{report.matched > 1 ? "s" : ""} automatiquement, {report.toReview} à vérifier.</p>)}
+        {report?.warnings?.map((w) => <p key={w} className="mt-1 text-xs" style={{ color: colors.brassDark }}>{w}</p>)}
+      </div>
+      {loadError && <p className="mb-4 text-sm" style={{ color: colors.brick }}>{loadError}</p>}
+      {actionError && <p className="mb-4 text-sm" style={{ color: colors.brick }}>{actionError}</p>}
+      <div className="mb-4 flex flex-wrap gap-1 rounded-lg p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+        {BANK_TABS.map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)} className="rounded-md px-3 py-1.5 text-xs font-medium" style={tab === t.id ? { background: colors.ink, color: "white" } : { color: colors.inkSoft }}>{t.label} ({counts[t.id]})</button>
+        ))}
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-10"><Loader2 size={20} className="animate-spin" style={{ color: colors.slate }} /></div>
+      ) : visible.length === 0 ? (
+        <p className="rounded-2xl p-6 text-center text-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}>
+          {rows.length === 0 ? "Aucune opération pour l'instant : importe ton premier relevé." : "Rien dans cette liste."}
+        </p>
+      ) : (
+        <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          {visible.map((row) => {
+            const credit = Number(row.amount) > 0;
+            return (
+              <div key={row.id} className="flex flex-wrap items-start gap-3 border-b px-4 py-3 last:border-b-0" style={{ borderColor: colors.line }} data-status={row.status}>
+                <div className="df-mono w-24 shrink-0 pt-0.5 text-sm" style={{ color: colors.inkSoft }}>{paymentDateLabel(row.booked_at)}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium" title={row.label}>{row.label || row.counterparty || "Opération"}</div>
+                  {row.counterparty && row.counterparty !== row.label && <div className="truncate text-xs" style={{ color: colors.inkSoft }}>{row.counterparty}</div>}
+                </div>
+                <div className="df-mono w-28 shrink-0 text-right text-sm font-semibold" style={{ color: credit ? colors.moss : colors.brick }}>{credit ? "+" : ""}{formatMoney(Number(row.amount) || 0, row.currency)}</div>
+                <div className="w-full sm:w-auto sm:min-w-[18rem]">{renderActions(row)}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Paiement en ligne reçu pendant que la facture n'était pas ouverte : à
 // l'ouverture d'une facture pas encore soldée, vérification auprès de
 // Stripe (syncOnlinePayments dans l'application) et reprise des paiements
@@ -18752,5 +19030,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

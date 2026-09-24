@@ -84,7 +84,7 @@ describe("logo dans les trois versions", () => {
     expect(views).toEqual(["dashboard"]);
     // « Gestion de stock » juste après Clients dans la barre
     const labels = [...container.querySelectorAll("button")].map((b) => b.textContent.trim());
-    expect(labels.indexOf("Gestion de stock")).toBe(labels.indexOf("Clients") + 1);
+    expect(labels.findIndex((l) => l.startsWith("Gestion de stock"))).toBe(labels.indexOf("Clients") + 1);
     await unmount();
   });
   it("Avancée : barre latérale et barre mobile, deux liens vers l'accueil", async () => {
