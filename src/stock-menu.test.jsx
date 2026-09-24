@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 // Menu « Gestion de stock » : un seul bouton qui se déplie sur six entrées,
-// dans l'ordre demandé, dans les trois versions (barre Classique, sidebar et
-// mobile Avancée, menu Plus d'Atelier).
+// dans l'ordre demandé (menu déroulant de l'en-tête et volet du bas, Atelier).
 import { describe, it, expect, beforeAll } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -29,41 +28,10 @@ describe("ordre et libellés", () => {
   });
 });
 
-describe("sidebar Avancée et menus mobiles (accordéon)", () => {
-  for (const variant of ["sidebar", "inline"]) {
-    it(`${variant} : un seul bouton, replié hors du stock, se déplie et se replie au clic, dans l'ordre`, async () => {
-      const { container, unmount } = await mount(<StockMenu variant={variant} view="dashboard" setView={() => {}} locked={false} styleFor={styleFor} itemClass="px-3 py-2 text-xs" />);
-      expect(buttons(container)).toEqual(["Gestion de stock"]);
-      await click(stockButton(container));
-      expect(buttons(container)).toEqual(["Gestion de stock", ...ORDER]);
-      expect(stockButton(container).getAttribute("aria-expanded")).toBe("true");
-      await click(stockButton(container));
-      expect(buttons(container)).toEqual(["Gestion de stock"]);
-      await unmount();
-    });
-  }
-  it("déplié d'office quand une page du stock est ouverte, l'entrée active marquée", async () => {
-    const { container, unmount } = await mount(<StockMenu variant="sidebar" view="stock-entrepots" setView={() => {}} locked={false} styleFor={styleFor} />);
-    expect(buttons(container)).toEqual(["Gestion de stock", ...ORDER]);
-    const active = [...container.querySelectorAll("button")].filter((b) => b.style.background === "rgb(0, 0, 0)").map((b) => b.textContent.trim());
-    expect(active).toEqual(["Entrepôts"]);
-    await unmount();
-  });
-  it("navigue et referme le menu mobile", async () => {
-    const views = []; let closed = 0;
-    const { container, unmount } = await mount(<StockMenu variant="inline" view="dashboard" setView={(v) => views.push(v)} locked={false} styleFor={styleFor} onNavigate={() => { closed += 1; }} />);
-    await click(stockButton(container));
-    await click([...container.querySelectorAll("button")].find((b) => b.textContent.trim() === "Comptabilité"));
-    expect(views).toEqual(["stock-comptabilite"]);
-    expect(closed).toBe(1);
-    await unmount();
-  });
-});
-
-describe("barre Classique (menu déroulant)", () => {
+describe("menu déroulant (en-tête Atelier)", () => {
   it("un seul bouton, liste déroulante dans l'ordre, refermée après un choix", async () => {
     const views = [];
-    const { container, unmount } = await mount(<StockMenu variant="dropdown" view="dashboard" setView={(v) => views.push(v)} locked={false} styleFor={styleFor} iconColor="#8F5C2E" />);
+    const { container, unmount } = await mount(<StockMenu view="dashboard" setView={(v) => views.push(v)} locked={false} styleFor={styleFor} iconColor="#8F5C2E" />);
     expect(buttons(container)).toEqual(["Gestion de stock"]);
     await click(stockButton(container));
     expect(buttons(container)).toEqual(["Gestion de stock", ...ORDER]);

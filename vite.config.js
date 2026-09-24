@@ -4,6 +4,10 @@ import { defineConfig } from 'vite'
    import { VitePWA } from 'vite-plugin-pwa'
 
    export default defineConfig(({ mode }) => ({
+     // Tests (Vitest) : les rendus complets des éditeurs dépassent parfois les
+     // 5 s par défaut sur une machine chargée ; même délai que les tests qui le
+     // précisaient déjà un par un.
+     test: { testTimeout: 30000 },
      // Production : plus aucun console.* dans le code livré (les journaux de
      // développement peuvent contenir des données personnelles ou des jetons).
      esbuild: mode === "production" ? { drop: ["console", "debugger"] } : {},

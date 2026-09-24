@@ -17,7 +17,7 @@ import {
   Pencil, X, UserPlus, UserCircle, LayoutDashboard, LogOut, Lock, CreditCard, Mail, Landmark,
   KeyRound, Sparkles, ArrowRight, Eye, EyeOff, GitMerge, Scissors,
   Library, BookmarkPlus, RotateCcw, AlertTriangle, IndentIncrease, IndentDecrease,
-  Shield, ToggleLeft, ToggleRight, Calculator, Download, Layers, Menu, Palette, Monitor, Mic, Sun, Moon, Link2,
+  Shield, ToggleLeft, ToggleRight, Calculator, Download, Menu, Palette, Monitor, Mic, Sun, Moon, Link2,
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
   Maximize2, Minimize2, Camera, ImagePlus,
   Home, HardHat, Files, ChevronRight,
@@ -42,26 +42,8 @@ const colors = {
   line: "var(--df-line, #DAE1DC)",
 };
 
-// Palette dédiée à la version "Avancée" — volontairement indépendante
-// du système de thèmes (13 thèmes, voir THEMES plus bas) : peu importe
-// le thème choisi par ailleurs, l'interface avancée garde toujours
-// cette identité propre (anthracite + émeraude), pour un vrai
-// changement d'ambiance, pas juste une variante du même marine/laiton.
-const adv = {
-  ink: "#27272A",         // texte foncé (gris anthracite doux, jamais noir pur)
-  inkSoft: "#71717A",
-  paper: "#F9FAFB",       // fond général très clair
-  surface: "linear-gradient(to bottom, #BFDBFE, #FFFFFF)",   // dégradé bleu clair → blanc, appliqué à toute case/carte/champ blanc par défaut
-  sidebarBg: "linear-gradient(to bottom, #BFDBFE, #FFFFFF)",   // dégradé bleu clair → blanc, ne dépend jamais du thème choisi
-  accent: "#4F46E5",      // indigo simple et clair, un seul accent, pas de turquoise
-  accentSoft: "#EEF2FF",
-  line: "#E4E4E7",
-  brick: "#DC2626",
-  moss: "#16A34A",
-};
-
-// Palette de la version "Atelier" — fixe, indépendante des thèmes de
-// l'admin (comme la version avancée). Codes couleur du métier : bleu de
+// Palette de l'interface Atelier — fixe, indépendante des thèmes de
+// l'admin. Codes couleur du métier : bleu de
 // travail pour l'accent, orange sécurité réservé à l'action « Créer »,
 // gris béton en fond. Tous les couples texte/fond restent au-dessus de
 // 4,5:1 de contraste. Les variables CSS --df-* sont redéfinies sous
@@ -245,9 +227,8 @@ function InstagramIcon({ size = 20 }) {
 // comme "Terminé" une fois cliqué. Reste discret et informatif une
 // fois déjà cliqué, plutôt que de disparaître (pour qu'on sache
 // toujours où on en est en revenant sur ce document plus tard).
-function FinalizeButton({ doc, onFinalize, siteSettings, errors = [], hints = [] }) {
+function FinalizeButton({ doc, onFinalize, errors = [], hints = [] }) {
   const isDone = doc?.workStage === "termine";
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
   const blocked = errors.length > 0;
   return (
     <div className="no-print flex flex-wrap items-center justify-end gap-2 border-t px-6 py-4" style={{ borderColor: colors.line }}>
@@ -259,7 +240,7 @@ function FinalizeButton({ doc, onFinalize, siteSettings, errors = [], hints = []
         disabled={blocked}
         title={blocked ? "Renseigne d'abord les champs obligatoires (marqués *)" : undefined}
         className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium"
-        style={{ ...(isDone ? { background: isAdvanced ? adv.moss : colors.moss, color: "white" } : isAdvanced ? { background: adv.accent, color: "white" } : { background: colors.brass, color: colors.ink }), ...(blocked ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
+        style={{ ...(isDone ? { background: colors.moss, color: "white" } : { background: colors.brass, color: colors.ink }), ...(blocked ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
       >
         {isDone ? <Check size={16} /> : null} {isDone ? "Terminé" : "Enregistrer"}
       </button>
@@ -600,40 +581,6 @@ function hasAccess(account, minTier) {
   return account?.paymentStatus === "payé";
 }
 
-function docTypeIcon(type) {
-  if (type === "devis") return FileText;
-  if (type === "proforma") return Ship;
-  if (type === "revision") return TrendingUp;
-  if (type === "avoir") return RotateCcw;
-  if (type === "acompte") return Wallet;
-  if (type === "commande") return ShoppingCart;
-  if (type === "livraison") return Truck;
-  if (type === "situation") return BarChart3;
-  if (type === "pv_reception") return ClipboardCheck;
-  if (type === "bpu") return List;
-  if (type === "rapport") return Wrench;
-  if (type === "contrat") return FileSignature;
-  if (type === "relance") return AlertTriangle;
-  if (type === "planning") return Calendar;
-  return Receipt;
-}
-function docTypeColor(type) {
-  if (type === "devis") return colors.slate;
-  if (type === "proforma") return colors.moss;
-  if (type === "revision") return colors.brick;
-  if (type === "avoir") return colors.brick;
-  if (type === "acompte") return colors.brassDark;
-  if (type === "commande") return colors.slate;
-  if (type === "livraison") return colors.moss;
-  if (type === "situation") return colors.brassDark;
-  if (type === "pv_reception") return colors.moss;
-  if (type === "bpu") return colors.slate;
-  if (type === "rapport") return colors.brassDark;
-  if (type === "contrat") return colors.slate;
-  if (type === "relance") return colors.brick;
-  if (type === "planning") return colors.moss;
-  return colors.brassDark;
-}
 function docTypeLabel(type) {
   if (type === "devis") return "Devis";
   if (type === "proforma") return "Proforma";
@@ -2349,13 +2296,6 @@ const GlobalStyle = () => (
     .df-display { font-family: 'Space Grotesk', sans-serif; }
     .df-mono { font-family: 'IBM Plex Mono', monospace; }
     .df-input:focus, .df-select:focus, .df-textarea:focus { outline: none; border-color: ${colors.brass} !important; box-shadow: 0 0 0 3px rgba(184,118,62,0.15); }
-    /* Décale tout le contenu à droite quand une barre latérale (version
-       avancée) est présente — uniquement à partir de la largeur où
-       elle s'affiche réellement (voir lg:flex sur .df-sidebar-nav),
-       jamais sur les pages sans navigation (accueil, connexion). */
-    @media (min-width: 1024px) {
-      .df-root:has(> .df-sidebar-nav) { padding-left: 272px; }
-    }
     /* Mode sombre — un réglage personnel (mémorisé sur cet appareil),
        indépendant du thème de couleurs choisi par l'administrateur du
        site : couleurs douces (jamais noir pur), appliquées le plus
@@ -2949,10 +2889,10 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
 });
 
 // ---------------------------------------------------------------------------
-// Paramètres du site (version d'interface, thème, nom, couleurs des PDF…) :
+// Paramètres du site (thème, nom, couleurs des PDF…) :
 // la dernière valeur connue est gardée sur l'appareil pour démarrer
-// directement dans la bonne version (Classique, Avancée ou Atelier), sans
-// jamais afficher une autre version le temps du chargement, y compris
+// directement avec les bons réglages, sans
+// jamais changer d'apparence le temps du chargement, y compris
 // quand le serveur ne répond pas au premier essai. Réécrite à chaque
 // chargement réussi et à chaque modification depuis Admin.
 // ---------------------------------------------------------------------------
@@ -2985,7 +2925,6 @@ function siteSettingsFromRow(data) {
     desktopAppUrlMac: data.desktop_app_url_mac || "",
     desktopAppEnabled: data.desktop_app_enabled || false,
     contactInstagramUrl: data.contact_instagram_url || "",
-    landingPageVersion: data.landing_page_version || "classique",
     // Commission de la plateforme sur les paiements en ligne des factures
     // (Stripe Connect), en % ; 0 = aucune commission.
     connectFeePercent: Number(data.connect_fee_percent) || 0,
@@ -2998,9 +2937,9 @@ function siteSettingsFromRow(data) {
 // lui-même est déjà dans la bonne version.
 function applyCachedSiteAppearance() {
   if (typeof document === "undefined") return;
+  document.body.classList.add("df-atelier");
   const cached = readCachedSiteSettings();
   if (!cached) return;
-  document.body.classList.toggle("df-atelier", cached.landingPageVersion === "atelier");
   applyTheme(cached.theme || "classique");
 }
 applyCachedSiteAppearance();
@@ -3077,8 +3016,8 @@ function DeviFactAppInner() {
   // Connexion réussie mais compte impossible à charger (réseau, droits) :
   // message montré sur l'écran de connexion.
   const [sessionError, setSessionError] = useState(null);
-  // Empêche d'afficher la page d'accueil (ou toute page) avec la
-  // version par défaut ("classique") pendant la fraction de seconde où
+  // Empêche d'afficher la page d'accueil (ou toute page) avec les
+  // réglages par défaut pendant la fraction de seconde où
   // le vrai réglage n'est pas encore arrivé de la base de données —
   // sans ça, un "flash" de la mauvaise version apparaît brièvement à
   // chaque rechargement, avant de basculer sur la bonne.
@@ -3161,9 +3100,6 @@ function DeviFactAppInner() {
   // instant à quelqu'un de connecté qui rouvre le site).
   const sessionLoadRef = useRef(null);
   const bootDoneRef = useRef(false);
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("tous");
-  const [stageFilter, setStageFilter] = useState("tous"); // tous | brouillon | termine
   const [revisionCountry, setRevisionCountry] = useState("🇫🇷 FR");
   const [limitNotice, setLimitNotice] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -3224,14 +3160,12 @@ function DeviFactAppInner() {
   useEffect(() => {
     applyTheme(siteSettings?.theme || "classique");
   }, [siteSettings?.theme]);
-  // Version "Atelier" : classe sur le corps de page qui porte sa palette
-  // fixe (voir GlobalStyle) — sans effet sur les versions classique et
-  // avancée, qui n'ont pas cette classe.
-  const isAtelier = siteSettings?.landingPageVersion === "atelier";
+  // Interface Atelier (la seule) : classe sur le corps de page qui porte sa
+  // palette fixe (voir GlobalStyle).
   useEffect(() => {
     if (typeof document === "undefined") return;
-    document.body.classList.toggle("df-atelier", isAtelier);
-  }, [isAtelier]);
+    document.body.classList.add("df-atelier");
+  }, []);
   const [atelierCreateOpen, setAtelierCreateOpen] = useState(false);
   // Filtre pré-appliqué à la page Documents Atelier (carte « À faire »).
   const [atelierDocsPreset, setAtelierDocsPreset] = useState(null);
@@ -3509,7 +3443,7 @@ function DeviFactAppInner() {
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfTextColor: "pdf_text_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", landingPageVersion: "landing_page_version", legalInfo: "legal_info", connectFeePercent: "connect_fee_percent" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfTextColor: "pdf_text_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", legalInfo: "legal_info", connectFeePercent: "connect_fee_percent" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -4535,7 +4469,7 @@ function DeviFactAppInner() {
         rows.push(["Référence", doc.docNumber]);
         rows.push(["Marché N°", doc.marcheNumero || ""]);
         if (doc.periodeDebut || doc.periodeFin) rows.push(["Période couverte", [doc.periodeDebut ? `du ${fr(doc.periodeDebut)}` : "", doc.periodeFin ? `au ${fr(doc.periodeFin)}` : ""].filter(Boolean).join(" ")]);
-        rows.push(["Vaut facture", doc.vautFacture === true ? "Oui" : "Non"]);
+        rows.push(["Vaut facture", doc.vautFacture === "Oui"]);
         rows.push(["Avancement global", `${s.avancementGlobalPct.toFixed(1)}%`]);
         rows.push([]);
         rows.push(["Désignation", "Montant marché", "% cumulé", "Cumul atteint", "Déjà facturé", "Cette situation"]);
@@ -4716,38 +4650,13 @@ function DeviFactAppInner() {
     setSplitNotice({ docNumber: newDoc.docNumber, id: newDoc.id });
   }
 
-  const filtered = useMemo(() => {
-    return documents
-      .filter((d) => typeFilter === "tous" || d.type === typeFilter)
-      .filter((d) => stageFilter === "tous" || (stageFilter === "termine" ? d.workStage === "termine" : d.workStage !== "termine"))
-      .filter((d) => {
-        if (!search.trim()) return true;
-        const s = search.toLowerCase();
-        return d.docNumber.toLowerCase().includes(s) || (d.client.name || "").toLowerCase().includes(s);
-      })
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [documents, typeFilter, stageFilter, search]);
 
   // Affiche un nombre limité de documents à la fois — sans ça, un
   // compte avec plusieurs centaines de documents accumulés au fil du
   // temps ralentirait la page (tout serait affiché d'un coup). La
   // recherche et les filtres continuent de porter sur TOUS les
   // documents, pas seulement ceux actuellement affichés.
-  const PAGE_SIZE = 40;
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [search, typeFilter, stageFilter]);
-  const visibleFiltered = filtered.slice(0, visibleCount);
 
-  const stats = useMemo(() => {
-    const enAttente = documents.filter((d) => d.type === "devis" && ["envoyé", "vu"].includes(d.status));
-    const montantEnAttente = enAttente.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
-    const impayees = documents.filter((d) => d.type === "facture" && d.status !== "payée");
-    const montantImpaye = impayees.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
-    const devisTraites = documents.filter((d) => d.type === "devis" && d.status !== "brouillon");
-    const devisSignes = documents.filter((d) => d.type === "devis" && d.status === "signé");
-    const tauxSignature = devisTraites.length ? Math.round((devisSignes.length / devisTraites.length) * 100) : null;
-    return { enAttenteCount: enAttente.length, montantEnAttente, impayeesCount: impayees.length, montantImpaye, tauxSignature };
-  }, [documents]);
 
   const reminders = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -4839,9 +4748,8 @@ function DeviFactAppInner() {
       return <LegalView kind={preAuthView} siteSettings={siteSettings} onBack={() => setPreAuthView("landing")} onLegal={setPreAuthView} />;
     }
     if (preAuthView === "landing") {
-      const LandingComponent = siteSettings?.landingPageVersion === "atelier" ? LandingPageAtelier : siteSettings?.landingPageVersion === "avancee" ? LandingPageAvancee : LandingPage;
       return (
-        <LandingComponent
+        <LandingPageAtelier
           plans={plans}
           siteSettings={siteSettings}
           onGetStarted={() => { setAuthMode("signup"); setPreAuthView("auth"); }}
@@ -5071,8 +4979,6 @@ function DeviFactAppInner() {
     }
   }
 
-  const navProps = { saveError, view, setView, onNewDevis: () => openNew("devis"), onNewFacture: () => openNew("facture"), onNewProforma: () => openNew("proforma"), onNewRevision: () => setView("revision-sector"), onNewService: openNewService, visibleServices, account, onLogout: logout, onSwitchOrganization: switchOrganization, onCreateOwnOrg: createMyOwnOrganization, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType: (type) => { persistCompanyProfile({ ...companyProfile, type }); setView("company"); }, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode };
-
   // Pages de la Gestion de stock (mêmes composants dans les trois
   // versions) — réservées aux forfaits Pro et Entreprise.
   function renderStockPage(which, goPricing) {
@@ -5096,698 +5002,169 @@ function DeviFactAppInner() {
   }
 
   // ---------------------------------------------------------------------
-  // Version "Atelier" : une seule branche, avant les écrans classique et
-  // avancée, qui rend les pages dans la coque Atelier. Les éditeurs sont
-  // déjà rendus plus haut (identiques pour toutes les versions).
+  // Pages rendues dans la coque Atelier. Les éditeurs sont déjà rendus
+  // plus haut.
   // ---------------------------------------------------------------------
-  if (isAtelier) {
-    const goPricing = () => setView("pricing");
-    // Création depuis une fiche chantier : le document naît avec le nom
-    // du chantier déjà rempli (mise à jour du brouillon en attente juste
-    // après sa création, dans le même cycle de rendu).
-    const createWithChantier = (serviceId) => {
-      const chantierName = atelierCreateChantier;
-      setAtelierCreateChantier(null);
-      openNewService(serviceId);
-      if (chantierName && serviceId !== "revision") setPendingDoc((p) => (p ? { ...p, chantier: chantierName } : p));
-    };
-    const openCreateForChantier = (chantierName) => { setAtelierCreateChantier(chantierName); setAtelierCreateOpen(true); };
-    let page;
-    if (view === "atelier-documents") {
-      page = (
-        <AtelierDocumentsView
-          documents={documents}
-          darkMode={darkMode}
-          isLocked={isLocked}
-          isViewer={isViewer}
-          preset={atelierDocsPreset}
-          onPresetConsumed={() => setAtelierDocsPreset(null)}
-          onOpenDoc={openDoc}
-          onChangeStatus={(id, status) => updateDoc(id, { status })}
-          onDuplicate={duplicateDoc}
-          onDelete={deleteDoc}
-          selectedIds={selectedIds}
-          onToggleSelect={toggleSelect}
-          onClearSelection={() => setSelectedIds([])}
-          onMerge={mergeDocuments}
-          onBatchExcel={exportBatchExcel}
-          onBatchPdf={exportBatchPdf}
-          batchExporting={batchExporting}
-          onExportAccounting={exportAccountingCSV}
-        />
-      );
-    } else if (view === "revision-sector") {
-      page = <AtelierRevisionSectorPicker revisionCountry={revisionCountry} setRevisionCountry={setRevisionCountry} onPick={openNewRevision} onBack={backToDashboard} darkMode={darkMode} />;
-    } else if (view === "chantiers") {
-      page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
-    } else if (view === "atelier-chantier" && atelierChantier) {
-      page = <AtelierChantierView name={atelierChantier} documents={documents} account={account} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onBack={() => setView("chantiers")} onOpenDoc={openDoc} onCreateForChantier={openCreateForChantier} />;
-    } else if (view === "atelier-chantier") {
-      page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
-    } else if (view === "clients") {
-      page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} darkMode={darkMode} />;
-    } else if (view === "company") {
-      page = <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} />;
-    } else if (view === "banque") {
-      page = <BankView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} onPatchDocument={updateDoc} />;
-    } else if (view === "team") {
-      page = <TeamView account={account} siteSettings={siteSettings} />;
-    } else if (view === "planning-equipe") {
-      page = <PlanningView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} />;
-    } else if (view === "api") {
-      page = <ApiView account={account} siteSettings={siteSettings} />;
-    } else if (view === "account") {
-      page = <AccountView account={account} siteSettings={siteSettings} />;
-    } else if (isStockView(view) || view === "prestations") {
-      page = renderStockPage(view, goPricing);
-    } else if (view === "pricing") {
-      page = (
-        <PricingView
-          account={account}
-          plans={plans}
-          onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); }}
-          onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) setLimitNotice(false); }}
-          onCancelSubscription={cancelSubscription}
-          onContact={() => setView("contact")}
-          onRefreshAccount={refreshAccount}
-          cancellingSubscription={cancellingSubscription}
-          limitNotice={limitNotice}
-          documentCount={documents.length}
-          siteSettings={siteSettings}
-        />
-      );
-    } else if (view === "admin" && account?.isAdmin) {
-      page = (
-        <AdminView
-          account={account}
-          darkMode={darkMode}
-          documents={documents}
-          clients={clients}
-          companyProfile={companyProfile}
-          plans={plans}
-          savingPlanSettings={savingPlanSettings}
-          onTogglePlan={togglePlanVisibility}
-          onToggleWatermark={toggleWatermark}
-          onUpdatePlanPrice={updatePlanPrice}
-          onUpdatePlanLimit={updatePlanLimit}
-          onUpdatePlanPaypalId={updatePlanPaypalId}
-          onUpdatePlanStripeId={updatePlanStripeId}
-          onToggleCardPayment={toggleCardPayment}
-          onTogglePaypalPayment={togglePaypalPayment}
-          onTogglePayment={togglePaymentStatus}
-          onDeleteAccount={deleteCurrentAccount}
-          deletingAccount={deletingAccount}
-          siteSettings={siteSettings}
-          savingSiteSettings={savingSiteSettings}
-          onUpdateSiteSettings={updateSiteSettings}
-          allUsers={allUsers}
-          allUsersError={allUsersError}
-          onRefreshUsers={loadAllUsers}
-          onSetUserPlan={adminSetUserPlan}
-          onSetUserPaidAt={adminSetUserPaidAt}
-          onSetUserExpiresAt={adminSetUserExpiresAt}
-          savingUserPlanId={savingUserPlanId}
-          onResendConfirmation={resendConfirmation}
-          resendingConfirmationId={resendingConfirmationId}
-        />
-      );
-    } else {
-      page = (
-        <AtelierHome
-          account={account}
-          documents={documents}
-          darkMode={darkMode}
-          isLocked={isLocked}
-          isViewer={isViewer}
-          freeLimit={freeLimit}
-          freeLimitReached={freeLimitReached}
-          offlineMode={offlineMode}
-          visibleServices={visibleServices}
-          reminders={reminders}
-          reminderMailto={reminderMailto}
-          fiscalStartMonth={companyProfile?.fiscalStartMonth}
-          onCreate={openNewService}
-          onOpenCreate={() => setAtelierCreateOpen(true)}
-          onOpenDoc={openDoc}
-          onGoToDocuments={(preset) => { setAtelierDocsPreset(preset || null); setView("atelier-documents"); }}
-          onGoToPricing={goPricing}
-          autoFactureNotice={autoFactureNotice}
-          onOpenAutoFacture={() => { openDoc(autoFactureNotice.id); setAutoFactureNotice(null); }}
-          onDismissAutoFacture={() => setAutoFactureNotice(null)}
-          reviewNotice={reviewNotice}
-          onSendReview={sendReviewRequest}
-          onDismissReview={() => setReviewNotice(null)}
-        />
-      );
-    }
-    return (
-      <AtelierShell
-        view={view}
-        setView={setView}
-        account={account}
-        saveError={saveError}
-        siteSettings={siteSettings}
+  const goPricing = () => setView("pricing");
+  // Création depuis une fiche chantier : le document naît avec le nom
+  // du chantier déjà rempli (mise à jour du brouillon en attente juste
+  // après sa création, dans le même cycle de rendu).
+  const createWithChantier = (serviceId) => {
+    const chantierName = atelierCreateChantier;
+    setAtelierCreateChantier(null);
+    openNewService(serviceId);
+    if (chantierName && serviceId !== "revision") setPendingDoc((p) => (p ? { ...p, chantier: chantierName } : p));
+  };
+  const openCreateForChantier = (chantierName) => { setAtelierCreateChantier(chantierName); setAtelierCreateOpen(true); };
+  let page;
+  if (view === "atelier-documents") {
+    page = (
+      <AtelierDocumentsView
+        documents={documents}
         darkMode={darkMode}
-        setDarkMode={setDarkMode}
-        onLogout={logout}
-        onSwitchOrganization={switchOrganization}
-        onCreateOwnOrg={createMyOwnOrganization}
-        creatingOwnOrg={creatingOwnOrg}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        preset={atelierDocsPreset}
+        onPresetConsumed={() => setAtelierDocsPreset(null)}
+        onOpenDoc={openDoc}
+        onChangeStatus={(id, status) => updateDoc(id, { status })}
+        onDuplicate={duplicateDoc}
+        onDelete={deleteDoc}
+        selectedIds={selectedIds}
+        onToggleSelect={toggleSelect}
+        onClearSelection={() => setSelectedIds([])}
+        onMerge={mergeDocuments}
+        onBatchExcel={exportBatchExcel}
+        onBatchPdf={exportBatchPdf}
+        batchExporting={batchExporting}
+        onExportAccounting={exportAccountingCSV}
+      />
+    );
+  } else if (view === "revision-sector") {
+    page = <AtelierRevisionSectorPicker revisionCountry={revisionCountry} setRevisionCountry={setRevisionCountry} onPick={openNewRevision} onBack={backToDashboard} darkMode={darkMode} />;
+  } else if (view === "chantiers") {
+    page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
+  } else if (view === "atelier-chantier" && atelierChantier) {
+    page = <AtelierChantierView name={atelierChantier} documents={documents} account={account} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onBack={() => setView("chantiers")} onOpenDoc={openDoc} onCreateForChantier={openCreateForChantier} />;
+  } else if (view === "atelier-chantier") {
+    page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
+  } else if (view === "clients") {
+    page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} darkMode={darkMode} />;
+  } else if (view === "company") {
+    page = <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} />;
+  } else if (view === "banque") {
+    page = <BankView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} onPatchDocument={updateDoc} />;
+  } else if (view === "team") {
+    page = <TeamView account={account} siteSettings={siteSettings} />;
+  } else if (view === "planning-equipe") {
+    page = <PlanningView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} />;
+  } else if (view === "api") {
+    page = <ApiView account={account} siteSettings={siteSettings} />;
+  } else if (view === "account") {
+    page = <AccountView account={account} siteSettings={siteSettings} />;
+  } else if (isStockView(view) || view === "prestations") {
+    page = renderStockPage(view, goPricing);
+  } else if (view === "pricing") {
+    page = (
+      <PricingView
+        account={account}
+        plans={plans}
+        onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); }}
+        onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) setLimitNotice(false); }}
+        onCancelSubscription={cancelSubscription}
+        onContact={() => setView("contact")}
+        onRefreshAccount={refreshAccount}
+        cancellingSubscription={cancellingSubscription}
+        limitNotice={limitNotice}
+        documentCount={documents.length}
+        siteSettings={siteSettings}
+      />
+    );
+  } else if (view === "admin" && account?.isAdmin) {
+    page = (
+      <AdminView
+        account={account}
+        darkMode={darkMode}
+        documents={documents}
+        clients={clients}
+        companyProfile={companyProfile}
+        plans={plans}
+        savingPlanSettings={savingPlanSettings}
+        onTogglePlan={togglePlanVisibility}
+        onToggleWatermark={toggleWatermark}
+        onUpdatePlanPrice={updatePlanPrice}
+        onUpdatePlanLimit={updatePlanLimit}
+        onUpdatePlanPaypalId={updatePlanPaypalId}
+        onUpdatePlanStripeId={updatePlanStripeId}
+        onToggleCardPayment={toggleCardPayment}
+        onTogglePaypalPayment={togglePaypalPayment}
+        onTogglePayment={togglePaymentStatus}
+        onDeleteAccount={deleteCurrentAccount}
+        deletingAccount={deletingAccount}
+        siteSettings={siteSettings}
+        savingSiteSettings={savingSiteSettings}
+        onUpdateSiteSettings={updateSiteSettings}
+        allUsers={allUsers}
+        allUsersError={allUsersError}
+        onRefreshUsers={loadAllUsers}
+        onSetUserPlan={adminSetUserPlan}
+        onSetUserPaidAt={adminSetUserPaidAt}
+        onSetUserExpiresAt={adminSetUserExpiresAt}
+        savingUserPlanId={savingUserPlanId}
+        onResendConfirmation={resendConfirmation}
+        resendingConfirmationId={resendingConfirmationId}
+      />
+    );
+  } else {
+    page = (
+      <AtelierHome
+        account={account}
+        documents={documents}
+        darkMode={darkMode}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        freeLimit={freeLimit}
+        freeLimitReached={freeLimitReached}
+        offlineMode={offlineMode}
+        visibleServices={visibleServices}
+        reminders={reminders}
+        reminderMailto={reminderMailto}
+        fiscalStartMonth={companyProfile?.fiscalStartMonth}
+        onCreate={openNewService}
         onOpenCreate={() => setAtelierCreateOpen(true)}
-        commandPaletteOpen={commandPaletteOpen}
-        setCommandPaletteOpen={setCommandPaletteOpen}
-        paletteCommands={[{ id: "nav-atelier-documents", label: "Aller à Documents", icon: Files, action: () => setView("atelier-documents") }, ...paletteCommands]}
-      >
-        {page}
-        <AtelierCreateSheet open={atelierCreateOpen} onClose={() => { setAtelierCreateOpen(false); setAtelierCreateChantier(null); }} visibleServices={visibleServices} onCreate={createWithChantier} chantierName={atelierCreateChantier} darkMode={darkMode} />
-        {/* Hôte hors écran pour l'export PDF groupé (même mécanisme que
-            le tableau de bord classique, rendu ici pour Atelier). */}
-        <div style={{ position: "fixed", top: 0, left: "-9999px", zIndex: -1 }}>
-          {batchExportDoc && (() => {
-            const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
-            if (batchExportDoc.type === "revision") return <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} photoUrls={batchPhotoUrls} />;
-            if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} />;
-            if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} />;
-            if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
-            if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
-            if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-            return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          })()}
-        </div>
-      </AtelierShell>
+        onOpenDoc={openDoc}
+        onGoToDocuments={(preset) => { setAtelierDocsPreset(preset || null); setView("atelier-documents"); }}
+        onGoToPricing={goPricing}
+        autoFactureNotice={autoFactureNotice}
+        onOpenAutoFacture={() => { openDoc(autoFactureNotice.id); setAutoFactureNotice(null); }}
+        onDismissAutoFacture={() => setAutoFactureNotice(null)}
+        reviewNotice={reviewNotice}
+        onSendReview={sendReviewRequest}
+        onDismissReview={() => setReviewNotice(null)}
+      />
     );
   }
-
-  if (view === "revision-sector") {
-    const countryInfo = getRevisionCountryInfo(revisionCountry);
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-          <button onClick={backToDashboard} className="no-print mb-4 flex items-center gap-1 text-sm" style={{ color: colors.inkSoft }}><ArrowLeft size={15} /> Retour</button>
-          <h1 className="df-display mb-1 text-2xl font-semibold">Nouvelle révision de prix</h1>
-          <p className="mb-6 text-sm" style={{ color: colors.inkSoft }}>Choisis le pays, puis le secteur concerné.</p>
-
-          <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Pays</label>
-          <div className="mb-2 max-w-sm">
-            <CountrySelect
-              value={revisionCountry}
-              onChange={setRevisionCountry}
-              options={COUNTRIES.filter((c) => c !== "Autre")}
-              allowOther
-              showEmpty={false}
-            />
-          </div>
-          <div className="mb-6 flex items-start gap-2 rounded-lg p-3 text-xs" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}>
-            <Info size={14} className="mt-0.5 shrink-0" />
-            {countryInfo.currency ? (
-              <span>Devise suggérée : <strong>{countryInfo.currency}</strong>. Indice de référence usuel : <strong>{countryInfo.indexHint}</strong>, publié par {countryInfo.authority}. À vérifier avec ton contrat.</span>
-            ) : (
-              <span>Pas de repère spécifique enregistré pour ce pays — renseigne toi-même le nom et les valeurs de l'indice applicable (contrat, ou {countryInfo.authority}). La formule de calcul reste la même et s'adapte à tes propres valeurs.</span>
-            )}
-          </div>
-
-          <label className="mb-2 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Secteur</label>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {REVISION_SECTORS.map((sector) => (
-              <button
-                key={sector}
-                onClick={() => openNewRevision(sector, revisionCountry)}
-                className="flex items-center justify-between gap-2 rounded-xl px-4 py-3 text-left text-sm font-medium"
-                style={{ background: colors.surface, border: `1px solid ${colors.line}` }}
-              >
-                {sector} <ArrowRight size={15} style={{ color: colors.inkSoft }} />
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (view === "chantiers") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <ChantiersView documents={documents} siteSettings={siteSettings} darkMode={darkMode} onOpenDoc={openDoc} />
-      </div>
-    );
-  }
-
-  if (view === "clients") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} siteSettings={siteSettings} darkMode={darkMode} />
-      </div>
-    );
-  }
-
-  if (view === "company") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={() => setView("pricing")} siteSettings={siteSettings} />
-      </div>
-    );
-  }
-
-  if (view === "banque") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <BankView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} onPatchDocument={updateDoc} />
-      </div>
-    );
-  }
-
-  if (view === "team") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <TeamView account={account} siteSettings={siteSettings} />
-      </div>
-    );
-  }
-
-  if (view === "planning-equipe") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <PlanningView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} />
-      </div>
-    );
-  }
-
-  if (view === "api") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <ApiView account={account} siteSettings={siteSettings} />
-      </div>
-    );
-  }
-
-  if (view === "account") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <AccountView account={account} siteSettings={siteSettings} />
-      </div>
-    );
-  }
-
-  if (isStockView(view) || view === "prestations") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        {renderStockPage(view, () => setView("pricing"))}
-      </div>
-    );
-  }
-
-  if (view === "pricing") {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <PricingView
-          account={account}
-          plans={plans}
-          onChooseFree={async () => { await chooseFreePlan(); setLimitNotice(false); }}
-          onChooseZeroPrice={async (planId, billingCycle) => { const ok = await chooseZeroPricePlan(planId, billingCycle); if (ok) setLimitNotice(false); }}
-          onCancelSubscription={cancelSubscription}
-          onContact={() => setView("contact")}
-          onRefreshAccount={refreshAccount}
-          cancellingSubscription={cancellingSubscription}
-          limitNotice={limitNotice}
-          documentCount={documents.length}
-          siteSettings={siteSettings}
-        />
-      </div>
-    );
-  }
-
-  if (view === "admin" && account?.isAdmin) {
-    return (
-      <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-        <GlobalStyle />
-        <TopNav {...navProps} />
-        <AdminView
-          account={account}
-          darkMode={darkMode}
-          documents={documents}
-          clients={clients}
-          companyProfile={companyProfile}
-          plans={plans}
-          savingPlanSettings={savingPlanSettings}
-          onTogglePlan={togglePlanVisibility}
-          onToggleWatermark={toggleWatermark}
-          onUpdatePlanPrice={updatePlanPrice}
-          onUpdatePlanLimit={updatePlanLimit}
-          onUpdatePlanPaypalId={updatePlanPaypalId}
-          onUpdatePlanStripeId={updatePlanStripeId}
-          onToggleCardPayment={toggleCardPayment}
-          onTogglePaypalPayment={togglePaypalPayment}
-          onTogglePayment={togglePaymentStatus}
-          onDeleteAccount={deleteCurrentAccount}
-          deletingAccount={deletingAccount}
-          siteSettings={siteSettings}
-          savingSiteSettings={savingSiteSettings}
-          onUpdateSiteSettings={updateSiteSettings}
-          allUsers={allUsers}
-          allUsersError={allUsersError}
-          onRefreshUsers={loadAllUsers}
-          onSetUserPlan={adminSetUserPlan}
-          onSetUserPaidAt={adminSetUserPaidAt}
-          onSetUserExpiresAt={adminSetUserExpiresAt}
-          savingUserPlanId={savingUserPlanId}
-          onResendConfirmation={resendConfirmation}
-          resendingConfirmationId={resendingConfirmationId}
-        />
-      </div>
-    );
-  }
-
   return (
-    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-      <GlobalStyle />
-      <TopNav {...navProps} />
-
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {isViewer && (
-          <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.slate}12`, border: `1px solid ${colors.slate}40` }}>
-            <span className="flex items-center gap-2 text-sm" style={{ color: colors.slate }}>
-              <Eye size={15} /> Accès en lecture seule — {account?.organizationName || "cette équipe"} t'a donné le rôle "Lecteur", tu peux consulter mais pas modifier.
-            </span>
-          </div>
-        )}
-        {(account?.plan || "gratuit") === "gratuit" && (
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: isLocked ? `${colors.brick}12` : colors.surface, border: `1px solid ${isLocked ? colors.brick + "40" : colors.line}` }}>
-            <span className="flex items-center gap-2 text-sm" style={{ color: isLocked ? colors.brick : colors.inkSoft }}>
-              {freeLimitReached && <Lock size={15} />}
-              Forfait Gratuit — <strong className="df-mono">{documents.length}/{freeLimit}</strong> devis/factures/proforma utilisés
-              {freeLimitReached && " — compte verrouillé jusqu'au passage à un forfait payant"}
-            </span>
-            <button onClick={() => setView("pricing")} className={freeLimitReached ? "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" : "text-xs font-medium underline"} style={freeLimitReached ? { background: colors.brick } : { color: colors.brassDark }}>Passer à un forfait payant</button>
-          </div>
-        )}
-        <SalesKpis documents={documents} fiscalStartMonth={companyProfile?.fiscalStartMonth} variant={siteSettings?.landingPageVersion === "avancee" ? "avancee" : "classic"} darkMode={darkMode} />
-        {siteSettings?.landingPageVersion === "avancee" ? (
-          <div className="mb-6 overflow-hidden rounded-3xl border" style={{ background: darkMode ? "linear-gradient(to bottom, #2A3241, #1B212C)" : "linear-gradient(to bottom, #BFDBFE, #FFFFFF)", borderColor: darkMode ? "#3A4353" : adv.line }}>
-            <div className="p-6 sm:p-8">
-              <h1 className="df-display text-xl font-bold sm:text-2xl" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>Bonjour{account?.firstName ? `, ${account.firstName}` : ""} 👋</h1>
-              <p className="mt-1 text-xs" style={{ color: darkMode ? "#9AA5B5" : adv.inkSoft }}>Voici un aperçu de ton activité — crée un nouveau document en un clic.</p>
-              <div className="mt-6 flex flex-wrap gap-3">
-                {["devis", "facture", "commande", "situation"].map((id) => {
-                  const svc = getService(id);
-                  if (!svc) return null;
-                  const SvcIcon = svc.icon;
-                  return (
-                    <button key={id} onClick={() => openNewService(id)} className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold" style={{ background: darkMode ? "#262D3A" : adv.paper, color: darkMode ? "#E8EAED" : adv.ink }}>
-                      <SvcIcon size={15} style={{ color: adv.accent }} /> {svc.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-px sm:grid-cols-3" style={{ background: darkMode ? "#3A4353" : adv.line }}>
-              {[
-                { icon: Inbox, label: "Devis en attente de réponse", value: stats.enAttenteCount, sub: eur(stats.montantEnAttente) },
-                { icon: AlertTriangle, label: "Factures impayées", value: stats.impayeesCount, sub: eur(stats.montantImpaye) },
-                { icon: TrendingUp, label: "Taux de signature des devis", value: stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`, sub: "devis envoyés → signés" },
-              ].map(({ icon: Icon, label, value, sub }) => (
-                <div key={label} className="p-6" style={{ background: darkMode ? "#262D3A" : adv.surface }}>
-                  <Icon size={17} style={{ color: adv.accent }} />
-                  <div className="df-display mt-3 text-2xl font-bold" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{value}</div>
-                  <div className="mt-1 text-xs font-medium" style={{ color: darkMode ? "#9AA5B5" : adv.inkSoft }}>{label}</div>
-                  <div className="df-mono mt-1 text-[11px]" style={{ color: darkMode ? "#9AA5B5" : adv.inkSoft }}>{sub}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard label="Devis en attente de réponse" value={stats.enAttenteCount} sub={eur(stats.montantEnAttente)} color={colors.slate} />
-            <StatCard label="Factures impayées" value={stats.impayeesCount} sub={eur(stats.montantImpaye)} color={colors.brick} />
-            <StatCard label="Taux de signature des devis" value={stats.tauxSignature === null ? "—" : `${stats.tauxSignature}%`} sub="devis envoyés → signés" color={colors.moss} />
-          </div>
-        )}
-
-        <RevenueChart documents={documents} isAdvanced={siteSettings?.landingPageVersion === "avancee"} darkMode={darkMode} />
-
-        {offlineMode && (
-          <div className="mb-6 flex items-start gap-3 rounded-2xl px-4 py-3" style={{ background: `${colors.brick}0D`, border: `1px solid ${colors.brick}40` }}>
-            <AlertTriangle size={16} style={{ color: colors.brick, flexShrink: 0, marginTop: "2px" }} />
-            <div>
-              <p className="text-sm font-medium" style={{ color: colors.brick }}>Mode hors ligne — dernière copie connue</p>
-              <p className="text-xs" style={{ color: colors.inkSoft }}>Impossible de joindre le serveur. Tu consultes une copie de tes documents enregistrée lors de ta dernière connexion — elle peut ne plus être à jour, et aucune modification n'est possible tant que la connexion n'est pas revenue.</p>
-            </div>
-          </div>
-        )}
-
-        {autoFactureNotice && (
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3" style={{ background: `${colors.moss}0D`, border: `1px solid ${colors.moss}40` }}>
-            <div className="flex items-center gap-2">
-              <Check size={16} style={{ color: colors.moss, flexShrink: 0 }} />
-              <p className="text-sm font-medium" style={{ color: colors.moss }}>Devis signé — la facture {autoFactureNotice.docNumber} a été créée automatiquement.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button onClick={() => { openDoc(autoFactureNotice.id); setAutoFactureNotice(null); }} className="text-xs font-semibold underline" style={{ color: colors.moss }}>Ouvrir</button>
-              <button onClick={() => setAutoFactureNotice(null)} style={{ color: colors.inkSoft }}><X size={14} /></button>
-            </div>
-          </div>
-        )}
-        <ReviewRequestNotice notice={reviewNotice} onSend={sendReviewRequest} onDismiss={() => setReviewNotice(null)} />
-
-        {reminders.length > 0 && !hasAccess(account, "pro") && (
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-3" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
-            <span className="flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}>
-              <Lock size={14} /> {reminders.length} relance(s) à faire — fonctionnalité réservée aux forfaits Pro et Entreprise
-            </span>
-            <button onClick={() => setView("pricing")} className="text-xs font-medium underline" style={{ color: colors.brassDark }}>Voir les forfaits</button>
-          </div>
-        )}
-        {reminders.length > 0 && hasAccess(account, "pro") && (
-          <div className="mb-6 overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
-            <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: `${colors.brick}0F`, borderBottom: `1px solid ${colors.line}` }}>
-              <AlertTriangle size={14} style={{ color: colors.brick }} />
-              <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: colors.brick }}>Relances à faire ({reminders.length})</span>
-            </div>
-            {reminders.map(({ doc: d, reason, urgent }, idx) => (
-              <div key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
-                <div style={{ color: d.type === "devis" ? colors.slate : colors.brassDark }}>{d.type === "devis" ? <FileText size={15} /> : <Receipt size={15} />}</div>
-                <button onClick={() => openDoc(d.id)} className="df-mono w-32 shrink-0 text-left text-sm font-medium hover:underline">{d.docNumber}</button>
-                <div className="min-w-0 grow basis-40 truncate text-sm">{d.client.name || <span style={{ color: colors.inkSoft }}>Client non renseigné</span>}</div>
-                <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: urgent ? `${colors.brick}18` : `${colors.brassDark}18`, color: urgent ? colors.brick : colors.brassDark }}>{reason}</span>
-                <a href={reminderMailto({ doc: d })} className="ml-auto flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }}>
-                  <Mail size={12} /> Relancer par email
-                </a>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Filtres */}
-        <div className={siteSettings?.landingPageVersion === "avancee" ? "mb-5 flex flex-wrap items-center gap-3 rounded-2xl p-3" : "mb-4 flex flex-wrap items-center gap-3"} style={siteSettings?.landingPageVersion === "avancee" ? { background: colors.surface, border: `1px solid ${colors.line}` } : {}}>
-          <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}`, minWidth: siteSettings?.landingPageVersion === "avancee" ? "220px" : "auto" }}>
-            <Search size={15} style={{ color: colors.inkSoft }} />
-            <input className="df-input w-full bg-transparent text-sm outline-none" placeholder="Rechercher un client ou un numéro..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-          <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg p-1" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
-            {[["tous", "Tous"], ["devis", "Devis"], ["facture", "Factures"], ["proforma", "Proforma"], ["revision", "Révisions"]].map(([id, label]) => (
-              <button key={id} onClick={() => setTypeFilter(id)} className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: typeFilter === id ? colors.ink : "transparent", color: typeFilter === id ? "white" : colors.inkSoft }}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg p-1" style={{ background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : colors.surface, border: siteSettings?.landingPageVersion === "avancee" ? "none" : `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
-            {[["tous", "Tous"], ["brouillon", "Brouillons"], ["termine", "Terminés"]].map(([id, label]) => (
-              <button key={id} onClick={() => setStageFilter(id)} className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium" style={{ background: stageFilter === id ? colors.ink : "transparent", color: stageFilter === id ? "white" : colors.inkSoft }}>
-                {label}
-              </button>
-            ))}
-          </div>
-          {documents.length > 0 && (
-            <button onClick={exportAccountingCSV} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.moss }} title="Liste de tous les documents avec montants HT/TVA/TTC, à donner à un comptable">
-              <FileSpreadsheet size={15} /> Export comptable
-            </button>
-          )}
-          {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={12} className="animate-spin" /> Enregistrement...</span>}
-
-          {selectedIds.length > 0 && (() => {
-            const selectedDocs = documents.filter((d) => selectedIds.includes(d.id));
-            const sameType = selectedDocs.every((d) => d.type === selectedDocs[0].type);
-            const canMerge = selectedDocs.length >= 2 && sameType && !isLocked;
-            const canBatchExport = selectedDocs.length >= 2 && sameType;
-            return (
-              <div className="ml-auto flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: colors.paper, border: `1px solid ${colors.line}` }}>
-                <span className="text-xs font-medium" style={{ color: colors.inkSoft }}>{selectedIds.length} sélectionné(s)</span>
-                {(selectedDocs[0]?.type === "devis" || selectedDocs[0]?.type === "facture") && (
-                  <button
-                    onClick={() => canMerge && mergeDocuments(selectedIds)}
-                    disabled={!canMerge}
-                    title={!sameType ? "Sélectionne uniquement des devis ou uniquement des factures" : selectedDocs.length < 2 ? "Sélectionne au moins 2 documents" : "Fusionner en un seul document"}
-                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
-                    style={{ background: canMerge ? colors.slate : colors.line, color: canMerge ? "white" : colors.inkSoft, cursor: canMerge ? "pointer" : "not-allowed" }}
-                  >
-                    <GitMerge size={13} /> Fusionner
-                  </button>
-                )}
-                <button
-                  onClick={() => canBatchExport && exportBatchExcel(selectedDocs)}
-                  disabled={!canBatchExport}
-                  title={!sameType ? "Sélectionne des documents du même type (tous devis, ou toutes factures...)" : selectedDocs.length < 2 ? "Sélectionne au moins 2 documents" : "Un seul fichier Excel, un onglet par document"}
-                  className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
-                  style={{ background: canBatchExport ? colors.moss : colors.line, color: canBatchExport ? "white" : colors.inkSoft, cursor: canBatchExport ? "pointer" : "not-allowed" }}
-                >
-                  <FileSpreadsheet size={13} /> Excel
-                </button>
-                <button
-                  onClick={() => canBatchExport && exportBatchPdf(selectedDocs)}
-                  disabled={!canBatchExport || batchExporting}
-                  title={!sameType ? "Sélectionne des documents du même type (tous devis, ou toutes factures...)" : selectedDocs.length < 2 ? "Sélectionne au moins 2 documents" : "Un seul PDF, une page par document"}
-                  className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
-                  style={{ background: canBatchExport ? colors.brass : colors.line, color: canBatchExport ? colors.ink : colors.inkSoft, cursor: canBatchExport ? "pointer" : "not-allowed" }}
-                >
-                  {batchExporting ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} PDF
-                </button>
-                <button onClick={() => setSelectedIds([])} className="text-xs" style={{ color: colors.inkSoft }}>Annuler</button>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Liste */}
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-2xl px-6 py-16 text-center" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
-            <Inbox size={28} style={{ color: colors.inkSoft }} />
-            <p className="df-display mt-3 text-lg font-semibold">{documents.length === 0 ? "Aucun document pour l'instant" : "Aucun résultat"}</p>
-            <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>{documents.length === 0 ? "Crée ton premier devis ou ta première facture." : "Essaie une autre recherche ou un autre filtre."}</p>
-            {documents.length === 0 && (
-              <button onClick={() => openNew("devis")} className="mt-4 flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink }}>
-                <Plus size={15} /> Créer un devis
-              </button>
-            )}
-          </div>
-        ) : siteSettings?.landingPageVersion === "avancee" ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {visibleFiltered.map((d) => {
-              const isRevision = d.type === "revision";
-              const isSituation = d.type === "situation";
-              const totalTTC = isRevision ? computeRevision(d).montantRevise
-                : isSituation ? computeSituation(d).netAPayer
-                : d.type === "contrat" ? (Number(d.montantTotalHT) || 0) * (1 + (Number(d.tva) || 0) / 100)
-                : d.type === "relance" ? (Number(d.montantDu) || 0)
-                : computeTotals(d).totalTTC;
-              const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
-              const TypeIconComp = docTypeIcon(d.type);
-              return (
-                <div key={d.id} className="flex flex-col gap-3 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${selectedIds.includes(d.id) ? colors.brass : colors.line}` }}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor(d.type)}18`, color: docTypeColor(d.type) }}><TypeIconComp size={16} /></div>
-                      <div>
-                        <button onClick={() => openDoc(d.id)} className="df-mono block text-left text-sm font-semibold hover:underline">{d.docNumber}</button>
-                        <div className="text-xs" style={{ color: colors.inkSoft }}>{fr(d.updatedAt)}</div>
-                      </div>
-                    </div>
-                    <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} style={{ accentColor: colors.brass }} aria-label={`Sélectionner ${d.docNumber}`} />
-                  </div>
-                  <div className="truncate text-sm font-medium">{d.client.name || <span style={{ color: colors.inkSoft }}>Client non renseigné</span>}</div>
-                  <div className="df-display text-xl font-bold">{formatMoney(totalTTC, d.currency)}</div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: d.workStage === "termine" ? `${colors.moss}18` : `${colors.inkSoft}18`, color: d.workStage === "termine" ? colors.moss : colors.inkSoft }}>
-                      {d.workStage === "termine" ? <Check size={11} /> : null} {d.workStage === "termine" ? "Terminé" : "Brouillon"}
-                    </span>
-                    <select
-                      value={d.status}
-                      onChange={(e) => updateDoc(d.id, { status: e.target.value })}
-                      className="df-select rounded-full px-2 py-0.5 text-xs font-medium"
-                      style={{ background: `${statusColor(d.status)}1A`, color: statusColor(d.status), border: `1px solid ${statusColor(d.status)}55` }}
-                    >
-                      {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div className="mt-1 flex justify-end gap-3 border-t pt-3" style={{ borderColor: colors.line }}>
-                    <button onClick={() => duplicateDoc(d.id)} disabled={isLocked} title={isLocked ? "Verrouillé — passe à un forfait payant" : "Dupliquer"} style={{ color: colors.inkSoft, opacity: isLocked ? 0.4 : 1, cursor: isLocked ? "not-allowed" : "pointer" }}><Copy size={15} /></button>
-                    <button onClick={() => deleteDoc(d.id)} disabled={isLocked} title={isLocked ? "Verrouillé — passe à un forfait payant" : "Supprimer"} style={{ color: colors.brick, opacity: isLocked ? 0.4 : 1, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
-                  </div>
-                </div>
-              );
-            })}
-            {filtered.length > visibleCount && (
-              <button onClick={() => setVisibleCount((c) => c + PAGE_SIZE)} className="flex items-center justify-center rounded-2xl p-4 text-sm font-medium" style={{ background: colors.surface, border: `1px dashed ${colors.line}`, color: colors.slate }}>
-                Charger {Math.min(PAGE_SIZE, filtered.length - visibleCount)} de plus ({filtered.length - visibleCount} restant{filtered.length - visibleCount > 1 ? "s" : ""})
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-            <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-              Sélectionne plusieurs devis (ou plusieurs factures) pour les <strong>fusionner</strong> en un seul document.
-            </p>
-            {visibleFiltered.map((d, idx) => {
-              const isRevision = d.type === "revision";
-              const isSituation = d.type === "situation";
-              const totalTTC = isRevision ? computeRevision(d).montantRevise
-                : isSituation ? computeSituation(d).netAPayer
-                : d.type === "contrat" ? (Number(d.montantTotalHT) || 0) * (1 + (Number(d.tva) || 0) / 100)
-                : d.type === "relance" ? (Number(d.montantDu) || 0)
-                : computeTotals(d).totalTTC;
-              const statuses = d.type === "devis" ? DEVIS_STATUSES : d.type === "proforma" ? PROFORMA_STATUSES : FACTURE_STATUSES;
-              const TypeIconComp = docTypeIcon(d.type);
-              return (
-                <div key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none", background: selectedIds.includes(d.id) ? "rgba(184,118,62,0.06)" : "transparent" }}>
-                  <input type="checkbox" checked={selectedIds.includes(d.id)} onChange={() => toggleSelect(d.id)} style={{ accentColor: colors.brass }} aria-label={`Sélectionner ${d.docNumber}`} />
-                  <div className="flex items-center gap-2" style={{ color: docTypeColor(d.type) }}>
-                    <TypeIconComp size={16} />
-                  </div>
-                  <button onClick={() => openDoc(d.id)} className="df-mono w-32 shrink-0 text-left text-sm font-medium hover:underline">{d.docNumber}</button>
-                  <div className="min-w-0 grow basis-40 truncate text-sm">{d.client.name || <span style={{ color: colors.inkSoft }}>Client non renseigné</span>}</div>
-                  <div className="df-mono w-28 shrink-0 text-right text-sm font-medium">{formatMoney(totalTTC, d.currency)}</div>
-                  <div className="w-24 shrink-0 text-right text-xs" style={{ color: colors.inkSoft }}>{fr(d.updatedAt)}</div>
-                  <span className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: d.workStage === "termine" ? `${colors.moss}18` : `${colors.inkSoft}18`, color: d.workStage === "termine" ? colors.moss : colors.inkSoft }}>
-                    {d.workStage === "termine" ? <Check size={11} /> : null} {d.workStage === "termine" ? "Terminé" : "Brouillon"}
-                  </span>
-                  <select
-                    value={d.status}
-                    onChange={(e) => updateDoc(d.id, { status: e.target.value })}
-                    className="df-select w-28 shrink-0 rounded-full px-2 py-1 text-xs font-medium"
-                    style={{ background: `${statusColor(d.status)}1A`, color: statusColor(d.status), border: `1px solid ${statusColor(d.status)}55` }}
-                  >
-                    {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <div className="flex shrink-0 gap-2">
-                    <button onClick={() => duplicateDoc(d.id)} disabled={isLocked} title={isLocked ? "Verrouillé — passe à un forfait payant" : "Dupliquer"} style={{ color: colors.inkSoft, opacity: isLocked ? 0.4 : 1, cursor: isLocked ? "not-allowed" : "pointer" }}><Copy size={15} /></button>
-                    <button onClick={() => deleteDoc(d.id)} disabled={isLocked} title={isLocked ? "Verrouillé — passe à un forfait payant" : "Supprimer"} style={{ color: colors.brick, opacity: isLocked ? 0.4 : 1, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
-                  </div>
-                </div>
-
-              );
-            })}
-            {filtered.length > visibleCount && (
-              <div className="flex justify-center border-t px-4 py-3" style={{ borderColor: colors.line }}>
-                <button onClick={() => setVisibleCount((c) => c + PAGE_SIZE)} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.paper, color: colors.slate }}>
-                  Charger {Math.min(PAGE_SIZE, filtered.length - visibleCount)} de plus ({filtered.length - visibleCount} restant{filtered.length - visibleCount > 1 ? "s" : ""})
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
+    <AtelierShell
+      view={view}
+      setView={setView}
+      account={account}
+      saveError={saveError}
+      siteSettings={siteSettings}
+      darkMode={darkMode}
+      setDarkMode={setDarkMode}
+      onLogout={logout}
+      onSwitchOrganization={switchOrganization}
+      onCreateOwnOrg={createMyOwnOrganization}
+      creatingOwnOrg={creatingOwnOrg}
+      onOpenCreate={() => setAtelierCreateOpen(true)}
+      commandPaletteOpen={commandPaletteOpen}
+      setCommandPaletteOpen={setCommandPaletteOpen}
+      paletteCommands={[{ id: "nav-atelier-documents", label: "Aller à Documents", icon: Files, action: () => setView("atelier-documents") }, ...paletteCommands]}
+    >
+      {page}
+      <AtelierCreateSheet open={atelierCreateOpen} onClose={() => { setAtelierCreateOpen(false); setAtelierCreateChantier(null); }} visibleServices={visibleServices} onCreate={createWithChantier} chantierName={atelierCreateChantier} darkMode={darkMode} />
+      {/* Hôte hors écran pour l'export PDF groupé. */}
       <div style={{ position: "fixed", top: 0, left: "-9999px", zIndex: -1 }}>
         {batchExportDoc && (() => {
           const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
@@ -5801,7 +5178,7 @@ function DeviFactAppInner() {
           return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
         })()}
       </div>
-    </div>
+    </AtelierShell>
   );
 }
 
@@ -6720,334 +6097,6 @@ function LegalInfoSettings({ siteSettings, saving, onSave }) {
   );
 }
 
-// Nouvelle version, plus avancée, de la page d'accueil — activable
-// depuis Admin → Apparence du site, sans jamais toucher à l'ancienne
-// (gardée intacte juste après, voir LandingPage) ni à aucune logique
-// des services du site : uniquement de la présentation (HTML/CSS).
-function LandingPageAvancee({ plans, siteSettings, onGetStarted, onLogin, onContact, onLegal }) {
-  const [mobileMenu, setMobileMenu] = useState(false);
-  const visiblePlans = plans.filter((p) => !p.hidden);
-  return (
-    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.surface, color: adv.ink }}>
-      <GlobalStyle />
-
-      {/* Barre de navigation */}
-      <nav className="flex items-center justify-between border-b px-6 py-4 sm:px-10 lg:px-16" style={{ borderColor: colors.line }}>
-        <div className="flex items-center gap-2.5">
-          {siteSettings?.logo ? (
-            <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth || 34, height: siteSettings.logoHeight || 34, objectFit: "contain" }} />
-          ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-display text-sm font-bold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "C"}</div>
-          )}
-          <span className="df-display text-lg font-bold">{siteSettings?.name || "Chantiflow"}</span>
-        </div>
-        <div className="hidden items-center gap-8 text-sm font-medium lg:flex" style={{ color: adv.inkSoft }}>
-          <a href="#fonctionnalites">Fonctionnalités</a>
-          <a href="#tarifs">Tarifs</a>
-          <a href="#faq">FAQ</a>
-          <button onClick={onContact}>Contacter</button>
-        </div>
-        <div className="hidden items-center gap-3 lg:flex">
-          <button onClick={onLogin} className="text-sm font-semibold">Connexion</button>
-          <button onClick={onGetStarted} className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white" style={{ background: adv.accent }}>Essai gratuit</button>
-        </div>
-        <button onClick={() => setMobileMenu((v) => !v)} className="lg:hidden" title="Menu" aria-label="Ouvrir le menu"><Menu size={22} /></button>
-      </nav>
-      {mobileMenu && (
-        <div className="flex flex-col gap-4 border-b px-6 py-5 lg:hidden" style={{ borderColor: colors.line }}>
-          <a href="#fonctionnalites" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Fonctionnalités</a>
-          <a href="#tarifs" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Tarifs</a>
-          <button onClick={onContact} className="text-left text-sm font-medium">Contacter</button>
-          <button onClick={onLogin} className="text-left text-sm font-semibold">Connexion</button>
-          <button onClick={onGetStarted} className="rounded-lg px-4 py-2.5 text-center text-sm font-semibold text-white" style={{ background: adv.accent }}>Essai gratuit</button>
-        </div>
-      )}
-
-      {/* Hero */}
-      <section className="px-6 pb-16 pt-16 text-center sm:px-10 sm:pt-20 lg:px-16">
-        <div className="mx-auto mb-7 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold sm:text-sm" style={{ background: colors.paper, color: adv.inkSoft }}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: colors.moss }} /> Nouveau : logiciel de bureau Mac & Windows
-        </div>
-        <h1 className="df-display mx-auto max-w-3xl text-4xl font-bold leading-tight tracking-tight sm:text-5xl lg:text-[58px]">
-          La gestion administrative, <span style={{ color: adv.accent }}>enfin simple</span> pour votre activité
-        </h1>
-        <p className="mx-auto mt-6 max-w-lg text-base sm:text-lg" style={{ color: adv.inkSoft }}>
-          Devis, factures, bons de commande et bien plus — créés en quelques clics, pensés pour les artisans et indépendants qui n'ont pas de temps à perdre.
-        </p>
-        <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <button onClick={onGetStarted} className="flex w-full items-center justify-center gap-2 rounded-xl px-7 py-3.5 text-base font-semibold text-white sm:w-auto" style={{ background: adv.accent }}>
-            Essayer gratuitement <ArrowRight size={17} />
-          </button>
-          <a href="#fonctionnalites" className="w-full rounded-xl border px-7 py-3.5 text-center text-base font-semibold sm:w-auto" style={{ borderColor: colors.line }}>Voir les fonctionnalités</a>
-        </div>
-        <p className="mt-4 text-xs sm:text-sm" style={{ color: adv.inkSoft }}>Sans carte bancaire — configuré en 2 minutes</p>
-
-        {/* Aperçu produit stylisé */}
-        <div className="mx-auto mt-14 max-w-4xl rounded-2xl border p-2.5 sm:p-3.5" style={{ background: adv.paper, borderColor: adv.line }}>
-          <div className="flex flex-col gap-4 rounded-xl p-5 sm:flex-row sm:p-7" style={{ background: colors.paper }}>
-            <div className="hidden w-32 shrink-0 flex-col gap-2.5 sm:flex">
-              {[70, 90, 60, 80].map((w, i) => <div key={i} className="h-3 rounded" style={{ width: `${w}%`, background: "rgba(27,42,51,0.1)" }} />)}
-            </div>
-            <div className="flex-1 rounded-lg p-5 text-left" style={{ background: colors.surface }}>
-              <div className="mb-4 h-4 w-2/5 rounded" style={{ background: colors.paper }} />
-              <div className="mb-2.5 h-3 w-4/5 rounded" style={{ background: colors.paper }} />
-              <div className="mb-4 h-3 w-3/5 rounded" style={{ background: colors.paper }} />
-              <div className="flex items-center justify-between rounded-lg px-4 py-3 font-bold" style={{ background: colors.paper }}>
-                <span>Total TTC</span><span>3 450,00 €</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Fonctionnalités */}
-      <section id="fonctionnalites" className="px-6 py-20 sm:px-10 lg:px-16" style={{ background: colors.paper }}>
-        <div className="mx-auto mb-14 max-w-xl text-center">
-          <div className="mb-3 text-xs font-bold uppercase tracking-widest sm:text-sm" style={{ color: adv.accent }}>Fonctionnalités</div>
-          <h2 className="df-display text-3xl font-bold tracking-tight sm:text-4xl">Tout ce qu'il faut, rien de superflu</h2>
-          <p className="mt-3 text-base sm:text-lg" style={{ color: adv.inkSoft }}>Chaque outil est pensé pour un vrai besoin du métier, pas pour impressionner.</p>
-        </div>
-        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            { icon: FileText, title: "Devis & factures", desc: "Créés en quelques minutes, envoyés en un clic, toujours professionnels." },
-            { icon: ClipboardCheck, title: "Bons de commande", desc: "Gérez vos commandes fournisseurs sans jongler entre plusieurs outils." },
-            { icon: Users, title: "Suivi clients", desc: "Toutes vos coordonnées et l'historique de chaque client, au même endroit." },
-            { icon: TrendingUp, title: "Révisions de prix", desc: "Calculs automatiques, conformes aux indices officiels du secteur." },
-            { icon: Monitor, title: "Logiciel de bureau", desc: "Disponible aussi en application Mac et Windows, avec mise à jour automatique." },
-            { icon: Lock, title: "Sécurisé", desc: "Vos données et celles de vos clients, protégées et jamais partagées." },
-          ].map(({ icon: Icon, title, desc }) => (
-            <div key={title} className="rounded-2xl p-6" style={{ background: colors.surface }}>
-              <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><Icon size={20} /></div>
-              <h3 className="mb-1.5 text-base font-bold">{title}</h3>
-              <p className="text-sm" style={{ color: adv.inkSoft }}>{desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Tarifs (réutilise la logique existante, juste la présentation) */}
-      <section id="tarifs" className="px-6 py-20 sm:px-10 lg:px-16">
-        <div className="mx-auto mb-14 max-w-xl text-center">
-          <div className="mb-3 text-xs font-bold uppercase tracking-widest sm:text-sm" style={{ color: adv.accent }}>Tarifs</div>
-          <h2 className="df-display text-3xl font-bold tracking-tight sm:text-4xl">Un tarif simple, sans surprise</h2>
-        </div>
-        <div className="mx-auto flex max-w-5xl flex-wrap justify-center gap-5">
-          {visiblePlans.map((plan) => (
-            <div key={plan.id} className="w-full max-w-xs rounded-2xl p-6" style={{ border: `1px solid ${colors.line}` }}>
-              <h3 className="df-display text-lg font-bold">{plan.name}</h3>
-              <div className="my-3">
-                {plan.monthly === null || plan.monthly === undefined ? (
-                  <span className="df-display text-xl font-bold">Sur devis</span>
-                ) : (
-                  <><span className="df-display text-3xl font-bold">{plan.monthly}€</span><span className="text-sm" style={{ color: adv.inkSoft }}> /mois</span></>
-                )}
-              </div>
-              <button onClick={onGetStarted} className="mt-2 w-full rounded-lg py-2.5 text-sm font-semibold" style={{ background: colors.paper, color: adv.ink }}>Choisir</button>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Appel à l'action final */}
-      <section className="mx-6 mb-20 rounded-3xl px-6 py-14 text-center sm:mx-10 sm:px-10 lg:mx-16">
-        <div className="rounded-3xl px-6 py-14" style={{ background: adv.accent }}>
-          <h2 className="df-display text-2xl font-bold text-white sm:text-3xl">Prêt à simplifier votre gestion ?</h2>
-          <p className="mt-3 text-sm sm:text-base" style={{ color: "rgba(255,255,255,0.7)" }}>Essai gratuit, sans carte bancaire, configuré en 2 minutes.</p>
-          <button onClick={onGetStarted} className="mt-7 rounded-xl px-8 py-3.5 text-base font-bold" style={{ background: adv.accent, color: adv.ink }}>Créer mon compte gratuitement</button>
-        </div>
-      </section>
-
-      <footer className="border-t px-6 py-8 text-center text-xs sm:px-10 lg:px-16" style={{ borderColor: colors.line, color: adv.inkSoft }}>
-        © 2026 {siteSettings?.name || "Chantiflow"} — <button onClick={onContact} className="underline" style={{ color: adv.inkSoft }}>Nous contacter</button>
-        {onLegal && <> · <LegalLinks onLegal={onLegal} color={adv.inkSoft} /></>}
-      </footer>
-    </div>
-  );
-}
-
-function LandingPage({ plans, siteSettings, onGetStarted, onLogin, onContact, onLegal }) {
-  const [openFaq, setOpenFaq] = useState(null);
-  const [mobileMenu, setMobileMenu] = useState(false);
-  const visiblePlans = plans.filter((p) => !p.hidden);
-
-  const features = [
-    { icon: Menu, title: "Un service pour chaque besoin", text: "Devis, factures, révisions de prix, bons de commande, avoirs... choisissez le bon document en quelques clics." },
-    { icon: Calculator, title: "Calculs automatiques", text: "TVA multi-taux, remises par ligne ou globales, acomptes : les totaux se recalculent seuls, sans erreur." },
-    { icon: Layers, title: "Descriptions détaillées", text: "Structurez vos devis avec des descriptions et sous-descriptions imbriquées, uniquement si vous en avez besoin." },
-    { icon: PenTool, title: "Signature électronique", text: "Signature saisie, dessinée à l'écran ou importée depuis une image, directement sur le document." },
-    { icon: Download, title: "Export PDF & Excel", text: "Un PDF propre à envoyer tel quel, ou un fichier Excel avec tous les calculs à retravailler." },
-    { icon: Users, title: "Clients & entreprise enregistrés", text: "Vos informations et celles de vos clients, saisies une fois, réutilisées automatiquement partout." },
-  ];
-
-  const faqs = [
-    { q: "Dois-je entrer une carte bancaire pour l'essai gratuit ?", a: "Non. Le forfait Gratuit est accessible sans carte bancaire, avec une limite de 3 devis ou factures pour tester l'outil." },
-    { q: "Puis-je transformer un devis en facture ?", a: "Oui, en un clic. Les lignes, quantités et prix sont repris automatiquement dans la facture générée." },
-    { q: "Le produit est-il conforme à la réforme de facturation électronique ?", a: `${siteSettings.name} génère déjà les mentions légales obligatoires. La connexion à une Plateforme Agréée, obligatoire pour les TPE/PME au 1ᵉʳ septembre 2027, fait partie de la feuille de route.` },
-    { q: "Puis-je changer de forfait à tout moment ?", a: "Oui, depuis votre compte, sans engagement pour le mensuel." },
-  ];
-
-  return (
-    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
-      <GlobalStyle />
-
-      <div className="relative w-full overflow-hidden py-2.5" style={{ background: colors.ink }}>
-        <span className="df-marquee-text df-display text-xl font-semibold sm:text-2xl" style={{ color: colors.brass }}>
-          ✦ Devis, factures, révisions de prix et bien plus — tout pour votre entreprise
-        </span>
-      </div>
-
-      <header className="sticky top-0 z-10" style={{ background: "rgba(233,238,234,0.92)", backdropFilter: "blur(8px)", borderBottom: `1px solid ${colors.line}` }}>
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
-            {siteSettings.logo ? (
-              <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
-            ) : (
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: colors.brass, color: colors.ink }}>{initials(siteSettings.name) || "DF"}</div>
-            )}
-            <span className="df-display text-lg font-semibold tracking-wide">{siteSettings.name}</span>
-          </div>
-          <nav className="hidden items-center gap-6 text-sm font-medium sm:flex" style={{ color: colors.inkSoft }}>
-            <a href="#fonctionnalites">Fonctionnalités</a>
-            <a href="#tarifs">Tarifs</a>
-            <a href="#faq">FAQ</a>
-            <button onClick={onContact}>Contacter</button>
-          </nav>
-          <div className="hidden items-center gap-3 sm:flex">
-            <button onClick={onLogin} className="text-sm font-medium" style={{ color: colors.inkSoft }}>Connexion</button>
-            <button onClick={onGetStarted} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Essai gratuit</button>
-          </div>
-          <button onClick={() => setMobileMenu((v) => !v)} className="sm:hidden" title="Menu" aria-label="Ouvrir le menu"><Menu size={22} /></button>
-        </div>
-        {mobileMenu && (
-          <div className="flex flex-col gap-3 border-t px-6 py-4 sm:hidden" style={{ borderColor: colors.line }}>
-            <a href="#fonctionnalites" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Fonctionnalités</a>
-            <a href="#tarifs" onClick={() => setMobileMenu(false)} className="text-sm font-medium">Tarifs</a>
-            <button onClick={onContact} className="text-left text-sm font-medium">Contacter</button>
-            <button onClick={onLogin} className="text-left text-sm font-medium">Connexion</button>
-            <button onClick={onGetStarted} className="rounded-lg px-4 py-2 text-center text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Essai gratuit</button>
-          </div>
-        )}
-      </header>
-
-      {/* Hero */}
-      <section className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-6 py-16 lg:grid-cols-2 lg:py-24">
-        <div>
-          <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>La gestion administrative des artisans</span>
-          <h1 className="df-display mt-3 text-4xl font-semibold leading-tight sm:text-5xl">Devis, factures, et bien plus — un seul outil pour toute votre administration.</h1>
-          <p className="mt-4 max-w-md text-base" style={{ color: colors.inkSoft }}>{siteSettings.name} réunit devis, factures, révisions de prix et plusieurs autres services dans un seul outil pensé pour les artisans et petites entreprises.</p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button onClick={onGetStarted} className="flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Commencer gratuitement <ArrowRight size={16} /></button>
-            <a href="#tarifs" className="flex items-center gap-2 rounded-lg px-5 py-3 text-sm font-medium" style={{ border: `1px solid ${colors.line}` }}>Voir les tarifs</a>
-          </div>
-          <p className="mt-4 text-xs" style={{ color: colors.inkSoft }}>Aucune carte bancaire requise · Pensé pour la réforme de facturation électronique 2027</p>
-        </div>
-        <div className="rounded-2xl p-6 shadow-sm" style={{ background: colors.surface, border: `1px solid ${colors.line}`, transform: "rotate(1deg)" }}>
-          <div className="mb-3 flex items-center justify-between border-b pb-3" style={{ borderColor: colors.line }}>
-            <div>
-              <div className="df-display text-lg font-semibold uppercase">Devis</div>
-              <div className="df-mono text-xs" style={{ color: colors.inkSoft }}>DEV-2026-014</div>
-            </div>
-            <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.moss}22`, color: colors.moss }}>signé</span>
-          </div>
-          <div className="flex justify-between border-b py-1.5 text-sm" style={{ borderColor: colors.line }}><span>Dépose ancienne robinetterie</span><span className="df-mono">45,00 €</span></div>
-          <div className="flex justify-between border-b py-1.5 text-sm" style={{ borderColor: colors.line }}><span>Mitigeur thermostatique — pose</span><span className="df-mono">180,00 €</span></div>
-          <div className="flex justify-between py-1.5 text-sm"><span>Reprise étanchéité</span><span className="df-mono">90,00 €</span></div>
-          <div className="mt-4 flex justify-end">
-            <div className="relative flex h-28 w-28 items-center justify-center" style={{ transform: "rotate(-5deg)" }}>
-              <div className="absolute inset-0 rounded-full" style={{ border: `2.5px solid ${colors.brass}` }} />
-              <div className="absolute inset-1.5 rounded-full" style={{ border: `1px solid ${colors.brass}` }} />
-              <div className="text-center">
-                <div className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Total TTC</div>
-                <div className="df-mono mt-1 text-lg font-semibold">378,00 €</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Fonctionnalités */}
-      <section id="fonctionnalites" className="border-y py-16" style={{ background: colors.surface, borderColor: colors.line }}>
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mx-auto mb-10 max-w-lg text-center">
-            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Fonctionnalités</span>
-            <h2 className="df-display mt-2 text-2xl font-semibold sm:text-3xl">Tout ce qu'il faut, rien de superflu</h2>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {features.map(({ icon: Icon, title, text }) => (
-              <div key={title} className="rounded-2xl p-5" style={{ border: `1px solid ${colors.line}` }}>
-                <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: colors.paper, color: colors.slate }}><Icon size={18} /></div>
-                <div className="mb-1 text-sm font-semibold">{title}</div>
-                <p className="text-xs" style={{ color: colors.inkSoft }}>{text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Tarifs */}
-      <section id="tarifs" className="py-16">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="mx-auto mb-10 max-w-lg text-center">
-            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Tarifs</span>
-            <h2 className="df-display mt-2 text-2xl font-semibold sm:text-3xl">Un forfait pour chaque taille d'entreprise</h2>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {visiblePlans.map((plan) => (
-              <div key={plan.id} className="flex flex-col overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${plan.id === "essentiel" ? colors.brass : colors.line}`, boxShadow: plan.id === "essentiel" ? `0 0 0 2px ${colors.brass}30` : "none" }}>
-                <div style={{ height: "6px", background: planAccentColor(plan.id) }} />
-                <div className="flex grow flex-col p-5">
-                <div className="df-display text-lg font-bold" style={{ color: planAccentColor(plan.id) }}>{plan.name}</div>
-                <div className="text-xs" style={{ color: colors.inkSoft }}>{plan.tagline}</div>
-                <div className="df-mono my-4">
-                  {plan.monthly === null ? <span className="text-2xl font-semibold">Sur devis</span> : (
-                    <><span className="text-3xl font-extrabold">{plan.monthly}€</span><span className="text-sm" style={{ color: colors.inkSoft }}>/mois</span></>
-                  )}
-                </div>
-                <ul className="mb-5 grow space-y-2 text-sm">
-                  {(plan.features || []).map((f) => <PlanFeatureItem key={f} text={f} accentColor={planAccentColor(plan.id)} />)}
-                </ul>
-                <button onClick={onGetStarted} className="rounded-lg py-2 text-sm font-medium" style={{ background: plan.id === "essentiel" ? colors.brass : colors.ink, color: plan.id === "essentiel" ? colors.ink : "white" }}>Commencer</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ */}
-      <section id="faq" className="border-t py-16" style={{ borderColor: colors.line }}>
-        <div className="mx-auto max-w-2xl px-6">
-          <div className="mb-8 text-center">
-            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>Questions fréquentes</span>
-          </div>
-          {faqs.map((f, idx) => (
-            <div key={f.q} className="border-b" style={{ borderColor: colors.line }}>
-              <button onClick={() => setOpenFaq(openFaq === idx ? null : idx)} className="flex w-full items-center justify-between gap-3 py-4 text-left text-sm font-medium">
-                {f.q} <ChevronDown size={16} className="shrink-0" style={{ transform: openFaq === idx ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
-              </button>
-              {openFaq === idx && <p className="pb-4 text-sm" style={{ color: colors.inkSoft }}>{f.a}</p>}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* CTA final */}
-      <section className="px-6 pb-16">
-        <div className="mx-auto max-w-4xl rounded-2xl p-10 text-center" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>
-          <h2 className="df-display text-2xl font-semibold sm:text-3xl">Prêt à arrêter de perdre du temps sur vos devis ?</h2>
-          <p className="mt-2 text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>Créez votre compte en une minute, sans carte bancaire.</p>
-          <button onClick={onGetStarted} className="mt-6 rounded-lg px-6 py-3 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>Commencer gratuitement</button>
-        </div>
-      </section>
-
-      <footer className="border-t px-6 py-8 text-center text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-        © 2026 {siteSettings.name} — <button onClick={onContact} className="underline" style={{ color: colors.inkSoft }}>Nous contacter</button>
-        {onLegal && <> · <LegalLinks onLegal={onLegal} color={colors.inkSoft} /></>}
-      </footer>
-    </div>
-  );
-}
-
 function ResetPasswordScreen({ siteSettings, onDone }) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -7126,7 +6175,7 @@ function ResetPasswordScreen({ siteSettings, onDone }) {
 // — la personne doit régulariser (choisir mensuel/annuel, payer
 // réellement) pour continuer. Ne s'affiche jamais pour un vrai
 // paiement déjà effectué.
-function RegularizationScreen({ account, plans, siteSettings, onLogout, onContact }) {
+function RegularizationScreen({ account, plans, onLogout, onContact }) {
   const [billing, setBilling] = useState(account.billing || "mensuel");
   const plan = plans.find((p) => p.id === account.plan);
   const price = billing === "annuel" ? plan?.annual : plan?.monthly;
@@ -7496,495 +6545,6 @@ function SaveErrorBanner({ error }) {
         {error.retry && <button onClick={error.retry} className="rounded-md px-3 py-1.5 text-xs font-semibold" style={{ background: "white", color: colors.brick }}>Réessayer</button>}
         {error.dismiss && <button onClick={error.dismiss} className="rounded-md px-2 py-1.5 text-xs" style={{ color: "rgba(255,255,255,0.85)" }}>Fermer</button>}
       </span>
-    </div>
-  );
-}
-
-function TopNav({ view, setView, onNewDevis, onNewFacture, onNewProforma, onNewRevision, onNewService, visibleServices, account, onLogout, onSwitchOrganization, onCreateOwnOrg, creatingOwnOrg, siteSettings, companyProfile, onSetCompanyType, commandPaletteOpen, setCommandPaletteOpen, paletteCommands, darkMode, setDarkMode, saveError = null }) {
-  const [orgMenuOpen, setOrgMenuOpen] = useState(false);
-  const [servicesMenuOpen, setServicesMenuOpen] = useState(false);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
-  useEscapeToClose(orgMenuOpen, () => setOrgMenuOpen(false));
-  useEscapeToClose(servicesMenuOpen, () => setServicesMenuOpen(false));
-  useEscapeToClose(mobileNavOpen, () => setMobileNavOpen(false));
-  useEscapeToClose(desktopMenuOpen, () => setDesktopMenuOpen(false));
-  const mainTabs = [
-    { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
-    { id: "chantiers", label: "Chantiers", icon: MapPinned },
-    { id: "planning-equipe", label: "Planning", icon: Calendar },
-    { id: "clients", label: "Clients", icon: Users },
-    { id: "stock", label: "Gestion de stock", icon: Package },
-    { id: "banque", label: "Banque", icon: Landmark },
-    { id: "company", label: "Mon entreprise", icon: Building2 },
-    { id: "team", label: "Équipe", icon: UserPlus },
-    ...(account?.plan === "entreprise" && account?.role === "owner" ? [{ id: "api", label: "API", icon: KeyRound }] : []),
-  ];
-  const rightTabs = [
-    { id: "pricing", label: "Abonnement", icon: CreditCard },
-    ...(account?.isAdmin ? [{ id: "admin", label: "Admin", icon: Shield }] : []),
-    { id: "account", label: "Mon compte", icon: UserCircle },
-  ];
-  const tabs = [...mainTabs, ...rightTabs];
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const navBg = isAdvanced ? (darkMode ? "linear-gradient(to bottom, #2A3241, #1B212C)" : adv.sidebarBg) : colors.ink;
-  const navLine = darkMode ? "#3A4353" : adv.line;
-  // Pastille active : fond indigo clair + texte indigo en version
-  // avancée (simple, clair, un seul accent) — transparence blanche
-  // sur fond sombre sinon (comportement d'origine, inchangé).
-  const activeTabStyle = isAdvanced
-    ? { background: darkMode ? "#38363F" : adv.accentSoft, color: darkMode ? "#C7C4FF" : adv.accent }
-    : { background: "rgba(255,255,255,0.12)", color: "white" };
-  const inactiveTabStyle = isAdvanced
-    ? { background: "transparent", color: darkMode ? "#9AA5B5" : adv.inkSoft }
-    : { background: "transparent", color: "rgba(255,255,255,0.65)" };
-  function tabStyle(isActive) { return isActive ? activeTabStyle : inactiveTabStyle; }
-  if (isAdvanced) {
-    // Contenu de navigation partagé entre la barre latérale (grand
-    // écran) et le menu déroulant mobile — évite d'avoir deux fois la
-    // même liste à maintenir séparément.
-    const orgSwitcher = (() => {
-      const memberships = account?.memberships || [];
-      const hasOwnOrg = memberships.some((m) => m.role === "owner");
-      return (
-        <div className="relative">
-          <button
-            onClick={() => setOrgMenuOpen((v) => !v)}
-            className="flex w-full items-center justify-between gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium"
-            style={{ background: darkMode ? "#262D3A" : adv.paper, color: darkMode ? "#E8EAED" : adv.ink }}
-            title="Changer d'organisation"
-          >
-            <span className="flex items-center gap-1.5 truncate"><Building2 size={12} /> Organisations</span>
-            <span className="flex shrink-0 items-center gap-1">
-              <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: adv.line }}>{ROLE_LABELS[account.role] || account.role}</span>
-              <ChevronDown size={11} />
-            </span>
-          </button>
-          {orgMenuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
-              <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: darkMode ? "#262D3A" : "white", border: `1px solid ${darkMode ? "#3A4353" : adv.line}` }}>
-                {memberships.map((m) => (
-                  <button key={m.organizationId} onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs" style={{ background: m.organizationId === account.organizationId ? (darkMode ? "#262D3A" : adv.paper) : "transparent", color: darkMode ? "#E8EAED" : adv.ink }}>
-                    <span className="truncate">{m.name || "Organisation"}</span>
-                    <span className="shrink-0 text-xs" style={{ color: adv.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
-                  </button>
-                ))}
-                {!hasOwnOrg && (
-                  <button onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }} disabled={creatingOwnOrg} className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium" style={{ borderColor: adv.line, color: adv.accent }}>
-                    {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      );
-    })();
-
-    const NavItem = ({ id, label, icon: Icon, locked }) => (
-      <button onClick={() => setView(id)} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={tabStyle(view === id)}>
-        <Icon size={15} /> <span className="truncate">{label}</span> {locked && <Lock size={11} className="ml-auto shrink-0" />}
-      </button>
-    );
-
-    return (
-      <>
-        <SaveErrorBanner error={saveError} />
-        {/* ───── Barre latérale — grand écran uniquement ───── */}
-        <div className="df-sidebar-nav hidden lg:flex" style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: "264px", background: navBg, borderRight: `1px solid ${navLine}`, flexDirection: "column", zIndex: 30 }}>
-          <HomeLink setView={setView} className="flex items-center gap-2.5 px-5 py-5">
-            {siteSettings?.logo ? (
-              <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
-            ) : (
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
-            )}
-            <span className="df-display truncate text-sm font-semibold" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
-          </HomeLink>
-
-          <div className="px-4 pb-4">
-            <button onClick={onNewDevis} className="flex w-full items-center justify-center gap-2 rounded-xl py-2 text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>
-              <Plus size={15} /> Nouveau devis
-            </button>
-            <div className="mt-2 grid grid-cols-3 gap-1.5">
-              <button onClick={onNewFacture} className="rounded-lg py-1.5 text-[10px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Facture</button>
-              <button onClick={onNewProforma} className="rounded-lg py-1.5 text-[10px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Proforma</button>
-              <button onClick={onNewRevision} className="rounded-lg py-1.5 text-[10px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }} title="Révision des prix">Révision</button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-3">
-            <div className="flex flex-col gap-0.5">
-              {mainTabs.map(({ id, label, icon: Icon }) =>
-                id === "company" ? (
-                  <div key={id} className="relative flex items-center">
-                    <select
-                      value=""
-                      onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
-                      onClick={() => setView("company")}
-                      className="df-select w-full appearance-none rounded-lg py-1.5 pl-9 pr-3 text-left text-xs font-medium"
-                      style={{ ...tabStyle(view === id), border: "none" }}
-                      title="Mon entreprise"
-                    >
-                      <option value="" disabled hidden style={{ color: adv.ink }}>Mon entreprise</option>
-                      <option value="entreprise" style={{ color: adv.ink }}>Entreprise</option>
-                      <option value="particulier" style={{ color: adv.ink }}>Particulier</option>
-                    </select>
-                    <Building2 size={15} className="pointer-events-none absolute left-3" style={{ color: tabStyle(view === id).color }} />
-                  </div>
-                ) : id === "team" ? (
-                  <Fragment key={id}>
-                    <NavItem id={id} label={label} icon={Icon} />
-                    {orgSwitcher}
-                  </Fragment>
-                ) : id === "stock" ? (
-                  <StockMenu key={id} variant="sidebar" itemClass="px-3 py-1.5 text-xs font-medium" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} iconColor={adv.accent} />
-                ) : (
-                  <NavItem key={id} id={id} label={label} icon={Icon} />
-                )
-              )}
-            </div>
-
-            <div className="my-3 border-t" style={{ borderColor: adv.line }} />
-
-            <div className="flex flex-col gap-0.5">
-              {rightTabs.map(({ id, label, icon: Icon }) => <NavItem key={id} id={id} label={label} icon={Icon} />)}
-            </div>
-          </div>
-
-          <div className="border-t px-3 py-3" style={{ borderColor: adv.line }}>
-            <div className="flex items-center gap-1">
-              <div className="relative flex-1">
-                <button onClick={() => setServicesMenuOpen((v) => !v)} className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-[11px] font-medium" style={{ color: adv.inkSoft }} title="Tous les services">
-                  <Menu size={14} /> Tous les services
-                </button>
-                {servicesMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setServicesMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 z-20 mb-1 max-h-96 w-72 overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: darkMode ? "#262D3A" : "white", border: `1px solid ${darkMode ? "#3A4353" : adv.line}` }}>
-                      <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: adv.inkSoft }}>Tous les services</div>
-                      {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
-                        const SIcon = s.icon;
-                        return (
-                          <button key={s.id} onClick={() => { setServicesMenuOpen(false); onNewService(s.id); }} className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>
-                            <SIcon size={15} className="mt-0.5 shrink-0" style={{ color: adv.accent }} />
-                            <span className="min-w-0">
-                              <span className="block font-medium">{s.label}{!s.implemented && <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-normal" style={{ background: adv.line, color: adv.inkSoft }}>bientôt</span>}</span>
-                              <span className="block truncate" style={{ color: adv.inkSoft }}>{s.description}</span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-              {!window.chantiflowDesktop && siteSettings?.desktopAppEnabled && (siteSettings?.desktopAppUrlWindows || siteSettings?.desktopAppUrlMac) && (
-                <div className="relative">
-                  <button onClick={() => setDesktopMenuOpen((v) => !v)} className="flex items-center gap-1 rounded-lg p-2" style={{ color: adv.inkSoft }} title="Télécharger le logiciel de bureau">
-                    <Monitor size={14} />
-                  </button>
-                  {desktopMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-10" onClick={() => setDesktopMenuOpen(false)} />
-                      <div className="absolute bottom-full right-0 z-20 mb-1 w-52 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: darkMode ? "#262D3A" : "white", border: `1px solid ${darkMode ? "#3A4353" : adv.line}` }}>
-                        {siteSettings.desktopAppUrlWindows && <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: darkMode ? "#E8EAED" : adv.ink }}><Monitor size={15} /> Version Windows</a>}
-                        {siteSettings.desktopAppUrlMac && <a href={siteSettings.desktopAppUrlMac} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: darkMode ? "#E8EAED" : adv.ink }}><Monitor size={15} /> Version Mac</a>}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-              <button onClick={() => setDarkMode((v) => !v)} className="flex items-center gap-1 rounded-lg p-2" style={{ color: adv.inkSoft }} title={darkMode ? "Mode clair" : "Mode sombre"}>{darkMode ? <Sun size={14} /> : <Moon size={14} />}</button>
-              <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg p-2" style={tabStyle(view === "contact")} title="Nous contacter"><Mail size={14} /></button>
-            </div>
-            <button onClick={onLogout} className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ color: adv.inkSoft }}>
-              <LogOut size={15} /> Se déconnecter
-            </button>
-          </div>
-        </div>
-
-        {/* ───── Barre du haut — petit écran uniquement ───── */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3 lg:hidden" style={{ background: navBg, borderBottom: `1px solid ${navLine}` }}>
-          <HomeLink setView={setView} className="flex min-w-0 flex-1 items-center gap-2.5">
-            {siteSettings?.logo ? (
-              <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
-            ) : (
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg df-mono text-xs font-semibold" style={{ background: adv.accent, color: "white" }}>{initials(siteSettings?.name) || "DF"}</div>
-            )}
-            <span className="df-display truncate text-xs font-semibold" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{siteSettings?.name || "Chantiflow"}</span>
-          </HomeLink>
-          <div className="flex shrink-0 items-center gap-2">
-            <button onClick={onNewDevis} className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-medium" style={{ background: adv.accent, color: "white" }}><Plus size={13} /> Devis</button>
-            <button onClick={() => setMobileNavOpen((v) => !v)} className="shrink-0 rounded-lg p-1.5" style={{ color: darkMode ? "#E8EAED" : adv.ink }}>{mobileNavOpen ? <X size={19} /> : <Menu size={19} />}</button>
-          </div>
-        </div>
-        {mobileNavOpen && (
-          <div className="lg:hidden" style={{ background: navBg, borderBottom: `1px solid ${navLine}` }}>
-            <div className="max-h-[calc(70*var(--df-vh))] overflow-y-auto px-3 pb-3">
-              <div className="grid grid-cols-3 gap-1.5 py-2">
-                <button onClick={() => { setMobileNavOpen(false); onNewFacture(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Facture</button>
-                <button onClick={() => { setMobileNavOpen(false); onNewProforma(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }}>Proforma</button>
-                <button onClick={() => { setMobileNavOpen(false); onNewRevision(); }} className="rounded-lg py-2 text-[11px] font-medium" style={{ border: `1px solid ${adv.line}`, color: adv.inkSoft }} title="Révision des prix">Révision</button>
-              </div>
-              <div className="mb-1 mt-1 px-3 text-[10px] font-semibold uppercase tracking-wide" style={{ color: adv.inkSoft }}>Tous les services</div>
-              <div className="mb-2 grid grid-cols-2 gap-1">
-                {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
-                  const SIcon = s.icon;
-                  return (
-                    <button key={s.id} onClick={() => { setMobileNavOpen(false); onNewService(s.id); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-[11px]" style={{ background: darkMode ? "#262D3A" : adv.paper, color: darkMode ? "#E8EAED" : adv.ink }}>
-                      <SIcon size={13} className="shrink-0" style={{ color: adv.accent }} /> <span className="truncate">{s.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="my-2 border-t" style={{ borderColor: adv.line }} />
-              {tabs.map(({ id, label, icon: Icon }) => (
-                id === "stock" ? (
-                  <StockMenu key={id} variant="inline" itemClass="px-3 py-2 text-xs" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} textColor={darkMode ? "#9AA5B5" : adv.inkSoft} onNavigate={() => setMobileNavOpen(false)} />
-                ) : (
-                  <button key={id} onClick={() => { setView(id); setMobileNavOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={tabStyle(view === id)}>
-                    <Icon size={15} /> {label}
-                  </button>
-                )
-              ))}
-              <div className="my-2 border-t" style={{ borderColor: adv.line }} />
-              <button onClick={() => setView("contact")} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={{ color: adv.inkSoft }}><Mail size={15} /> Nous contacter</button>
-              <button onClick={onLogout} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs" style={{ color: adv.inkSoft }}><LogOut size={15} /> Se déconnecter</button>
-            </div>
-          </div>
-        )}
-        <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} commands={paletteCommands} />
-      </>
-    );
-  }
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: navBg }}>
-      <SaveErrorBanner error={saveError} />
-      <div className="flex min-w-0 grow items-center gap-6">
-        <HomeLink setView={setView} className="flex shrink-0 items-center gap-3">
-          {siteSettings?.logo ? (
-            <img src={siteSettings.logo} alt={siteSettings.name} style={{ width: siteSettings.logoWidth, height: siteSettings.logoHeight, objectFit: "contain" }} />
-          ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg df-mono text-sm font-semibold" style={{ background: isAdvanced ? adv.accent : colors.brass, color: isAdvanced ? "white" : colors.ink }}>{initials(siteSettings?.name) || "DF"}</div>
-          )}
-          <span className="df-display text-lg font-semibold tracking-wide text-white">{siteSettings?.name || "Chantiflow"}</span>
-        </HomeLink>
-        <div className="hidden min-w-0 grow items-center justify-between gap-3 lg:flex">
-          <div className="flex items-center gap-1">
-            {mainTabs.map(({ id, label, icon: Icon }) =>
-              id === "company" ? (
-                <div key={id} className="relative flex items-center">
-                  <select
-                    value=""
-                    onChange={(e) => { if (e.target.value) onSetCompanyType(e.target.value); }}
-                    onClick={() => setView("company")}
-                    className="df-select appearance-none rounded-lg py-1.5 pl-8 pr-3 text-xs font-medium"
-                    style={{ ...tabStyle(view === id), border: "none" }}
-                    title="Mon entreprise"
-                  >
-                    <option value="" disabled hidden style={{ color: colors.ink }}>Entreprise/Particulier</option>
-                    <option value="entreprise" style={{ color: colors.ink }}>Entreprise</option>
-                    <option value="particulier" style={{ color: colors.ink }}>Particulier</option>
-                  </select>
-                  <Building2 size={15} className="pointer-events-none absolute left-2.5" style={{ color: tabStyle(view === id).color }} />
-                </div>
-              ) : id === "team" ? (
-                <Fragment key={id}>
-                  <button onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium xl:px-3" style={tabStyle(view === id)}>
-                    <Icon size={15} /> {label}
-                  </button>
-                  {(() => {
-                    const memberships = account?.memberships || [];
-                    const hasOwnOrg = memberships.some((m) => m.role === "owner");
-                    return (
-                      <div className="relative">
-                        <button
-                          onClick={() => setOrgMenuOpen((v) => !v)}
-                          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium"
-                          style={{ background: "rgba(255,255,255,0.1)", color: "white", border: "none" }}
-                          title="Changer d'organisation"
-                        >
-                          <Building2 size={13} /> Organisations
-                          <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(255,255,255,0.15)" }}>{ROLE_LABELS[account.role] || account.role}</span>
-                          <ChevronDown size={12} />
-                        </button>
-                        {orgMenuOpen && (
-                          <>
-                            <div className="fixed inset-0 z-10" onClick={() => setOrgMenuOpen(false)} />
-                            <div className="absolute left-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                              {memberships.map((m) => (
-                                <button
-                                  key={m.organizationId}
-                                  onClick={() => { onSwitchOrganization(m.organizationId); setOrgMenuOpen(false); }}
-                                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
-                                  style={{ background: m.organizationId === account.organizationId ? colors.paper : "transparent", color: colors.ink }}
-                                >
-                                  <span className="truncate">{m.name || "Organisation"}</span>
-                                  <span className="shrink-0 text-xs" style={{ color: colors.inkSoft }}>{ROLE_LABELS[m.role] || m.role}</span>
-                                </button>
-                              ))}
-                              {!hasOwnOrg && (
-                                <button
-                                  onClick={() => { setOrgMenuOpen(false); onCreateOwnOrg(); }}
-                                  disabled={creatingOwnOrg}
-                                  className="flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-medium"
-                                  style={{ borderColor: colors.line, color: colors.brassDark }}
-                                >
-                                  {creatingOwnOrg ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-                                  {creatingOwnOrg ? "Création…" : "Créer mon propre espace"}
-                                </button>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </Fragment>
-              ) : id === "stock" ? (
-                <StockMenu key={id} variant="dropdown" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={tabStyle} iconColor={colors.brassDark} responsiveLabel buttonClass="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium xl:px-3" />
-              ) : (
-                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium xl:px-3" style={tabStyle(view === id)} title={id === "banque" ? label : undefined}>
-                  {/* Banque : icône seule sous 1280 px (xl), pour que la barre tienne sur un portable 1024 px. */}
-                  <Icon size={15} /> {id === "banque" ? <span className="hidden xl:inline">{label}</span> : label}
-                </button>
-              )
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              {rightTabs.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => setView(id)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium xl:px-3" style={tabStyle(view === id)}>
-                  <Icon size={15} /> {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button onClick={onNewDevis} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { background: adv.accent, color: "white" } : { background: colors.brass, color: colors.ink }}>
-          <Plus size={15} /> Devis
-        </button>
-        <button onClick={onNewFacture} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { border: "1px solid rgba(255,255,255,0.3)", color: "white" } : { background: colors.slate, color: "white" }}>
-          <Plus size={15} /> Facture
-        </button>
-        <button onClick={onNewProforma} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { border: "1px solid rgba(255,255,255,0.3)", color: "white" } : { background: colors.moss, color: "white" }} title="Nouvelle facture proforma">
-          <Plus size={15} /> Proforma
-        </button>
-        <button onClick={onNewRevision} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium" style={isAdvanced ? { border: "1px solid rgba(255,255,255,0.3)", color: "white" } : { background: colors.slate, color: "white" }} title="Nouvelle révision des prix">
-          <TrendingUp size={15} /> Révision des prix
-        </button>
-        <div className="relative">
-          <button onClick={() => setServicesMenuOpen((v) => !v)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium" style={{ background: "rgba(255,255,255,0.1)", color: "white" }} title="Tous les services">
-            <Menu size={16} />
-          </button>
-          {servicesMenuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setServicesMenuOpen(false)} />
-              <div className="absolute right-0 top-full z-20 mt-1 max-h-96 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Tous les services</div>
-                {SERVICES.filter((s) => visibleServices.includes(s.id)).map((s) => {
-                  const SIcon = s.icon;
-                  return (
-                    <button
-                      key={s.id}
-                      onClick={() => { setServicesMenuOpen(false); onNewService(s.id); }}
-                      className="flex w-full items-start gap-2.5 px-3 py-2 text-left text-xs hover:bg-black/5"
-                      style={{ color: colors.ink }}
-                    >
-                      <SIcon size={15} className="mt-0.5 shrink-0" style={{ color: colors.brassDark }} />
-                      <span className="min-w-0">
-                        <span className="block font-medium">{s.label}{!s.implemented && <span className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-normal" style={{ background: `${colors.inkSoft}18`, color: colors.inkSoft }}>bientôt</span>}</span>
-                        <span className="block truncate" style={{ color: colors.inkSoft }}>{s.description}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-        {!window.chantiflowDesktop && siteSettings?.desktopAppEnabled && (siteSettings?.desktopAppUrlWindows || siteSettings?.desktopAppUrlMac) && (
-          <div className="relative">
-            <button
-              onClick={() => setDesktopMenuOpen((v) => !v)}
-              className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium"
-              style={{ color: "rgba(255,255,255,0.65)" }}
-              title="Télécharger le logiciel de bureau"
-            >
-              <Monitor size={15} />
-            </button>
-            {desktopMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setDesktopMenuOpen(false)} />
-                <div className="absolute right-0 top-full z-20 mt-1 w-52 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-                  {siteSettings.desktopAppUrlWindows && (
-                    <a href={siteSettings.desktopAppUrlWindows} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: colors.ink }}>
-                      <Monitor size={15} /> Version Windows
-                    </a>
-                  )}
-                  {siteSettings.desktopAppUrlMac && (
-                    <a href={siteSettings.desktopAppUrlMac} download onClick={() => setDesktopMenuOpen(false)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm" style={{ color: colors.ink }}>
-                      <Monitor size={15} /> Version Mac
-                    </a>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-        <button onClick={() => setDarkMode((v) => !v)} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title={darkMode ? "Mode clair" : "Mode sombre"}>
-          {darkMode ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-        <button onClick={() => setView("contact")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={tabStyle(view === "contact")} title="Nous contacter">
-          <Mail size={15} />
-        </button>
-        {account?.isAdmin && (
-          <button onClick={() => setView("admin")} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={tabStyle(view === "admin")} title="Admin">
-            <Shield size={15} />
-          </button>
-        )}
-        <button onClick={onLogout} className="flex items-center gap-1 rounded-lg px-2 py-2 text-xs font-medium" style={{ color: "rgba(255,255,255,0.65)" }} title="Se déconnecter">
-          <LogOut size={15} />
-        </button>
-      </div>
-      <div className="relative w-full lg:hidden">
-        <button
-          onClick={() => setMobileNavOpen((v) => !v)}
-          className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm font-medium"
-          style={{ background: "rgba(255,255,255,0.1)", color: "white" }}
-        >
-          <span className="flex items-center gap-2">
-            {(() => { const Current = tabs.find((t) => t.id === view)?.icon || (isStockView(view) ? Package : LayoutDashboard); return <Current size={15} />; })()}
-            {tabs.find((t) => t.id === view)?.label || (isStockView(view) ? "Gestion de stock" : "Menu")}
-          </span>
-          {mobileNavOpen ? <X size={16} /> : <Menu size={16} />}
-        </button>
-        {mobileNavOpen && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setMobileNavOpen(false)} />
-            <div className="absolute left-0 top-full z-20 mt-1 w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "white", border: `1px solid ${colors.line}` }}>
-              {tabs.map(({ id, label, icon: Icon }) => (
-                id === "stock" ? (
-                  <StockMenu key={id} variant="inline" itemClass="px-3 py-2.5 text-sm" view={view} setView={setView} locked={!hasAccess(account, "pro")} styleFor={(active) => ({ background: active ? colors.paper : "transparent", color: colors.ink, fontWeight: active ? 600 : 400 })} textColor={colors.inkSoft} onNavigate={() => setMobileNavOpen(false)} />
-                ) : (
-                  <button
-                    key={id}
-                    onClick={() => { setView(id); setMobileNavOpen(false); }}
-                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm"
-                    style={{ background: view === id ? colors.paper : "transparent", color: colors.ink, fontWeight: view === id ? 600 : 400 }}
-                  >
-                    <Icon size={15} style={{ color: view === id ? colors.brassDark : colors.inkSoft }} /> {label}
-                  </button>
-                )
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-      <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} commands={paletteCommands} />
     </div>
   );
 }
@@ -8465,10 +7025,10 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
@@ -8489,11 +7049,6 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
           <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: colors.line }}>
             <div>
-              {siteSettings?.landingPageVersion === "avancee" && (
-                <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("revision")}18`, color: docTypeColor("revision") }}>
-                  <TrendingUp size={17} />
-                </div>
-              )}
               <h1 className="df-display text-xl font-semibold">Révision de prix</h1>
               {localDoc.country && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>{localDoc.country}</span>}
               <span className="ml-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.slate}18`, color: colors.slate }}>{sectorLines.length} secteur{sectorLines.length > 1 ? "s" : ""}</span>
@@ -8539,7 +7094,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
 
           <div className="mb-4 flex items-center justify-between">
             <label className="block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Secteurs du chantier</label>
-            <button onClick={addSector} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>
+            <button onClick={addSector} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: colors.ink, color: "white" }}>
               <Plus size={13} /> Ajouter un secteur
             </button>
           </div>
@@ -8593,7 +7148,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                   <div className="mb-3 rounded-lg p-3" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
                     <div className="mb-2 flex items-center justify-between">
                       <label className="text-xs font-semibold" style={{ color: colors.slate }}>Termes de la formule (un par indice utilisé)</label>
-                      <button onClick={() => addTerm(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Terme</button>
+                      <button onClick={() => addTerm(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Terme</button>
                     </div>
                     <div className="space-y-2">
                       {(sec.terms || []).map((t, tIdx) => (
@@ -8707,7 +7262,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
 
                               <div className="mb-2 flex items-center justify-between">
                                 <label className="text-xs" style={{ color: colors.inkSoft }}>Mois inclus dans ce décompte ({totalJours} jour{totalJours > 1 ? "s" : ""} au total)</label>
-                                <button onClick={() => addMois(sec.id, d.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={11} /> Mois</button>
+                                <button onClick={() => addMois(sec.id, d.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={11} /> Mois</button>
                               </div>
                               <div className="space-y-1.5">
                                 {(d.mois || []).map((m, mIdx) => (
@@ -8744,7 +7299,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
                       </div>
                       <div className="mt-2 flex items-center justify-end gap-1.5">
                         <button onClick={() => addBlankRow(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.surface, border: `1px solid ${colors.line}`, color: colors.inkSoft }}><Minus size={12} /> Ligne vide</button>
-                        <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
+                        <button onClick={() => addDecompte(sec.id)} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Décompte</button>
                       </div>
                     </div>
                   )}
@@ -9090,7 +7645,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
     if (localDoc.chantier) rows.push(["Chantier", localDoc.chantier]);
     if (localDoc.periodeDebut || localDoc.periodeFin) rows.push(["Période couverte", [localDoc.periodeDebut ? `du ${fr(localDoc.periodeDebut)}` : "", localDoc.periodeFin ? `au ${fr(localDoc.periodeFin)}` : ""].filter(Boolean).join(" ")]);
     if (localDoc.dateDebut) rows.push(["Début des travaux", fr(localDoc.dateDebut)]);
-    rows.push(["Vaut facture", localDoc.vautFacture === true ? "Oui" : "Non"]);
+    rows.push(["Vaut facture", localDoc.vautFacture === "Oui"]);
     if (localDoc.vautFacture === true) rows.push(["Échéance", fr(new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 30) * 86400000))]);
     if ((localDoc.paymentTerms || "").trim()) rows.push(["Conditions de paiement", localDoc.paymentTerms.trim()]);
     if ((localDoc.visaMaitreOeuvre || "").trim()) rows.push(["Visa du maître d'œuvre", localDoc.visaMaitreOeuvre.trim()]);
@@ -9121,7 +7676,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
           {!hasNextSituation && !isLocked && (
@@ -9129,7 +7684,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
               <ArrowRight size={15} /> Situation suivante
             </button>
           )}
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -9150,11 +7705,6 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
           <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: colors.line }}>
             <div>
-              {siteSettings?.landingPageVersion === "avancee" && (
-                <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("situation")}18`, color: docTypeColor("situation") }}>
-                  <BarChart3 size={17} />
-                </div>
-              )}
               <h1 className="df-display text-xl font-semibold">Situation de travaux N° {localDoc.numeroSituation || 1}</h1>
               {localDoc.previousSituationId && <span className="text-xs" style={{ color: colors.inkSoft }}>Suite de la situation précédente — cumul repris automatiquement</span>}
             </div>
@@ -9216,7 +7766,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                   <input type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dueDays ?? 30} onChange={(e) => patch({ dueDays: Number(e.target.value) || 0 })} />
                 </div>
               )}
-              <div className={localDoc.vautFacture === true ? "" : "sm:col-span-2"}>
+              <div className={localDoc.vautFacture === ""}>
                 <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Conditions de paiement (optionnel)</label>
                 <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : 30 jours fin de mois" value={localDoc.paymentTerms || ""} onChange={(e) => patch({ paymentTerms: e.target.value })} />
               </div>
@@ -9249,7 +7799,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
 
           <div className="mb-3 flex items-center justify-between">
             <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Postes du marché</label>
-            <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Poste</button>
+            <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Poste</button>
           </div>
           <div className="mb-4 space-y-2">
             {localDoc.items.map((l) => {
@@ -9609,10 +8159,10 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -9631,11 +8181,6 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
-          {siteSettings?.landingPageVersion === "avancee" && (
-            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("pv_reception")}18`, color: docTypeColor("pv_reception") }}>
-              <ClipboardCheck size={17} />
-            </div>
-          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Procès-verbal de réception de travaux</h1>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -9698,7 +8243,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
             <div className="mb-6">
               <div className="mb-2 flex items-center justify-between">
                 <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Réserves</label>
-                <button onClick={addReserve} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Réserve</button>
+                <button onClick={addReserve} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Réserve</button>
               </div>
               <div className="space-y-2">
                 {(localDoc.reserves || []).map((r) => (
@@ -10129,10 +8674,10 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -10151,11 +8696,6 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
-          {siteSettings?.landingPageVersion === "avancee" && (
-            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("rapport")}18`, color: docTypeColor("rapport") }}>
-              <Wrench size={17} />
-            </div>
-          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Rapport d'intervention</h1>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -10218,7 +8758,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
           <div className="mb-6">
             <div className="mb-2 flex items-center justify-between">
               <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Matériel utilisé</label>
-              <button onClick={addMateriel} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Matériel</button>
+              <button onClick={addMateriel} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Matériel</button>
             </div>
             <div className="space-y-2">
               {(localDoc.materielsUtilises || []).map((m) => (
@@ -10501,10 +9041,10 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -10530,11 +9070,6 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
-          {siteSettings?.landingPageVersion === "avancee" && (
-            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("contrat")}18`, color: docTypeColor("contrat") }}>
-              <FileSignature size={17} />
-            </div>
-          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Contrat de chantier</h1>
           <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires pour enregistrer le contrat.</p>
 
@@ -10858,10 +9393,10 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -10887,11 +9422,6 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
-          {siteSettings?.landingPageVersion === "avancee" && (
-            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("relance")}18`, color: docTypeColor("relance") }}>
-              <AlertTriangle size={17} />
-            </div>
-          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>{relanceNiveauLabel(localDoc)}{relanceNiveauOf(localDoc) === "mise_en_demeure" ? " de payer" : " de paiement"}</h1>
           <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Les champs marqués * sont obligatoires pour enregistrer ce courrier.</p>
 
@@ -11217,10 +9747,10 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
   return (
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
@@ -11239,11 +9769,6 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
           </div>
         )}
         <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: isLocked ? "none" : "auto", opacity: isLocked ? 0.55 : 1 }}>
-          {siteSettings?.landingPageVersion === "avancee" && (
-            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: `${docTypeColor("planning")}18`, color: docTypeColor("planning") }}>
-              <Calendar size={17} />
-            </div>
-          )}
           <h1 className="df-display mb-6 border-b pb-4 text-xl font-semibold" style={{ borderColor: colors.line }}>Planning de chantier</h1>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -11286,7 +9811,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
 
           <div className="mb-3 flex items-center justify-between">
             <label className="text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tâches * <span className="normal-case tracking-normal" style={{ color: colors.inkSoft }}>(au moins une tâche nommée pour enregistrer)</span></label>
-            <button onClick={addTache} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}><Plus size={12} /> Tâche</button>
+            <button onClick={addTache} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.ink, color: "white" }}><Plus size={12} /> Tâche</button>
           </div>
           <div className="mb-6 space-y-2">
             {(localDoc.taches || []).map((t) => {
@@ -11444,7 +9969,7 @@ function startOfWeek(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.ge
 function addDays(d, n) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
 const WEEKDAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
-function PlanningView({ documents, account, siteSettings, darkMode, isLocked, isViewer }) {
+function PlanningView({ documents, account, isLocked, isViewer }) {
   const [slots, setSlots] = useState(null); // null tant que le chargement n'est pas terminé
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -11453,8 +9978,7 @@ function PlanningView({ documents, account, siteSettings, darkMode, isLocked, is
   const [cursor, setCursor] = useState(() => new Date());
   const [editing, setEditing] = useState(null);
   const canEdit = !isLocked && !isViewer;
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const surface = colors.surface;
 
   useEffect(() => {
     let cancelled = false;
@@ -11572,16 +10096,13 @@ function PlanningView({ documents, account, siteSettings, darkMode, isLocked, is
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          {isAdvanced && (
-            <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><Calendar size={18} /></div>
-          )}
           <h1 className="df-display text-2xl font-semibold">Planning d'équipe</h1>
           <p className="text-sm" style={{ color: colors.inkSoft }}>Place un membre de l'équipe sur un chantier à une date donnée — clique sur un jour pour créer un créneau, sur un créneau pour le modifier.</p>
         </div>
         <div className="flex items-center gap-2">
           {saving && <span className="flex items-center gap-1 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={12} className="animate-spin" /> Enregistrement</span>}
           {canEdit && (
-            <button onClick={() => openNewSlot(new Date())} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: isAdvanced ? adv.accent : colors.brassDark }}>
+            <button onClick={() => openNewSlot(new Date())} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.brassDark }}>
               <Plus size={15} /> Nouveau créneau
             </button>
           )}
@@ -11724,7 +10245,7 @@ function PlanningView({ documents, account, siteSettings, darkMode, isLocked, is
               <div className="flex items-center gap-2">
                 <button onClick={() => setEditing(null)} className="rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>{canEdit ? "Annuler" : "Fermer"}</button>
                 {canEdit && (
-                  <button onClick={saveSlot} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: isAdvanced ? adv.accent : colors.brassDark }}>Enregistrer</button>
+                  <button onClick={saveSlot} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ background: colors.brassDark }}>Enregistrer</button>
                 )}
               </div>
             </div>
@@ -11736,10 +10257,8 @@ function PlanningView({ documents, account, siteSettings, darkMode, isLocked, is
 }
 
 // ===========================================================================
-// Version "Atelier" — coque de navigation, panneau « Créer », pages
-// propres. Tout est additif : rien des versions classique et avancée
-// n'est réutilisé autrement que par composition (pages et éditeurs
-// partagés rendus tels quels dans la coque).
+// Interface Atelier — coque de navigation, panneau « Créer », pages
+// propres ; pages et éditeurs partagés rendus tels quels dans la coque.
 // ===========================================================================
 
 // Les 15 services regroupés par famille, dans l'ordre du panneau « Créer ».
@@ -11959,7 +10478,7 @@ function AtelierShell({ view, setView, account, siteSettings, darkMode, setDarkM
           ))}
           {/* Gestion de stock : même niveau que Clients — « Gestion de stock »
               écrit sur tablette et grand écran, « Stock » sur portable */}
-          <StockMenu variant="dropdown" view={view} setView={setView} locked={stockLocked} styleFor={tabStyle} iconColor={tone.accent} buttonClass="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium lg:px-2 xl:px-3" iconSize={18} responsiveLabel />
+          <StockMenu view={view} setView={setView} locked={stockLocked} styleFor={tabStyle} iconColor={tone.accent} buttonClass="df-at-tap flex items-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium lg:px-2 xl:px-3" iconSize={18} responsiveLabel />
         </nav>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setCommandPaletteOpen(true)} className="df-at-tap flex h-11 items-center gap-2 whitespace-nowrap rounded-lg px-3 text-sm" style={{ color: tone.inkSoft, border: `1px solid ${tone.line}` }} title="Rechercher ou aller quelque part (Ctrl+K)">
@@ -12158,7 +10677,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
       )}
       <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
 
-      <SalesKpis documents={documents} fiscalStartMonth={fiscalStartMonth} variant="atelier" darkMode={darkMode} />
+      <SalesKpis documents={documents} fiscalStartMonth={fiscalStartMonth} darkMode={darkMode} />
 
       <section className="mb-8">
         <h2 className="df-display mb-3 text-base font-semibold">À faire</h2>
@@ -12251,7 +10770,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
         )}
       </section>
 
-      <RevenueChart documents={documents} isAdvanced={false} darkMode={darkMode} />
+      <RevenueChart documents={documents} darkMode={darkMode} />
     </div>
   );
 }
@@ -12865,7 +11384,7 @@ function LandingPageAtelier({ plans, siteSettings, onGetStarted, onLogin, onCont
           <span className="inline-block rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide" style={{ background: tone.accentSoft, color: tone.accent }}>Pour les artisans et entreprises du bâtiment</span>
           <h1 className="df-display mt-4 text-4xl font-bold leading-tight tracking-tight sm:text-5xl">Tes devis, tes factures et tes chantiers, <span style={{ color: tone.accent }}>au même endroit</span></h1>
           <p className="mt-5 max-w-xl text-[17px] leading-relaxed" style={{ color: tone.inkSoft }}>
-            {siteSettings?.name || "Chantiflow"} crée tes documents en quelques minutes, fait signer et payer tes clients en ligne, et suit chaque chantier du devis à l'encaissement. Simple, même si tu n'aimes pas l'informatique.
+            {siteSettings?.name || "Chantiflow"} crée tes documents en quelques minutes, fait signer tes devis en ligne, et suit chaque chantier du devis à l'encaissement. Simple, même si tu n'aimes pas l'informatique.
           </p>
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
             <button onClick={onGetStarted} className="df-at-tap rounded-xl px-6 py-3.5 text-[16px] font-bold" style={{ background: tone.action, color: "#1C2733" }}>Créer mon compte gratuit</button>
@@ -12903,7 +11422,7 @@ function LandingPageAtelier({ plans, siteSettings, onGetStarted, onLogin, onCont
               </div>
               <div className="grid grid-cols-5 border-t px-1 py-2 text-[9px]" style={{ background: tone.surface, borderColor: tone.line, color: tone.inkSoft }}>
                 {[["Accueil", Home, true], ["Documents", Files, false], ["Créer", Plus, "action"], ["Chantiers", HardHat, false], ["Clients", Users, false]].map(([l, Icon, state]) => (
-                  <div key={l} className="flex flex-col items-center gap-0.5" style={{ color: state === true ? tone.accent : tone.inkSoft }}>
+                  <div key={l} className="flex flex-col items-center gap-0.5" style={{ color: state === tone.accent }}>
                     {state === "action" ? <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: tone.action, color: "#1C2733" }}><Icon size={16} /></span> : <Icon size={16} />}
                     {l}
                   </div>
@@ -13110,91 +11629,7 @@ function AtelierRevisionSectorPicker({ revisionCountry, setRevisionCountry, onPi
   );
 }
 
-function ChantiersView({ documents, siteSettings, darkMode, onOpenDoc }) {
-  const [openChantier, setOpenChantier] = useState(null);
-  const chantiers = useMemo(() => {
-    const map = new Map();
-    for (const d of documents) {
-      const nom = (d.chantier || "").trim();
-      if (!nom) continue;
-      if (!map.has(nom)) map.set(nom, { nom, devisTotal: 0, factureTotal: 0, docs: [] });
-      const entry = map.get(nom);
-      entry.docs.push(d);
-      if (d.type === "devis") entry.devisTotal += computeTotals(d).totalTTC;
-      if (d.type === "facture") entry.factureTotal += computeTotals(d).totalTTC;
-    }
-    return [...map.values()].sort((a, b) => b.docs.length - a.docs.length);
-  }, [documents]);
-
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-
-  return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <div className="mb-6">
-        {isAdvanced && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><MapPinned size={18} /></div>
-        )}
-        <h1 className="df-display text-2xl font-semibold">Chantiers</h1>
-        <p className="text-sm" style={{ color: colors.inkSoft }}>Compare le budget prévu (devis) au montant facturé, pour chaque projet — renseigne le champ "Chantier" sur tes documents pour les regrouper ici.</p>
-      </div>
-
-      {chantiers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl px-6 py-16 text-center" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
-          <MapPinned size={28} style={{ color: colors.inkSoft }} />
-          <p className="df-display mt-3 text-lg font-semibold">Aucun chantier suivi pour l'instant</p>
-          <p className="mt-1 max-w-sm text-sm" style={{ color: colors.inkSoft }}>Ouvre un devis ou une facture, renseigne le champ "Chantier" (sous les informations client) avec le même nom sur plusieurs documents pour les voir apparaître groupés ici.</p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {chantiers.map((c) => {
-            const ecart = c.devisTotal - c.factureTotal;
-            const isOpen = openChantier === c.nom;
-            return (
-              <div key={c.nom} className="overflow-hidden rounded-2xl" style={{ background: isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
-                <button onClick={() => setOpenChantier(isOpen ? null : c.nom)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">{c.nom}</div>
-                    <div className="text-xs" style={{ color: colors.inkSoft }}>{c.docs.length} document(s)</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-4">
-                    <div className="text-right">
-                      <div className="text-xs" style={{ color: colors.inkSoft }}>Prévu</div>
-                      <div className="df-mono text-sm font-medium">{eur(c.devisTotal)}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs" style={{ color: colors.inkSoft }}>Facturé</div>
-                      <div className="df-mono text-sm font-medium">{eur(c.factureTotal)}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs" style={{ color: colors.inkSoft }}>Écart</div>
-                      <div className="df-mono text-sm font-semibold" style={{ color: ecart >= 0 ? colors.moss : colors.brick }}>{ecart >= 0 ? "+" : ""}{eur(ecart)}</div>
-                    </div>
-                    <ChevronDown size={16} style={{ color: colors.inkSoft, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-                  </div>
-                </button>
-                {isOpen && (
-                  <div className="border-t px-4 pb-4 pt-2" style={{ borderColor: colors.line }}>
-                    {c.docs.map((d) => (
-                      <button key={d.id} onClick={() => onOpenDoc(d.id)} className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-black/5">
-                        <span className="flex items-center gap-2">
-                          <span className="df-mono font-medium">{d.docNumber}</span>
-                          <span style={{ color: colors.inkSoft }}>{docTypeLabel(d.type)}</span>
-                        </span>
-                        <span className="df-mono" style={{ color: colors.inkSoft }}>{eur(computeTotals(d).totalTTC)}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing, siteSettings, darkMode }) {
+function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, isViewer, onGoToPricing }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [nameError, setNameError] = useState(false);
@@ -13282,24 +11717,6 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
           <Users size={28} style={{ color: colors.inkSoft }} />
           <p className="df-display mt-3 text-lg font-semibold">Aucun client enregistré</p>
           <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Ajoute un client ici, ou enregistre-le directement depuis un devis.</p>
-        </div>
-      ) : siteSettings?.landingPageVersion === "avancee" ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((c) => (
-            <div key={c.id} className="flex flex-col gap-2 rounded-2xl p-4 transition-shadow hover:shadow-md" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
-              <div className="flex items-start justify-between">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full df-display text-sm font-bold" style={{ background: colors.paper, color: colors.ink }}>{initials(c.name) || "?"}</div>
-                <div className="flex gap-2">
-                  <button onClick={() => startEdit(c)} disabled={isLocked} style={{ color: isLocked ? colors.line : colors.slate, cursor: isLocked ? "not-allowed" : "pointer" }}><Pencil size={15} /></button>
-                  <button onClick={() => onDelete(c.id)} disabled={isLocked} title="Supprimer le client" style={{ color: isLocked ? colors.line : colors.brick, cursor: isLocked ? "not-allowed" : "pointer" }}><Trash2 size={15} /></button>
-                </div>
-              </div>
-              <div className="truncate text-sm font-semibold">{c.name}</div>
-              <div className="truncate text-xs" style={{ color: colors.inkSoft }}>{c.email || "—"}</div>
-              <div className="text-xs" style={{ color: colors.inkSoft }}>{c.phone || "—"}</div>
-              <div className="df-mono mt-1 text-xs" style={{ color: colors.brassDark }}>{countDocs(c)} document(s)</div>
-            </div>
-          ))}
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
@@ -13461,52 +11878,33 @@ function productAvailability(p, stockByProduct) {
 
 // Sous-menu « Gestion de stock » dans les navigations (déroulant sur grand
 // écran, liste indentée sur mobile). `variant` : "dropdown" | "inline".
-function StockMenu({ variant, view, setView, locked, styleFor, textColor, iconColor, onNavigate, itemClass = "px-3 py-2 text-xs", buttonClass = "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium", iconSize = 15, responsiveLabel = false }) {
+function StockMenu({ view, setView, locked, styleFor, iconColor, onNavigate, buttonClass = "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium", iconSize = 15, responsiveLabel = false }) {
   const active = isStockView(view);
-  // Déplié d'office quand une page du stock est ouverte (sidebar et mobile).
-  const [open, setOpen] = useState(variant !== "dropdown" && active);
-  useEffect(() => { if (active && variant !== "dropdown") setOpen(true); }, [active, variant]);
-  useEscapeToClose(open && variant === "dropdown", () => setOpen(false));
-  const go = (id) => { setView(id); if (variant === "dropdown") setOpen(false); if (onNavigate) onNavigate(); };
+  const [open, setOpen] = useState(false);
+  useEscapeToClose(open, () => setOpen(false));
+  const go = (id) => { setView(id); setOpen(false); if (onNavigate) onNavigate(); };
   const chevron = locked
     ? <Lock size={11} className="ml-auto shrink-0" />
     : <ChevronDown size={12} className="ml-auto shrink-0" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />;
-  if (variant === "dropdown") {
-    return (
-      <div className="relative">
-        <button onClick={() => setOpen((v) => !v)} className={buttonClass} style={styleFor(active)} aria-expanded={open} title="Gestion de stock">
-          <Package size={iconSize} />
-          {responsiveLabel ? <><span className="truncate lg:hidden xl:inline">Gestion de stock</span><span className="hidden truncate lg:inline xl:hidden">Stock</span></> : <span className="truncate">Gestion de stock</span>}
-          {chevron}
-        </button>
-        {open && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "var(--df-surface, #FFFFFF)", border: "1px solid var(--df-line, #DAE1DC)" }}>
-              {STOCK_MENU.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => go(id)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: view === id ? iconColor : "var(--df-ink, #1B2A33)", fontWeight: view === id ? 600 : 400 }}>
-                  <Icon size={14} style={{ color: iconColor }} /> {label}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    );
-  }
-  // Sidebar (Avancée) et menus mobiles : accordéon, mêmes classes que les
-  // boutons voisins (itemClass), entrées indentées.
   return (
-    <div className="flex w-full flex-col gap-0.5">
-      <button onClick={() => setOpen((v) => !v)} className={`flex w-full items-center gap-2.5 rounded-lg text-left ${itemClass}`} style={styleFor(active && !open)} aria-expanded={open}>
-        <Package size={15} className="shrink-0" /> <span className="truncate">Gestion de stock</span>
+    <div className="relative">
+      <button onClick={() => setOpen((v) => !v)} className={buttonClass} style={styleFor(active)} aria-expanded={open} title="Gestion de stock">
+        <Package size={iconSize} />
+        {responsiveLabel ? <><span className="truncate lg:hidden xl:inline">Gestion de stock</span><span className="hidden truncate lg:inline xl:hidden">Stock</span></> : <span className="truncate">Gestion de stock</span>}
         {chevron}
       </button>
-      {open && STOCK_MENU.map(({ id, label, icon: Icon }) => (
-        <button key={id} onClick={() => go(id)} className={`flex w-full items-center gap-2.5 rounded-lg text-left ${itemClass} pl-9`} style={styleFor(view === id)}>
-          <Icon size={14} className="shrink-0" style={view === id ? undefined : { color: iconColor || textColor }} /> {label}
-        </button>
-      ))}
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg py-1 shadow-lg" style={{ background: "var(--df-surface, #FFFFFF)", border: "1px solid var(--df-line, #DAE1DC)" }}>
+            {STOCK_MENU.map(({ id, label, icon: Icon }) => (
+              <button key={id} onClick={() => go(id)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-black/5" style={{ color: view === id ? iconColor : "var(--df-ink, #1B2A33)", fontWeight: view === id ? 600 : 400 }}>
+                <Icon size={14} style={{ color: iconColor }} /> {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -13585,10 +11983,8 @@ function useOrgMemberLabels(organizationId) {
 }
 
 // Page Entrepôts : liste, création / modification, stock par entrepôt.
-function WarehousesView({ warehouses, products, stockDetail, canEdit, siteSettings, darkMode, onSave, onDelete }) {
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const isAtelier = siteSettings?.landingPageVersion === "atelier";
-  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+function WarehousesView({ warehouses, products, stockDetail, canEdit, onSave, onDelete }) {
+  const surface = colors.surface;
   const card = { background: surface, border: `1px solid ${colors.line}` };
   const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
   const [editing, setEditing] = useState(null);
@@ -13612,7 +12008,7 @@ function WarehousesView({ warehouses, products, stockDetail, canEdit, siteSettin
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Warehouse size={18} /></div>}
+          {<div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: atelier.accentSoft, color: atelier.accent }}><Warehouse size={18} /></div>}
           <h1 className="df-display text-2xl font-semibold">Entrepôts</h1>
           <p className="text-sm" style={{ color: colors.inkSoft }}>Tes lieux de stockage (dépôt, camion, chantier…). Chaque entrée ou sortie de stock est rattachée à un entrepôt ; l'entrepôt par défaut est proposé en premier.</p>
         </div>
@@ -13694,11 +12090,9 @@ function WarehousesView({ warehouses, products, stockDetail, canEdit, siteSettin
 
 // Formulaire d'entrée ou de sortie de stock : plusieurs produits, un
 // entrepôt, une date, un motif / référence.
-function StockMovementView({ kind, products, warehouses, stockDetail, canEdit, siteSettings, darkMode, onSubmit, onGoToProducts, onGoToWarehouses }) {
+function StockMovementView({ kind, products, warehouses, stockDetail, canEdit, onSubmit, onGoToProducts, onGoToWarehouses }) {
   const meta = STOCK_KINDS[kind];
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const isAtelier = siteSettings?.landingPageVersion === "atelier";
-  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+  const surface = colors.surface;
   const card = { background: surface, border: `1px solid ${colors.line}` };
   const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
   const activeProducts = useMemo(() => products.filter((p) => p.is_active).sort((a, b) => a.name.localeCompare(b.name, "fr")), [products]);
@@ -13743,7 +12137,7 @@ function StockMovementView({ kind, products, warehouses, stockDetail, canEdit, s
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
-        {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Icon size={18} /></div>}
+        {<div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: atelier.accentSoft, color: atelier.accent }}><Icon size={18} /></div>}
         <h1 className="df-display text-2xl font-semibold">{meta.verb}</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>{kind === "entree" ? "Réapprovisionnement : les quantités saisies s'ajoutent au stock de l'entrepôt choisi." : "Vente, utilisation sur chantier, casse… : les quantités saisies sont retirées du stock de l'entrepôt choisi."} Un document de stock numéroté est créé et conservé dans l'historique.</p>
       </div>
@@ -13798,10 +12192,8 @@ function StockMovementView({ kind, products, warehouses, stockDetail, canEdit, s
 }
 
 // Historique : documents de stock (mouvements groupés par numéro).
-function StockDocumentsView({ movements, loading, products, warehouses, account, siteSettings, darkMode, onRefresh, onGoToEntry, onGoToExit }) {
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const isAtelier = siteSettings?.landingPageVersion === "atelier";
-  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+function StockDocumentsView({ movements, loading, products, warehouses, account, onRefresh, onGoToEntry, onGoToExit }) {
+  const surface = colors.surface;
   const card = { background: surface, border: `1px solid ${colors.line}` };
   const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
   const members = useOrgMemberLabels(account?.organizationId);
@@ -13847,7 +12239,7 @@ function StockDocumentsView({ movements, loading, products, warehouses, account,
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Archive size={18} /></div>}
+          {<div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: atelier.accentSoft, color: atelier.accent }}><Archive size={18} /></div>}
           <h1 className="df-display text-2xl font-semibold">Documents de stock</h1>
           <p className="text-sm" style={{ color: colors.inkSoft }}>Historique de toutes les entrées, sorties et ajustements, avec la date, l'entrepôt, l'auteur et le motif.</p>
         </div>
@@ -13911,10 +12303,8 @@ const ACCOUNT_DEFAULT_FIELDS = [
 const amount2 = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const isoDay = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
 
-function ComptabiliteView({ documents, products, movements, movementsLoading, companyProfile, canEdit, siteSettings, darkMode, onRefreshMovements, onSaveDefaults, onExportXlsx }) {
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const isAtelier = siteSettings?.landingPageVersion === "atelier";
-  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+function ComptabiliteView({ documents, products, movements, movementsLoading, companyProfile, canEdit, onRefreshMovements, onSaveDefaults, onExportXlsx }) {
+  const surface = colors.surface;
   const card = { background: surface, border: `1px solid ${colors.line}` };
   const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
   const fiscalMonth = Number(companyProfile?.fiscalStartMonth) || 1;
@@ -13964,15 +12354,15 @@ function ComptabiliteView({ documents, products, movements, movementsLoading, co
   function resetFilters() {
     setFrom(isoDay(fiscalYearStart(new Date(), fiscalMonth))); setTo(isoDay(new Date())); setJournal(""); setActivity(""); setSource("");
   }
-  const accentBg = isAtelier ? atelier.accentSoft : adv.accentSoft;
-  const accentFg = isAtelier ? atelier.accent : adv.accent;
+  const accentBg = atelier.accentSoft;
+  const accentFg = atelier.accent;
   const balanced = totals.debit === totals.credit;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: accentBg, color: accentFg }}><Calculator size={18} /></div>}
+          {<div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: accentBg, color: accentFg }}><Calculator size={18} /></div>}
           <h1 className="df-display text-2xl font-semibold">Comptabilité</h1>
           <p className="text-sm" style={{ color: colors.inkSoft }}>Comptes utilisés par tes produits, et écritures générées à partir des factures émises et des entrées de stock. À vérifier avec ton comptable avant tout import.</p>
         </div>
@@ -14101,10 +12491,8 @@ function ComptabiliteView({ documents, products, movements, movementsLoading, co
 }
 
 // Page Produits : filtres, table triable, sélection multiple, actions.
-function ProductsView({ products, stockByProduct, stockDetail = {}, warehouses, warehousePrices = {}, loading, error, importInfo, isLocked, isViewer, account, siteSettings, darkMode, onSave, onDelete, onDuplicate, onToggleActive, onGoToPricing }) {
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
-  const isAtelier = siteSettings?.landingPageVersion === "atelier";
-  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
+function ProductsView({ products, stockByProduct, stockDetail = {}, warehouses, warehousePrices = {}, loading, error, importInfo, isLocked, isViewer, account, siteSettings, onSave, onDelete, onDuplicate, onToggleActive, onGoToPricing }) {
+  const surface = colors.surface;
   const canEdit = !isLocked && !isViewer;
   const emptyFilters = { q: "", warehouse: "", kind: "", nature: "", accountSales: "", accountPurchases: "", tag: "", vat: "", includeInactive: false };
   const [pending, setPending] = useState(emptyFilters);
@@ -14168,7 +12556,7 @@ function ProductsView({ products, stockByProduct, stockDetail = {}, warehouses, 
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          {(isAdvanced || isAtelier) && <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: isAtelier ? atelier.accentSoft : adv.accentSoft, color: isAtelier ? atelier.accent : adv.accent }}><Package size={18} /></div>}
+          {<div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: atelier.accentSoft, color: atelier.accent }}><Package size={18} /></div>}
           <h1 className="df-display text-2xl font-semibold">Produits</h1>
           <p className="text-sm" style={{ color: colors.inkSoft }}>Tes produits et prestations, avec leurs prix, leur stock et leurs comptes comptables. Ils s'insèrent dans tes devis et factures depuis le bouton « Depuis la bibliothèque ».</p>
         </div>
@@ -14447,7 +12835,7 @@ function ProductForm({ product, stock, warehouses = [], warehousePrices = {}, ca
 const ROLE_LABELS = { owner: "Propriétaire", editor: "Éditeur", viewer: "Lecteur", comptable: "Expert-comptable" };
 const ROLE_COLORS = { owner: colors.brassDark, editor: colors.moss, viewer: colors.slate, comptable: colors.brick };
 
-function AccountView({ account, siteSettings }) {
+function AccountView({ account }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -14479,9 +12867,6 @@ function AccountView({ account, siteSettings }) {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
-        {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><UserCircle size={18} /></div>
-        )}
         <h1 className="df-display text-2xl font-semibold">Mon compte</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Tes informations personnelles, saisies à l'inscription.</p>
       </div>
@@ -14549,7 +12934,7 @@ function AccountView({ account, siteSettings }) {
 
         {passwordError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{passwordError}</p>}
         {passwordSaved && <p className="mb-2 text-xs" style={{ color: colors.moss }}>Mot de passe mis à jour.</p>}
-        <button onClick={savePassword} disabled={savingPassword} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white", opacity: savingPassword ? 0.7 : 1 }}>
+        <button onClick={savePassword} disabled={savingPassword} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.ink, color: "white", opacity: savingPassword ? 0.7 : 1 }}>
           {savingPassword ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} Mettre à jour le mot de passe
         </button>
       </div>
@@ -14557,7 +12942,7 @@ function AccountView({ account, siteSettings }) {
   );
 }
 
-function ApiView({ account, siteSettings }) {
+function ApiView({ account }) {
   const [keys, setKeys] = useState(null);
   const [newKeyName, setNewKeyName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -14656,9 +13041,6 @@ function ApiView({ account, siteSettings }) {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
-        {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><KeyRound size={18} /></div>
-        )}
         <h1 className="df-display text-2xl font-semibold">Accès API</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Récupère tes devis, factures et clients depuis un logiciel externe (comptabilité, CRM...).</p>
       </div>
@@ -14670,7 +13052,7 @@ function ApiView({ account, siteSettings }) {
           </div>
           <div className="flex items-center gap-2 rounded-lg p-3" style={{ background: "white", border: `1px solid ${colors.line}` }}>
             <code className="df-mono grow break-all text-xs">{revealedKey}</code>
-            <button onClick={copyKey} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>
+            <button onClick={copyKey} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: colors.ink, color: "white" }}>
               {copied ? "Copié !" : "Copier"}
             </button>
           </div>
@@ -14730,7 +13112,7 @@ function ApiView({ account, siteSettings }) {
   );
 }
 
-function TeamView({ account, siteSettings }) {
+function TeamView({ account }) {
   const [members, setMembers] = useState(null);
   const [membersError, setMembersError] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -14839,9 +13221,6 @@ function TeamView({ account, siteSettings }) {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
-        {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><Users size={18} /></div>
-        )}
         <h1 className="df-display text-2xl font-semibold">Équipe</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>
           {isOwner
@@ -15680,9 +14059,6 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 text-center">
-        {siteSettings?.landingPageVersion === "avancee" && (
-          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: adv.accentSoft, color: adv.accent }}><CreditCard size={18} /></div>
-        )}
         <h1 className="df-display text-2xl font-semibold">Choisir un forfait</h1>
         <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Tarifs indicatifs — à affiner selon l'étude de la concurrence.</p>
       </div>
@@ -15772,15 +14148,15 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
               {isCurrent ? (
                 <button disabled className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.paper, color: colors.inkSoft }}>Forfait actuel</button>
               ) : plan.id === "gratuit" ? (
-                <button onClick={onChooseFree} className="rounded-lg py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>Choisir ce forfait</button>
+                <button onClick={onChooseFree} className="rounded-lg py-2 text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Choisir ce forfait</button>
               ) : plan.id === "entreprise" ? (
-                <a href={`mailto:${siteSettings?.contactEmail || "contact@chantiflow.fr"}?subject=Forfait%20Entreprise`} className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white" }}>Nous contacter</a>
+                <a href={`mailto:${siteSettings?.contactEmail || "contact@chantiflow.fr"}?subject=Forfait%20Entreprise`} className="rounded-lg py-2 text-center text-sm font-medium" style={{ background: colors.ink, color: "white" }}>Nous contacter</a>
               ) : price === 0 ? (
                 <button
                   onClick={async () => { setActivatingPlanId(plan.id); await onChooseZeroPrice(plan.id, billing); setActivatingPlanId(null); }}
                   disabled={activatingPlanId === plan.id}
                   className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium"
-                  style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink, color: "white", opacity: activatingPlanId === plan.id ? 0.7 : 1 }}
+                  style={{ background: colors.ink, color: "white", opacity: activatingPlanId === plan.id ? 0.7 : 1 }}
                 >
                   {activatingPlanId === plan.id ? <Loader2 size={14} className="animate-spin" /> : null} {activatingPlanId === plan.id ? "Activation…" : "Activer (0€)"}
                 </button>
@@ -16141,19 +14517,11 @@ function DesktopAppSettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, darkMode, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Chaque carte utilisateur est repliée par défaut (juste l'essentiel
   // visible) — évite une page immense dès qu'il y a beaucoup de
   // comptes. Un identifiant présent dans cet ensemble = carte dépliée.
-  const [expandedUserIds, setExpandedUserIds] = useState(() => new Set());
-  function toggleUserExpanded(id) {
-    setExpandedUserIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
   const [tab, setTab] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_lastAdminTab")) || "apercu");
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -16181,45 +14549,23 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
     { id: "danger", label: "Zone dangereuse", icon: AlertTriangle },
   ];
 
-  const isAdvanced = siteSettings?.landingPageVersion === "avancee";
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6">
-        <h1 className="df-display flex items-center gap-2 text-2xl font-semibold"><Shield size={22} style={{ color: isAdvanced ? adv.accent : colors.brassDark }} /> Espace Admin</h1>
+        <h1 className="df-display flex items-center gap-2 text-2xl font-semibold"><Shield size={22} style={{ color: colors.brassDark }} /> Espace Admin</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Vue d'ensemble, gestion des forfaits et du compte.</p>
       </div>
 
-      <div className={isAdvanced ? "flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-8" : ""}>
-        {isAdvanced ? (
-          <>
-            {/* Petit écran : barre horizontale déroulante (même principe qu'en classique) — la barre latérale verticale prendrait presque toute la largeur d'un téléphone. */}
-            <div className="flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1 lg:hidden" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
-              {TABS.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? (darkMode ? "#38363F" : adv.accentSoft) : "transparent", color: tab === id ? (darkMode ? "#C7C4FF" : adv.accent) : (darkMode ? "#9AA5B5" : adv.inkSoft) }}>
-                  <Icon size={13} /> {label}
-                </button>
-              ))}
-            </div>
-            {/* Grand écran : vraie barre latérale verticale */}
-            <div className="sticky top-6 hidden w-56 shrink-0 flex-col gap-0.5 lg:flex">
-              {TABS.map(({ id, label, icon: Icon }) => (
-                <button key={id} onClick={() => setTab(id)} className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium" style={{ background: tab === id ? (darkMode ? "#38363F" : adv.accentSoft) : "transparent", color: tab === id ? (darkMode ? "#C7C4FF" : adv.accent) : (darkMode ? "#9AA5B5" : adv.inkSoft) }}>
-                  <Icon size={15} /> {label}
-                </button>
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="mb-6 flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? colors.ink : "transparent", color: tab === id ? "white" : colors.inkSoft }}>
-                <Icon size={13} /> {label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className={isAdvanced ? "min-w-0 flex-1" : "w-full"}>
+      <div>
+        <div className="mb-6 flex w-full items-center gap-1 overflow-x-auto rounded-xl p-1" style={{ background: colors.surface, border: `1px solid ${colors.line}`, WebkitOverflowScrolling: "touch" }}>
+          {TABS.map(({ id, label, icon: Icon }) => (
+            <button key={id} onClick={() => setTab(id)} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium" style={{ background: tab === id ? colors.ink : "transparent", color: tab === id ? "white" : colors.inkSoft }}>
+              <Icon size={13} /> {label}
+            </button>
+          ))}
+        </div>
+        <div className={"w-full"}>
 
       {tab === "apercu" && (
         <>
@@ -16248,19 +14594,11 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
             </div>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            {siteSettings?.landingPageVersion === "avancee" ? (
-              <>
-                <StatCardAvancee icon={UserCircle} label="Ton compte" value={account ? 1 : 0} sub={account?.email || "—"} color={colors.slate} />
-                <StatCardAvancee icon={FileText} label="Documents créés" value={documents.length} sub={eur(totalTTC) + " au total"} color={colors.moss} />
-                <StatCardAvancee icon={Users} label="Clients enregistrés" value={clients.length} sub={companyProfile.name || "Entreprise non renseignée"} color={colors.brassDark} />
-              </>
-            ) : (
-              <>
-                <StatCard label="Ton compte" value={account ? 1 : 0} sub={account?.email || "—"} color={colors.slate} />
-                <StatCard label="Documents créés" value={documents.length} sub={eur(totalTTC) + " au total"} color={colors.moss} />
-                <StatCard label="Clients enregistrés" value={clients.length} sub={companyProfile.name || "Entreprise non renseignée"} color={colors.brassDark} />
-              </>
-            )}
+            <>
+              <StatCard label="Ton compte" value={account ? 1 : 0} sub={account?.email || "—"} color={colors.slate} />
+              <StatCard label="Documents créés" value={documents.length} sub={eur(totalTTC) + " au total"} color={colors.moss} />
+              <StatCard label="Clients enregistrés" value={clients.length} sub={companyProfile.name || "Entreprise non renseignée"} color={colors.brassDark} />
+            </>
           </div>
         </>
       )}
@@ -16279,38 +14617,6 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
 
       {tab === "apparence" && (
         <div className="space-y-3">
-          <CollapsibleSection title="Page d'accueil" subtitle={siteSettings.landingPageVersion === "atelier" ? "Version Atelier" : siteSettings.landingPageVersion === "avancee" ? "Version avancée" : "Version classique"} icon={LayoutDashboard} defaultOpen>
-            <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-              Choisis la page vue par les visiteurs qui ne sont pas encore connectés — les deux restent disponibles, tu peux revenir en arrière à tout moment sans rien perdre.
-            </p>
-            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
-              <button
-                onClick={() => onUpdateSiteSettings({ landingPageVersion: "classique" })}
-                className="rounded-xl p-4 text-left"
-                style={{ border: `2px solid ${siteSettings.landingPageVersion !== "avancee" && siteSettings.landingPageVersion !== "atelier" ? colors.brass : colors.line}`, background: colors.surface }}
-              >
-                <div className="flex items-center gap-2 text-sm font-semibold">Classique {siteSettings.landingPageVersion !== "avancee" && siteSettings.landingPageVersion !== "atelier" && <Check size={14} style={{ color: colors.brass }} />}</div>
-                <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>La page d'origine du site, simple et directe.</p>
-              </button>
-              <button
-                onClick={() => onUpdateSiteSettings({ landingPageVersion: "avancee" })}
-                className="rounded-xl p-4 text-left"
-                style={{ border: `2px solid ${siteSettings.landingPageVersion === "avancee" ? colors.brass : colors.line}`, background: colors.surface }}
-              >
-                <div className="flex items-center gap-2 text-sm font-semibold">Avancée {siteSettings.landingPageVersion === "avancee" && <Check size={14} style={{ color: colors.brass }} />}</div>
-                <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Mise en page plus travaillée — aperçu produit, section fonctionnalités détaillée.</p>
-              </button>
-              <button
-                onClick={() => onUpdateSiteSettings({ landingPageVersion: "atelier" })}
-                className="rounded-xl p-4 text-left"
-                style={{ border: `2px solid ${siteSettings.landingPageVersion === "atelier" ? colors.brass : colors.line}`, background: colors.surface }}
-              >
-                <div className="flex items-center gap-2 text-sm font-semibold">Atelier {siteSettings.landingPageVersion === "atelier" && <Check size={14} style={{ color: colors.brass }} />}</div>
-                <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Interface repensée pour tous : 4 rubriques, bouton « Créer » toujours visible, palette fixe bleu de travail. Pages chantier regroupées.</p>
-              </button>
-            </div>
-          </CollapsibleSection>
-
           <CollapsibleSection title="Apparence du site" subtitle={THEMES[siteSettings.theme]?.label} icon={Palette}>
             <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
               Choisis un thème de couleurs pour tout le site — le changement s'applique immédiatement pour tous les visiteurs.
@@ -16347,126 +14653,8 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
         </div>
       )}
 
-      {tab === "utilisateurs" && siteSettings?.landingPageVersion === "avancee" && (
-        <div>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="df-display text-lg font-semibold">Tous les utilisateurs du site</h2>
-            <div className="flex items-center gap-3">
-              <span className="text-xs" style={{ color: colors.inkSoft }}>{allUsers.length} compte(s)</span>
-              <button onClick={onRefreshUsers} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ background: colors.paper, color: colors.slate }} title="Recharger la liste">
-                <RotateCcw size={12} /> Rafraîchir
-              </button>
-            </div>
-          </div>
-          {allUsersError && (
-            <div className="mb-4 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brick}0D`, color: colors.brick, border: `1px solid ${colors.brick}30` }}>
-              Impossible de charger la liste ({allUsersError}). La migration migration_admin_voir_utilisateurs.sql a-t-elle bien été lancée dans Supabase ?
-            </div>
-          )}
-          {allUsers.length === 0 ? (
-            <p className="text-sm" style={{ color: colors.inkSoft }}>Aucun utilisateur pour l'instant.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {allUsers.map((u) => {
-                const deadline = u.created_at ? new Date(new Date(u.created_at).getTime() + 8 * 7 * 24 * 60 * 60 * 1000) : null;
-                const expired = u.expiresAt && new Date(u.expiresAt) < new Date();
-                const isExpanded = expandedUserIds.has(u.id);
-                return (
-                  <div key={u.id} className="overflow-hidden rounded-2xl" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
-                    <button onClick={() => toggleUserExpanded(u.id)} className="flex w-full items-start justify-between gap-2 p-4 text-left">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold">{u.email}</div>
-                        <div className="text-xs" style={{ color: colors.inkSoft }}>{[u.first_name, u.last_name].filter(Boolean).join(" ") || u.company_name || "—"}</div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {u.is_admin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
-                        {!u.confirmed_at && <AlertTriangle size={14} style={{ color: colors.brick }} />}
-                        <ChevronDown size={16} style={{ color: colors.inkSoft, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-                      </div>
-                    </button>
-                    {isExpanded && (
-                      <div className="px-4 pb-4">
-                        <div className="mb-3 flex flex-wrap items-center gap-2 border-y py-3" style={{ borderColor: colors.line }}>
-                          {u.organizationId ? (
-                            <>
-                              <select
-                                value={u.plan}
-                                onChange={(e) => onSetUserPlan(u.organizationId, e.target.value)}
-                                disabled={savingUserPlanId === u.organizationId}
-                                className="df-select rounded-md px-2 py-1 text-xs"
-                                style={{ border: `1px solid ${colors.line}` }}
-                              >
-                                {PLANS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                              </select>
-                              {savingUserPlanId === u.organizationId && <Loader2 size={12} className="animate-spin" style={{ color: colors.inkSoft }} />}
-                              {u.plan !== "gratuit" && (
-                                <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: u.paymentStatus === "payé" ? `${colors.moss}18` : `${colors.brick}18`, color: u.paymentStatus === "payé" ? colors.moss : colors.brick }}>
-                                  {u.paymentStatus === "payé" ? "Payé" : "Impayé"}
-                                </span>
-                              )}
-                            </>
-                          ) : (
-                            <span className="text-xs" style={{ color: colors.inkSoft }}>Aucune organisation</span>
-                          )}
-                        </div>
 
-                        <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          <label className="text-xs" style={{ color: colors.inkSoft }}>
-                            Payé le
-                            <input
-                              type="date"
-                              className="df-input df-mono mt-0.5 block w-full rounded-md px-2 py-1 text-xs"
-                              style={{ border: `1px solid ${colors.line}` }}
-                              value={u.paidAt ? u.paidAt.slice(0, 10) : ""}
-                              disabled={!u.organizationId}
-                              onChange={(e) => onSetUserPaidAt(u.organizationId, e.target.value)}
-                            />
-                          </label>
-                          <label className="text-xs" style={{ color: colors.inkSoft }}>
-                            Expire le
-                            <input
-                              type="date"
-                              className="df-input df-mono mt-0.5 block w-full rounded-md px-2 py-1 text-xs"
-                              style={{ border: `1px solid ${expired ? colors.brick : colors.line}`, color: expired ? colors.brick : colors.ink }}
-                              value={u.expiresAt ? u.expiresAt.slice(0, 10) : ""}
-                              disabled={!u.organizationId}
-                              onChange={(e) => onSetUserExpiresAt(u.organizationId, e.target.value)}
-                            />
-                            {expired && <span className="text-xs font-medium" style={{ color: colors.brick }}>Expiré</span>}
-                          </label>
-                        </div>
-
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          {u.confirmed_at ? (
-                            <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.moss }}><Check size={13} /> Confirmé</span>
-                          ) : (
-                            <div>
-                              <span className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brick }}><AlertTriangle size={13} /> Non confirmé</span>
-                              {deadline && <span className="block text-xs" style={{ color: colors.inkSoft }}>Suppression auto le {fr(deadline)}</span>}
-                            </div>
-                          )}
-                          {!u.confirmed_at && (
-                            <button
-                              onClick={() => onResendConfirmation(u.id)}
-                              disabled={resendingConfirmationId === u.id}
-                              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white"
-                              style={{ background: colors.slate, opacity: resendingConfirmationId === u.id ? 0.7 : 1 }}
-                            >
-                              {resendingConfirmationId === u.id ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} Relancer
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === "utilisateurs" && siteSettings?.landingPageVersion !== "avancee" && (
+      {tab === "utilisateurs" && (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Tous les utilisateurs du site</span>
@@ -16608,78 +14796,7 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
         </div>
       )}
 
-      {tab === "forfaits" && (siteSettings?.landingPageVersion === "avancee" ? (
-        <div>
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="df-display text-lg font-semibold">Forfaits & tarifs</h2>
-              <p className="text-xs" style={{ color: colors.inkSoft }}>Prix affiché, visibilité publique, filigrane, et nombre de documents autorisés.</p>
-            </div>
-            {savingPlanSettings && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
-          </div>
-          <div className="mb-4 flex items-start gap-2 rounded-xl p-3" style={{ background: `${colors.brick}0D`, border: `1px solid ${colors.brick}30` }}>
-            <AlertTriangle size={13} style={{ color: colors.brick, marginTop: "2px", flexShrink: 0 }} />
-            <p className="text-xs" style={{ color: colors.brick }}>
-              Si tu réduis le nombre de documents d'un forfait en dessous de ce qu'un compte a déjà créé, ce compte se verrouille automatiquement (sans perdre ses documents) jusqu'à passer à un forfait payant.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {plans.map((plan) => (
-              <div key={plan.id} className="rounded-2xl p-4" style={{ background: siteSettings?.landingPageVersion === "avancee" ? (darkMode ? "#262D3A" : adv.surface) : colors.surface, border: `1px solid ${colors.line}` }}>
-                <div className="mb-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold">{plan.name}</div>
-                    <div className="text-xs" style={{ color: colors.inkSoft }}>{plan.tagline}</div>
-                  </div>
-                  <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: plan.hidden ? `${colors.brick}18` : `${colors.moss}18`, color: plan.hidden ? colors.brick : colors.moss }}>{plan.hidden ? "Masqué" : "Visible"}</span>
-                </div>
-                <div className="mb-3 flex flex-wrap items-center gap-3 border-y py-3" style={{ borderColor: colors.line }}>
-                  {plan.monthly !== null ? (
-                    <>
-                      <PriceInput label="Mensuel €" value={plan.monthly} onSave={(v) => onUpdatePlanPrice(plan.id, "monthly", v)} />
-                      <PriceInput label="Annuel €" value={plan.annual} onSave={(v) => onUpdatePlanPrice(plan.id, "annual", v)} />
-                    </>
-                  ) : (
-                    <span className="text-xs" style={{ color: colors.inkSoft }}>Sur devis</span>
-                  )}
-                  <label className="text-xs" style={{ color: colors.inkSoft }}>
-                    Documents max
-                    <input
-                      type="number" min="0" placeholder="Illimité"
-                      className="df-input df-mono mt-0.5 block w-20 rounded-md px-2 py-1 text-sm"
-                      style={{ border: `1px solid ${colors.line}` }}
-                      defaultValue={plan.limit === Infinity ? "" : plan.limit}
-                      key={`${plan.id}-${plan.limit}`}
-                      onBlur={(e) => onUpdatePlanLimit(plan.id, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                    />
-                  </label>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-medium" style={{ color: plan.watermarkEnabled === false ? colors.inkSoft : colors.brassDark }}>Filigrane</span>
-                    <button
-                      onClick={() => onToggleWatermark(plan.id)}
-                      title={plan.watermarkEnabled === false ? "Activer le filigrane pour ce forfait" : "Retirer le filigrane pour ce forfait"}
-                      style={{ color: plan.watermarkEnabled === false ? colors.line : colors.brassDark }}
-                    >
-                      {plan.watermarkEnabled === false ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => onTogglePlan(plan.id)}
-                    title={plan.hidden ? "Rendre visible" : "Masquer ce forfait"}
-                    className="flex items-center gap-1.5"
-                    style={{ color: plan.hidden ? colors.inkSoft : colors.moss }}
-                  >
-                    {plan.hidden ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
+      {tab === "forfaits" && ((
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
             <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Forfaits & tarifs</span>
@@ -16722,11 +14839,11 @@ function AdminView({ account, darkMode, documents, clients, companyProfile, plan
               </label>
               <div className="ml-auto flex items-center gap-4">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium" style={{ color: plan.watermarkEnabled === false ? colors.inkSoft : colors.brassDark }}>Filigrane</span>
+                  <span className="text-xs font-medium" style={{ color: plan.watermarkEnabled === colors.brassDark }}>Filigrane</span>
                   <button
                     onClick={() => onToggleWatermark(plan.id)}
-                    title={plan.watermarkEnabled === false ? "Activer le filigrane pour ce forfait" : "Retirer le filigrane pour ce forfait"}
-                    style={{ color: plan.watermarkEnabled === false ? colors.line : colors.brassDark }}
+                    title={plan.watermarkEnabled === "Retirer le filigrane pour ce forfait"}
+                    style={{ color: plan.watermarkEnabled === colors.brassDark }}
                   >
                     {plan.watermarkEnabled === false ? <ToggleLeft size={22} /> : <ToggleRight size={22} />}
                   </button>
@@ -16956,7 +15073,7 @@ function FormattableField({ value, onChange, placeholder, className, style, mult
 // partir des factures existantes (hors brouillons), montants HT, à la
 // date d'émission. Dessiné en SVG, sans bibliothèque.
 function monthKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
-function RevenueChart({ documents, isAdvanced, darkMode }) {
+function RevenueChart({ documents }) {
   const data = useMemo(() => {
     const now = new Date();
     const months = [];
@@ -16984,11 +15101,11 @@ function RevenueChart({ documents, isAdvanced, darkMode }) {
     return { months, hasPrevious, totalCurrent, totalPrevious, max, delta };
   }, [documents]);
 
-  const surface = isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
-  const ink = isAdvanced && darkMode ? "#E8EAED" : colors.ink;
-  const soft = isAdvanced && darkMode ? "#9AA5B5" : colors.inkSoft;
-  const barColor = isAdvanced ? adv.accent : colors.brass;
-  const prevColor = isAdvanced && darkMode ? "#4A5568" : colors.line;
+  const surface = colors.surface;
+  const ink = colors.ink;
+  const soft = colors.inkSoft;
+  const barColor = colors.brass;
+  const prevColor = colors.line;
   const hasAny = data.totalCurrent > 0 || data.totalPrevious > 0;
 
   // Géométrie du graphique (en unités SVG, redimensionné en largeur)
@@ -17000,7 +15117,7 @@ function RevenueChart({ documents, isAdvanced, darkMode }) {
   const scaleY = (v) => (data.max > 0 ? (v / data.max) * innerH : 0);
 
   return (
-    <div className="mb-6 rounded-2xl p-5" style={{ background: surface, border: `1px solid ${isAdvanced && darkMode ? "#3A4353" : colors.line}` }}>
+    <div className="mb-6 rounded-2xl p-5" style={{ background: surface, border: `1px solid ${colors.line}` }}>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div>
           <div className="text-xs font-medium uppercase tracking-wide" style={{ color: soft }}>Chiffre d'affaires facturé — 12 derniers mois (HT)</div>
@@ -17052,7 +15169,7 @@ function RevenueChart({ documents, isAdvanced, darkMode }) {
 // Quatre indicateurs de ventes (aujourd'hui, 7 derniers jours, mois en
 // cours, exercice en cours). Montants HT, ventes = factures payées, dates
 // et bornes calculées dans src/kpis.js (testé unitairement).
-function SalesKpis({ documents, fiscalStartMonth = 1, variant = "classic", darkMode = false }) {
+function SalesKpis({ documents, fiscalStartMonth = 1, darkMode = false }) {
   const kpis = useMemo(
     () => computeSalesKpis(documents, { now: new Date(), fiscalStartMonth, amountOf: (d) => computeTotals(d).subtotalHT }),
     [documents, fiscalStartMonth],
@@ -17064,18 +15181,16 @@ function SalesKpis({ documents, fiscalStartMonth = 1, variant = "classic", darkM
     { key: "month", label: "Mois en cours", hint: "depuis le 1er du mois" },
     { key: "fiscalYear", label: "Exercice en cours", hint: `depuis le 1er ${monthName}` },
   ];
-  const isAtelier = variant === "atelier";
-  const isAdvanced = variant === "avancee";
-  const tone = isAtelier ? atelierTone(darkMode) : null;
-  const surface = isAtelier ? tone.surface : isAdvanced ? (darkMode ? "#262D3A" : adv.surface) : colors.surface;
-  const ink = isAtelier ? tone.ink : isAdvanced && darkMode ? "#E8EAED" : colors.ink;
-  const soft = isAtelier ? tone.inkSoft : isAdvanced && darkMode ? "#9AA5B5" : colors.inkSoft;
-  const accent = isAtelier ? tone.accent : isAdvanced ? adv.accent : colors.brassDark;
-  const line = isAtelier ? tone.line : isAdvanced && darkMode ? "#3A4353" : colors.line;
+  const tone = atelierTone(darkMode);
+  const surface = tone.surface;
+  const ink = tone.ink;
+  const soft = tone.inkSoft;
+  const accent = tone.accent;
+  const line = tone.line;
   return (
     <div className="mb-6">
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className={isAtelier ? "df-display text-base font-semibold" : "text-xs font-semibold uppercase tracking-widest"} style={{ color: isAtelier ? ink : soft }}>Ventes encaissées (HT)</h2>
+        <h2 className={"df-display text-base font-semibold"} style={{ color: ink }}>Ventes encaissées (HT)</h2>
         <span className="text-[11px]" style={{ color: soft }}>factures payées uniquement</span>
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -17101,21 +15216,6 @@ function StatCard({ label, value, sub, color }) {
   );
 }
 
-function StatCardAvancee({ label, value, sub, color, icon: Icon }) {
-  return (
-    <div className="rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: `${color}18`, color }}>
-        <Icon size={18} />
-      </div>
-      <div className="df-display text-2xl font-bold">{value}</div>
-      <div className="mt-0.5 text-sm font-medium" style={{ color: colors.inkSoft }}>{label}</div>
-      <div className="df-mono mt-2 text-xs" style={{ color }}>{sub}</div>
-    </div>
-  );
-}
-
-// Bandeau "facture payée → proposer une demande d'avis Google". Rien
-// n'est envoyé sans clic sur le bouton ; "Plus tard" ferme simplement.
 function ReviewRequestNotice({ notice, onSend, onDismiss }) {
   if (!notice) return null;
   return (
@@ -18156,7 +16256,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
       <GlobalStyle />
 
-      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: siteSettings?.landingPageVersion === "avancee" ? "0 0 20px 20px" : 0 }}>
+      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-white">
           <ArrowLeft size={16} /> Tableau de bord
         </button>
@@ -18181,7 +16281,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               <ArrowRightLeft size={15} /> Convertir en facture
             </button>
           )}
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.brass, color: siteSettings?.landingPageVersion === "avancee" ? "white" : colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
+          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
             {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
           </button>
           {localDoc.type === "facture" && (
@@ -18234,14 +16334,6 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 
           <div className="mb-8 flex flex-wrap items-start justify-between gap-6 border-b pb-6" style={{ borderColor: colors.line }}>
             <div>
-              {siteSettings?.landingPageVersion === "avancee" && (() => {
-                const TypeIcon = docTypeIcon(localDoc.type);
-                return (
-                  <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl" style={{ background: `${docTypeColor(localDoc.type)}18`, color: docTypeColor(localDoc.type) }}>
-                    <TypeIcon size={20} />
-                  </div>
-                );
-              })()}
               <div className="df-display text-3xl font-semibold uppercase tracking-wide">{docTypeLabel(localDoc.type)}</div>
               <input className="df-input df-mono mt-2 rounded-md px-2 py-1 text-sm" style={inputStyle} value={localDoc.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
               <div className="mt-2 flex items-center gap-1.5">
@@ -18370,7 +16462,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           </div>
 
           <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}`, background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : "transparent" }}>
+            <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}`, background: "transparent" }}>
               <div className="mb-2 flex items-center justify-between">
                 <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Émetteur</div>
                 <div className="no-print flex gap-1 rounded-md p-0.5" style={{ background: colors.paper }}>
@@ -18394,7 +16486,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                 <input className="df-input w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Téléphone" value={localDoc.company.phone} onChange={(e) => patchDeep("company", { phone: e.target.value })} />
               </div>
             </div>
-            <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}`, background: siteSettings?.landingPageVersion === "avancee" ? colors.paper : "transparent" }}>
+            <div className="rounded-xl p-4" style={{ border: `1px solid ${colors.line}`, background: "transparent" }}>
               <div className="mb-2 flex items-center justify-between">
                 <div className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.brassDark }}>{localDoc.type === "commande" ? "Fournisseur *" : localDoc.type === "livraison" ? "Destinataire *" : ["devis", "facture", "acompte", "avoir"].includes(localDoc.type) ? "Client *" : "Client"}</div>
                 <div className="no-print flex gap-1 rounded-md p-0.5" style={{ background: colors.paper }}>
@@ -18844,7 +16936,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               <button onClick={addSection} className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }}>
                 <LayoutList size={13} /> Titre de section
               </button>
-              <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-white" style={{ background: siteSettings?.landingPageVersion === "avancee" ? adv.accent : colors.ink }}>
+              <button onClick={addLine} className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-white" style={{ background: colors.ink }}>
                 <Plus size={13} /> Ligne
               </button>
             </div>
@@ -19149,5 +17241,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, TopNav, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

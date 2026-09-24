@@ -41,7 +41,7 @@ function builder(table) {
 }
 vi.mock("./client.js", () => ({ db: { from: (table) => builder(table), functions: { invoke: async () => ({ data: null, error: null }) }, auth: { getSession: async () => ({ data: { session: null } }) } } }));
 
-import { BankView, AtelierShell, TopNav, newDocument, documentAmountDue, computeTotals } from "./App.jsx";
+import { BankView, AtelierShell, newDocument, documentAmountDue, computeTotals } from "./App.jsx";
 
 beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = () => {}; window.matchMedia = window.matchMedia || (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })); });
 beforeEach(() => { store.rows = []; store.calls = []; });
@@ -175,7 +175,7 @@ describe("import et rapprochement automatique", () => {
   });
 });
 
-describe("navigation : « Banque » dans les trois versions", () => {
+describe("navigation : « Banque » dans le menu", () => {
   const noop = () => {};
   it("Atelier : entrée « Banque » dans le menu Plus", async () => {
     const views = [];
@@ -191,15 +191,4 @@ describe("navigation : « Banque » dans les trois versions", () => {
     expect(views).toEqual(["banque"]);
     await unmount();
   }, 30000);
-  for (const version of ["classique", "avancee"]) {
-    it(`${version} : onglet « Banque » dans la navigation`, async () => {
-      const views = [];
-      const { container, unmount } = await mount(<TopNav view="dashboard" setView={(v) => views.push(v)} account={account} siteSettings={{ name: "Chantiflow", landingPageVersion: version }} darkMode={false} setDarkMode={noop} onLogout={noop} onSwitchOrganization={noop} onCreateOwnOrg={noop} creatingOwnOrg={false} onNewDevis={noop} onNewFacture={noop} onNewProforma={noop} onNewRevision={noop} onNewService={noop} visibleServices={[]} companyProfile={{}} onSetCompanyType={noop} commandPaletteOpen={false} setCommandPaletteOpen={noop} paletteCommands={[]} />);
-      const banque = buttons(container).filter((b) => b.textContent.trim() === "Banque");
-      expect(banque.length).toBeGreaterThan(0);
-      await click(banque[0]);
-      expect(views).toEqual(["banque"]);
-      await unmount();
-    }, 30000);
-  }
 });

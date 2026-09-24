@@ -19,8 +19,8 @@ describe("cache des paramètres du site", () => {
   });
   it("colonnes de la table → paramètres, avec les valeurs par défaut", () => {
     const s = siteSettingsFromRow({ id: 1, landing_page_version: "atelier", legal_info: { rcs: "x" } });
-    expect(s).toMatchObject({ landingPageVersion: "atelier", theme: "classique", name: "Chantiflow", legalInfo: { rcs: "x" } });
-    expect(siteSettingsFromRow({ id: 1 }).landingPageVersion).toBe("classique");
+    expect(s).toMatchObject({ theme: "classique", name: "Chantiflow", legalInfo: { rcs: "x" } });
+    expect(s.landingPageVersion).toBeUndefined(); // une seule interface : le réglage n'existe plus
     // Commission Stripe Connect : nombre, 0 si absente ou invalide
     expect(siteSettingsFromRow({ id: 1, connect_fee_percent: "2.50" }).connectFeePercent).toBe(2.5);
     expect(siteSettingsFromRow({ id: 1 }).connectFeePercent).toBe(0);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// Version d'interface au démarrage : jamais une autre version que celle
-// configurée, même un instant, même si le serveur ne répond pas au premier
+// Démarrage : écran d'attente puis Atelier, jamais un autre rendu
+// même un instant, même si le serveur ne répond pas au premier
 // essai. Application complète avec une base simulée.
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import React, { act } from "react";
@@ -78,7 +78,7 @@ async function openApp() {
 }
 
 describe("démarrage dans la bonne version", () => {
-  it("première visite, réponse lente : uniquement l'écran de chargement jusqu'à la réponse, puis Atelier, et la version est mémorisée", async () => {
+  it("première visite, réponse lente : uniquement l'écran de chargement jusqu'à la réponse, puis Atelier, et les réglages sont mémorisés", async () => {
     state.delayMs = 400;
     const { container, unmount } = await openApp();
     expect(isSpinnerOnly(container)).toBe(true);
@@ -86,7 +86,7 @@ describe("démarrage dans la bonne version", () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 200)); });
     expect(isSpinnerOnly(container)).toBe(true); // toujours rien d'autre que le chargement
     expect(await waitFor(() => isAtelierShown(container))).toBe(true);
-    expect(JSON.parse(localStorage.getItem("devifact_site_settings")).landingPageVersion).toBe("atelier");
+    expect(JSON.parse(localStorage.getItem("devifact_site_settings")).theme).toBe("classique"); // réglages mémorisés (une seule interface : plus de version)
     await unmount();
   }, 30000);
   it("version mémorisée « atelier » et serveur qui ne répond pas : Atelier dès le premier rendu, jamais Classique", async () => {

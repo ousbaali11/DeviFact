@@ -82,7 +82,7 @@ beforeEach(() => {
 
 const buttons = (c) => [...c.querySelectorAll("button")].map((b) => b.textContent.trim());
 const isLanding = (c) => buttons(c).includes("Essayer gratuitement") || buttons(c).includes("Connexion");
-const isDashboard = (c) => buttons(c).includes("Tableau de bord") && !isLanding(c);
+const isDashboard = (c) => !!c.querySelector('button[title="Menu"]') && !isLanding(c);
 const isSpinnerOnly = (c) => !!c.querySelector(".animate-spin") && c.querySelectorAll("button").length === 0;
 async function waitFor(check, timeout = 10000) {
   const start = Date.now();
