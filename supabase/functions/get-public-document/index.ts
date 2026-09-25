@@ -103,6 +103,8 @@ serve(async (req) => {
     // (adresse de l'expert-comptable…) : jamais transmis au client.
     if (publicDoc.company && typeof publicDoc.company === "object") {
       const { accountingExport: _ax, accounting: _ac, googleReviewUrl: _gr, fiscalStartMonth: _fm, attestations: _at, ...company } = publicDoc.company;
+      // Coordonnées bancaires : seulement sur un document à payer (jamais sur un devis).
+      if (!isPayableDoc(doc)) { delete company.iban; delete company.bic; }
       publicDoc.company = company;
     }
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name, logo_url").limit(1).maybeSingle();

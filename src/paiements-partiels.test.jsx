@@ -102,7 +102,7 @@ describe("PDF et éditeur de situation valant facture", () => {
   it("éditeur : bloc « Paiements reçus » seulement quand la situation vaut facture", async () => {
     const noop = () => {};
     const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-    const props = { documents: [], saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow", landingPageVersion: "classique" }, isLocked: false, isViewer: false, onChange: noop, onFinalize: noop, onBack: noop, onCreateNext: noop, onGoToPricing: noop, clients: [] };
+    const props = { documents: [], saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow" }, isLocked: false, isViewer: false, onChange: noop, onFinalize: noop, onBack: noop, onCreateNext: noop, onGoToPricing: noop, clients: [] };
     const a = await mount(<SituationEditor {...props} doc={situation()} />);
     expect(a.container.querySelector(".print-payments-editor")).toBeTruthy();
     await a.unmount();

@@ -13,7 +13,7 @@ beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = 
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const profile = { ...emptyCompanyProfile(), name: "Bâti Plus", iban: "FR76 1234", bic: "AGRIFRPP" };
 const full = (extra = {}) => ({ ...newRelanceFormelleDocument([]), docNumber: "MED-007", issueDate: "2026-09-13", factureRef: "FAC-014", factureDate: "2026-07-01", montantDu: "1200", dateEcheanceOrigine: "2026-08-01", company: { ...newRelanceFormelleDocument([]).company, name: "Bâti Plus", address: "1 rue des Lilas" }, client: { ...newRelanceFormelleDocument([]).client, name: "Client SAS", address: "2 av. du Port" }, ...extra });
 // Texte rendu, espaces insécables (formatage des montants) ramenées à des espaces simples.

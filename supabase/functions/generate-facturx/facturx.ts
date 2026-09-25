@@ -271,6 +271,13 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
     });
     if (qty <= 0 && lineTotal !== 0) warnings.push(`Ligne ${lineIndex} : quantité nulle mais montant non nul (prix unitaire net mis à 0)`);
   }
+  // Remise en montant : résidu d'arrondi absorbé sur la dernière ligne (même règle que computeTotals / computeDocTotals).
+  if (doc.globalDiscountMode === "amount" && lines.length && globalRate > 0) {
+    const brutRounded = round2(items.filter(isCountedLine).reduce((s: number, it: any) => s + round2(lineNetOf(it)), 0));
+    const target = round2(brutRounded - Math.min(discountValue, brutRounded));
+    const diff = round2(target - round2(lines.reduce((s, l) => s + l.lineTotal, 0)));
+    if (diff !== 0) { const last = lines[lines.length - 1]; last.lineTotal = round2(last.lineTotal + diff); last.netUnitPrice = last.quantity > 0 ? round4(last.lineTotal / last.quantity) : 0; }
+  }
   if (!lines.length) missing.push("Au moins une ligne de prestation");
   if ((Number(it0(items)?.discount) || 0) < 0) warnings.push("Remise négative détectée");
 

@@ -13,7 +13,7 @@ beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = 
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const profile = { ...emptyCompanyProfile(), name: "Bâti Plus", insuranceName: "SMABTP", insurancePolicy: "P-42", insuranceZone: "France", mediatorName: "CM2C", mediatorContact: "https://cm2c.net" };
 const full = (extra = {}) => ({ ...newContratChantierDocument([]), docNumber: "CTR-002", issueDate: "2026-09-13", objetTravaux: "Rénovation de la toiture", lieuTravaux: "12 rue des Lilas, 69000 Lyon", montantTotalHT: "20000", company: { ...newContratChantierDocument([]).company, name: "Bâti Plus", siret: "123" }, client: { ...newContratChantierDocument([]).client, name: "M. Martin" }, signatureClient: { name: "", date: "2026-09-13" }, ...extra });
 const textOf = (html) => new DOMParser().parseFromString(html, "text/html").body.textContent.replace(/[  ]/g, " ");

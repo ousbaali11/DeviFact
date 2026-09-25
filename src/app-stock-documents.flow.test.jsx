@@ -21,7 +21,7 @@ const kv = {
 const fixtures = {
   profiles: () => [{ id: USER.id, email: USER.email, first_name: "Test", last_name: "T", is_admin: false, company_name: "" }],
   organization_members: () => [{ role: "owner", organization_id: ORG, organizations: { id: ORG, name: "Test SARL", plan: "pro", billing_cycle: "mensuel", payment_status: "payé", activated_via_free_button: false, expires_at: null, subscription_cancelled: false } }],
-  site_settings: () => [{ id: 1, name: "Chantiflow", theme: "classique" }],
+  site_settings: () => [{ id: 1, name: "Chantiflow" }],
   kv_store: (f) => (f.key in kv ? [{ value: kv[f.key] }] : []),
   products: () => [
     { id: P1, organization_id: ORG, name: "Carrelage 60x60", reference: "CAR-60", unit: "m²", kind: "produit", is_active: true, quantity_restricted: false, sale_price_ht: 25, sale_vat_rate: 20, sale_price_ttc: 30, purchase_price_ht: 10, purchase_vat_rate: 20, tags: [] },

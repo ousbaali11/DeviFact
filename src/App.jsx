@@ -25,11 +25,9 @@ import {
   Filter, MoreHorizontal, Paperclip, QrCode, Warehouse, Archive, ArrowDownToLine, ArrowUpFromLine,
 } from "lucide-react";
 
-// Chaque couleur pointe vers une variable CSS (définie par le thème
-// actif, voir THEMES et ThemeStyleInjector) plutôt qu'une valeur figée
-// — ainsi, changer de thème depuis Admin met à jour tout le site
-// instantanément, sans devoir toucher aux centaines d'endroits qui
-// utilisent déjà "colors.xxx".
+// Chaque couleur pointe vers une variable CSS (posée sur body par
+// GlobalStyle, mode sombre compris) plutôt qu'une valeur figée — les
+// centaines d'endroits qui utilisent "colors.xxx" suivent la palette.
 const colors = {
   ink: "var(--df-ink, #1B2A33)",
   inkSoft: "var(--df-ink-soft, #4A5B63)",
@@ -43,13 +41,12 @@ const colors = {
   line: "var(--df-line, #DAE1DC)",
 };
 
-// Palette de l'interface Atelier — fixe, indépendante des thèmes de
-// l'admin. Codes couleur du métier : bleu de
+// Palette de l'interface — fixe. Codes couleur du métier : bleu de
 // travail pour l'accent, orange sécurité réservé à l'action « Créer »,
 // gris béton en fond. Tous les couples texte/fond restent au-dessus de
-// 4,5:1 de contraste. Les variables CSS --df-* sont redéfinies sous
-// body.df-atelier (voir GlobalStyle) pour que les pages et éditeurs
-// partagés prennent la même palette sans être modifiés.
+// 4,5:1 de contraste. Les variables CSS --df-* sont posées sur body (voir
+// GlobalStyle) pour que les pages et éditeurs partagés prennent la même
+// palette sans être modifiés.
 const atelier = {
   ink: "#1C2733",
   inkSoft: "#5A6B78",
@@ -83,129 +80,6 @@ const atelier = {
 // Couleurs Atelier selon le mode clair/sombre de l'appareil.
 function atelierTone(darkMode) {
   return darkMode ? atelier.dark : atelier;
-}
-
-// Bibliothèque de thèmes — valeurs réelles utilisées par chaque
-// variable CSS ci-dessus. "classique" reprend exactement les couleurs
-// d'origine du site (rien ne change si l'admin ne touche à rien).
-const THEMES = {
-  classique: {
-    label: "Classique",
-    description: "Le style d'origine du site — encre marine et laiton.",
-    values: { ink: "#1B2A33", inkSoft: "#4A5B63", paper: "#E9EEEA", surface: "#FFFFFF", brass: "#B8763E", brassDark: "#8F5C2E", slate: "#3E5C6E", moss: "#5B7A55", brick: "#A6483B", line: "#DAE1DC" },
-  },
-  moderne: {
-    label: "Moderne",
-    description: "Épuré et contemporain — bleu clair et gris doux.",
-    values: { ink: "#1E2A3A", inkSoft: "#5B6B7F", paper: "#EEF2F7", surface: "#FFFFFF", brass: "#3B6FD6", brassDark: "#2C55AC", slate: "#4A6FA5", moss: "#3F9463", brick: "#D65A4A", line: "#DDE6F0" },
-  },
-  chantier: {
-    label: "Chantier",
-    description: "Inspiré des outils du métier — orange chaleureux et beige.",
-    values: { ink: "#332B22", inkSoft: "#6B5D4A", paper: "#F3ECE0", surface: "#FFFFFF", brass: "#D9822E", brassDark: "#B5691F", slate: "#7A6E5C", moss: "#7A9450", brick: "#C05339", line: "#E8DCC8" },
-  },
-  trousse: {
-    label: "Trousse",
-    description: "Papeterie et fournitures — bleu marine et rouge doux.",
-    values: { ink: "#242E4F", inkSoft: "#5C6690", paper: "#EEF0F8", surface: "#FFFFFF", brass: "#3355A0", brassDark: "#26417F", slate: "#4C68B0", moss: "#4B8F6A", brick: "#C0453B", line: "#DDE2F2" },
-  },
-  batisseur: {
-    label: "Bâtisseur",
-    description: "Terre cuite et bois clair — chaleureux et artisanal.",
-    values: { ink: "#3D2E22", inkSoft: "#786551", paper: "#F4EBDD", surface: "#FFFDF9", brass: "#B5652F", brassDark: "#8F4E22", slate: "#7C6A50", moss: "#7A8C52", brick: "#A24A34", line: "#EADFC8" },
-  },
-  pastel: {
-    label: "Pastel",
-    description: "Doux et lumineux — lavande, menthe et corail léger.",
-    values: { ink: "#463F58", inkSoft: "#867CA0", paper: "#F8F4FB", surface: "#FFFFFF", brass: "#A98AD1", brassDark: "#8A6CB5", slate: "#7FA0CC", moss: "#7ECBA6", brick: "#EE9C97", line: "#EBE3F5" },
-  },
-  sable: {
-    label: "Sable",
-    description: "Chaud et minéral — beige désert et terracotta clair.",
-    values: { ink: "#4C4030", inkSoft: "#877560", paper: "#F6EFE2", surface: "#FFFBF4", brass: "#CC8F4C", brassDark: "#A6712F", slate: "#8A9483", moss: "#93A970", brick: "#C07248", line: "#EEE1CB" },
-  },
-  ocean: {
-    label: "Océan",
-    description: "Frais et clair — bleu lagon et blanc écume.",
-    values: { ink: "#173239", inkSoft: "#527481", paper: "#EAF5F6", surface: "#FFFFFF", brass: "#2699AC", brassDark: "#1D7A8C", slate: "#3E7E92", moss: "#3FA684", brick: "#DB7360", line: "#D3EBEE" },
-  },
-  foret: {
-    label: "Forêt",
-    description: "Naturel et apaisant — verts doux et mousse.",
-    values: { ink: "#2B3624", inkSoft: "#647159", paper: "#F0F3E9", surface: "#FBFCF8", brass: "#7C9C4C", brassDark: "#61793A", slate: "#5C7259", moss: "#68914A", brick: "#B5623F", line: "#E2E9D5" },
-  },
-  minimal: {
-    label: "Minimal",
-    description: "Noir, blanc et gris — sobre, une seule touche de couleur.",
-    values: { ink: "#242427", inkSoft: "#77777C", paper: "#F5F5F6", surface: "#FFFFFF", brass: "#3B3B3F", brassDark: "#000000", slate: "#54545A", moss: "#2C9856", brick: "#D64545", line: "#E6E6E8" },
-  },
-  vintage: {
-    label: "Vintage",
-    description: "Papier ancien et sépia clair — comme un vieux carnet de chantier.",
-    values: { ink: "#4A3826", inkSoft: "#7E6A50", paper: "#EFE5CE", surface: "#FAF4E4", brass: "#9C7040", brassDark: "#7C562E", slate: "#7C6E52", moss: "#83824F", brick: "#A85C3E", line: "#E2D5B0" },
-  },
-  papeterie: {
-    label: "Papeterie",
-    description: "Stylo, règle, gomme et document dessinés à la main, mélangés en fond — chaud et artisanal.",
-    values: { ink: "#3A3226", inkSoft: "#7A6E58", paper: "#F5EFDE", surface: "#FFFCF4", brass: "#B87A3E", brassDark: "#93602E", slate: "#6E7C6A", moss: "#7A9460", brick: "#B5573F", line: "#E9DFC5" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%0A%3Cg%20stroke%3D%22%2393602E%22%20stroke-width%3D%221.6%22%20fill%3D%22none%22%20opacity%3D%220.22%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3C%21--%20Stylo%20--%3E%0A%20%20%3Cpath%20d%3D%22M15%2C55%20Q18%2C50%2022%2C45%20T35%2C12%22/%3E%0A%20%20%3Cpath%20d%3D%22M31%2C20%20L38%2C13%20L33%2C8%20Z%22%20fill%3D%22%2393602E%22/%3E%0A%20%20%3C%21--%20R%C3%A8gle%20gradu%C3%A9e%20--%3E%0A%20%20%3Cpath%20d%3D%22M120%2C20%20Q123%2C19%20126%2C20%20L155%2C85%20Q156%2C88%20153%2C89%20L124%2C24%22/%3E%0A%20%20%3Cline%20x1%3D%22128%22%20y1%3D%2226%22%20x2%3D%22133%22%20y2%3D%2224%22/%3E%0A%20%20%3Cline%20x1%3D%22133%22%20y1%3D%2236%22%20x2%3D%22140%22%20y2%3D%2233%22/%3E%0A%20%20%3Cline%20x1%3D%22139%22%20y1%3D%2247%22%20x2%3D%22144%22%20y2%3D%2245%22/%3E%0A%20%20%3Cline%20x1%3D%22144%22%20y1%3D%2258%22%20x2%3D%22151%22%20y2%3D%2255%22/%3E%0A%20%20%3C%21--%20Gomme%20--%3E%0A%20%20%3Cpath%20d%3D%22M25%2C140%20Q22%2C138%2024%2C134%20L45%2C120%20Q49%2C118%2051%2C122%20L58%2C133%20Q60%2C137%2056%2C139%20L35%2C153%20Q31%2C155%2029%2C151%20Z%22/%3E%0A%20%20%3Cline%20x1%3D%2233%22%20y1%3D%22128%22%20x2%3D%2252%22%20y2%3D%22140%22/%3E%0A%20%20%3C%21--%20Document%20pli%C3%A9%20--%3E%0A%20%20%3Cpath%20d%3D%22M110%2C140%20L145%2C140%20L160%2C155%20L160%2C195%20L110%2C195%20Z%22/%3E%0A%20%20%3Cpath%20d%3D%22M145%2C140%20L145%2C155%20L160%2C155%22/%3E%0A%20%20%3Cline%20x1%3D%22118%22%20y1%3D%22165%22%20x2%3D%22150%22%20y2%3D%22165%22/%3E%0A%20%20%3Cline%20x1%3D%22118%22%20y1%3D%22174%22%20x2%3D%22150%22%20y2%3D%22174%22/%3E%0A%20%20%3Cline%20x1%3D%22118%22%20y1%3D%22183%22%20x2%3D%22140%22%20y2%3D%22183%22/%3E%0A%3C/g%3E%0A%3C/svg%3E%0A")`,
-  },
-  atelier_plan: {
-    label: "Atelier de plan",
-    description: "Compas, équerre, règle et rapporteur dessinés à la main, mélangés en fond — précis et technique.",
-    values: { ink: "#26333D", inkSoft: "#5E7280", paper: "#EAF0F3", surface: "#FFFFFF", brass: "#3E7C93", brassDark: "#2E6273", slate: "#547E8F", moss: "#5C9470", brick: "#C15F4A", line: "#DAE6EA" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%0A%3Cg%20stroke%3D%22%232E6273%22%20stroke-width%3D%221.6%22%20fill%3D%22none%22%20opacity%3D%220.22%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3C%21--%20Compas%20--%3E%0A%20%20%3Ccircle%20cx%3D%2245%22%20cy%3D%2260%22%20r%3D%222%22%20fill%3D%22%232E6273%22/%3E%0A%20%20%3Cpath%20d%3D%22M45%2C60%20Q35%2C40%2025%2C15%22/%3E%0A%20%20%3Cpath%20d%3D%22M45%2C60%20Q58%2C42%2068%2C18%22/%3E%0A%20%20%3Cpath%20d%3D%22M45%2C60%20m-25%2C0%20a25%2C25%200%200%201%2044%2C-20%22%20stroke-dasharray%3D%222%2C4%22/%3E%0A%20%20%3C%21--%20%C3%89querre%20--%3E%0A%20%20%3Cpath%20d%3D%22M120%2C25%20L120%2C80%20Q120%2C84%20124%2C84%20L172%2C84%20Q158%2C60%20120%2C25%20Z%22/%3E%0A%20%20%3Cline%20x1%3D%22126%22%20y1%3D%2232%22%20x2%3D%22132%22%20y2%3D%2232%22/%3E%0A%20%20%3Cline%20x1%3D%22126%22%20y1%3D%2242%22%20x2%3D%22130%22%20y2%3D%2242%22/%3E%0A%20%20%3Cline%20x1%3D%22126%22%20y1%3D%2252%22%20x2%3D%22132%22%20y2%3D%2252%22/%3E%0A%20%20%3C%21--%20R%C3%A8gle%20--%3E%0A%20%20%3Cpath%20d%3D%22M20%2C140%20Q23%2C138%2027%2C140%20L58%2C205%20Q60%2C209%2056%2C211%20L25%2C146%22/%3E%0A%20%20%3Cline%20x1%3D%2229%22%20y1%3D%22147%22%20x2%3D%2235%22%20y2%3D%22144%22/%3E%0A%20%20%3Cline%20x1%3D%2235%22%20y1%3D%22159%22%20x2%3D%2240%22%20y2%3D%22157%22/%3E%0A%20%20%3Cline%20x1%3D%2241%22%20y1%3D%22171%22%20x2%3D%2247%22%20y2%3D%22168%22/%3E%0A%20%20%3C%21--%20Rapporteur%20--%3E%0A%20%20%3Cpath%20d%3D%22M120%2C150%20a30%2C30%200%200%201%2060%2C0%20Z%22/%3E%0A%20%20%3Cline%20x1%3D%22150%22%20y1%3D%22120%22%20x2%3D%22150%22%20y2%3D%22150%22/%3E%0A%20%20%3Cline%20x1%3D%22135%22%20y1%3D%22126%22%20x2%3D%22141%22%20y2%3D%22146%22/%3E%0A%20%20%3Cline%20x1%3D%22165%22%20y1%3D%22126%22%20x2%3D%22159%22%20y2%3D%22146%22/%3E%0A%3C/g%3E%0A%3C/svg%3E%0A")`,
-  },
-  charpente: {
-    label: "Charpente & Menuiserie",
-    description: "Scie, marteau, mètre ruban et planche — le travail du bois.",
-    values: { ink: "#3D2E1E", inkSoft: "#7A6650", paper: "#F4EAD9", surface: "#FFFDF8", brass: "#B5732E", brassDark: "#8F5A22", slate: "#7C6A50", moss: "#7A9450", brick: "#B5573F", line: "#EADFC5" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%0A%3Cg%20stroke%3D%22%238A5A2E%22%20stroke-width%3D%221.6%22%20fill%3D%22none%22%20opacity%3D%220.24%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3C%21--%20Scie%20--%3E%0A%20%20%3Cpath%20d%3D%22M15%2C50%20Q30%2C42%2055%2C55%20L50%2C62%20Q28%2C52%2018%2C58%20Z%22/%3E%0A%20%20%3Cpath%20d%3D%22M20%2C53%20L22%2C48%20L24%2C53%20L26%2C48%20L28%2C53%20L30%2C48%20L32%2C53%20L34%2C48%20L36%2C53%20L38%2C48%20L40%2C53%20L42%2C48%20L44%2C53%20L46%2C48%22/%3E%0A%20%20%3Cpath%20d%3D%22M50%2C58%20Q58%2C55%2062%2C48%22/%3E%0A%20%20%3C%21--%20Marteau%20--%3E%0A%20%20%3Cpath%20d%3D%22M130%2C20%20L155%2C45%22/%3E%0A%20%20%3Cpath%20d%3D%22M120%2C10%20L138%2C28%20Q142%2C32%20138%2C36%20L134%2C40%20Q130%2C44%20126%2C40%20L108%2C22%20Q104%2C18%20108%2C14%20L112%2C10%20Q116%2C6%20120%2C10%20Z%22/%3E%0A%20%20%3C%21--%20M%C3%A8tre%20ruban%20--%3E%0A%20%20%3Ccircle%20cx%3D%2245%22%20cy%3D%22150%22%20r%3D%2218%22/%3E%0A%20%20%3Cpath%20d%3D%22M45%2C132%20Q70%2C135%2078%2C155%22/%3E%0A%20%20%3Cline%20x1%3D%2255%22%20y1%3D%22138%22%20x2%3D%2257%22%20y2%3D%22142%22/%3E%0A%20%20%3Cline%20x1%3D%2263%22%20y1%3D%22143%22%20x2%3D%2265%22%20y2%3D%22148%22/%3E%0A%20%20%3Cline%20x1%3D%2270%22%20y1%3D%22149%22%20x2%3D%2273%22%20y2%3D%22153%22/%3E%0A%20%20%3C%21--%20Planche%20avec%20clou%20--%3E%0A%20%20%3Crect%20x%3D%22120%22%20y%3D%22140%22%20width%3D%2270%22%20height%3D%2216%22%20rx%3D%222%22/%3E%0A%20%20%3Cline%20x1%3D%22150%22%20y1%3D%22140%22%20x2%3D%22150%22%20y2%3D%22122%22/%3E%0A%20%20%3Cpath%20d%3D%22M147%2C124%20L150%2C118%20L153%2C124%22/%3E%0A%3C/g%3E%0A%3C/svg%3E%0A")`,
-  },
-  plomberie: {
-    label: "Plomberie",
-    description: "Clé à molette, tuyau et robinet — précis et technique.",
-    values: { ink: "#1C3644", inkSoft: "#537080", paper: "#E7F1F5", surface: "#FFFFFF", brass: "#2E86AA", brassDark: "#226A87", slate: "#4A7C94", moss: "#4E9470", brick: "#C15F4A", line: "#D3E6EE" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%0A%3Cg%20stroke%3D%22%232E6B8A%22%20stroke-width%3D%221.6%22%20fill%3D%22none%22%20opacity%3D%220.24%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3C%21--%20Cl%C3%A9%20%C3%A0%20molette%20--%3E%0A%20%20%3Cpath%20d%3D%22M30%2C60%20L55%2C35%22/%3E%0A%20%20%3Cpath%20d%3D%22M50%2C30%20Q56%2C24%2062%2C30%20Q68%2C36%2062%2C42%20L55%2C49%20L46%2C40%20Z%22/%3E%0A%20%20%3Cpath%20d%3D%22M22%2C68%20Q16%2C74%2022%2C80%20Q28%2C86%2034%2C80%20L38%2C76%20L26%2C64%20Z%22/%3E%0A%20%20%3C%21--%20Tuyau%20coud%C3%A9%20--%3E%0A%20%20%3Cpath%20d%3D%22M120%2C20%20L120%2C55%20Q120%2C65%20130%2C65%20L165%2C65%22/%3E%0A%20%20%3Cpath%20d%3D%22M112%2C20%20L128%2C20%22/%3E%0A%20%20%3Cpath%20d%3D%22M157%2C58%20L172%2C65%20L157%2C72%22/%3E%0A%20%20%3C%21--%20Robinet%20--%3E%0A%20%20%3Cpath%20d%3D%22M40%2C150%20L40%2C170%20Q40%2C178%2048%2C178%20L60%2C178%22/%3E%0A%20%20%3Cpath%20d%3D%22M32%2C150%20L48%2C150%22/%3E%0A%20%20%3Ccircle%20cx%3D%2240%22%20cy%3D%22140%22%20r%3D%228%22/%3E%0A%20%20%3Cline%20x1%3D%2234%22%20y1%3D%22140%22%20x2%3D%2246%22%20y2%3D%22140%22/%3E%0A%20%20%3Cpath%20d%3D%22M60%2C178%20Q66%2C178%2066%2C184%20L66%2C192%22/%3E%0A%20%20%3C%21--%20Goutte%20--%3E%0A%20%20%3Cpath%20d%3D%22M66%2C196%20Q70%2C200%2066%2C205%20Q62%2C200%2066%2C196%20Z%22/%3E%0A%3C/g%3E%0A%3C/svg%3E%0A")`,
-  },
-  electricite: {
-    label: "Électricité",
-    description: "Ampoule, tournevis, prise et éclair — clair et vif.",
-    values: { ink: "#3D3416", inkSoft: "#7A6E42", paper: "#F7F1DE", surface: "#FFFDF4", brass: "#C99A24", brassDark: "#A17A18", slate: "#7C8A5E", moss: "#7A9450", brick: "#B5573F", line: "#EFE2B8" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%0A%3Cg%20stroke%3D%22%239C7A1E%22%20stroke-width%3D%221.6%22%20fill%3D%22none%22%20opacity%3D%220.24%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3C%21--%20Ampoule%20--%3E%0A%20%20%3Ccircle%20cx%3D%2245%22%20cy%3D%2245%22%20r%3D%2220%22/%3E%0A%20%20%3Cpath%20d%3D%22M37%2C62%20L53%2C62%20L53%2C70%20Q53%2C74%2049%2C74%20L41%2C74%20Q37%2C74%2037%2C70%20Z%22/%3E%0A%20%20%3Cline%20x1%3D%2240%22%20y1%3D%2266%22%20x2%3D%2250%22%20y2%3D%2266%22/%3E%0A%20%20%3Cpath%20d%3D%22M38%2C38%20Q45%2C30%2052%2C38%20Q48%2C45%2045%2C50%20Q42%2C45%2038%2C38%20Z%22/%3E%0A%20%20%3C%21--%20Tournevis%20--%3E%0A%20%20%3Cpath%20d%3D%22M130%2C15%20L160%2C45%22/%3E%0A%20%20%3Crect%20x%3D%22108%22%20y%3D%2245%22%20width%3D%2226%22%20height%3D%2212%22%20rx%3D%223%22%20transform%3D%22rotate%2845%20121%2051%29%22/%3E%0A%20%20%3Cpath%20d%3D%22M155%2C40%20L168%2C53%20L162%2C59%20L149%2C46%20Z%22/%3E%0A%20%20%3C%21--%20Prise%20%C3%A9lectrique%20--%3E%0A%20%20%3Crect%20x%3D%22110%22%20y%3D%22120%22%20width%3D%2250%22%20height%3D%2260%22%20rx%3D%226%22/%3E%0A%20%20%3Ccircle%20cx%3D%22127%22%20cy%3D%22140%22%20r%3D%223%22%20fill%3D%22%239C7A1E%22/%3E%0A%20%20%3Ccircle%20cx%3D%22143%22%20cy%3D%22140%22%20r%3D%223%22%20fill%3D%22%239C7A1E%22/%3E%0A%20%20%3Cline%20x1%3D%22135%22%20y1%3D%22155%22%20x2%3D%22135%22%20y2%3D%22165%22/%3E%0A%20%20%3C%21--%20%C3%89clair%20--%3E%0A%20%20%3Cpath%20d%3D%22M40%2C110%20L52%2C110%20L44%2C128%20L56%2C128%20L36%2C155%20L42%2C132%20L30%2C132%20Z%22/%3E%0A%3C/g%3E%0A%3C/svg%3E%0A")`,
-  },
-  maconnerie: {
-    label: "Maçonnerie",
-    description: "Truelle, brique, niveau et seau — solide et minéral.",
-    values: { ink: "#3A2A22", inkSoft: "#78655A", paper: "#F1E7E2", surface: "#FFFDFB", brass: "#B0684E", brassDark: "#8A4F39", slate: "#7C8570", moss: "#7A9464", brick: "#A6483B", line: "#E6D3CA" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%0A%3Cg%20stroke%3D%22%238A5240%22%20stroke-width%3D%221.6%22%20fill%3D%22none%22%20opacity%3D%220.24%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3C%21--%20Truelle%20--%3E%0A%20%20%3Cpath%20d%3D%22M20%2C30%20L45%2C55%20Q52%2C62%2046%2C68%20L42%2C72%20Q36%2C78%2030%2C72%20L8%2C50%20Q4%2C46%208%2C42%20L12%2C38%20Q16%2C34%2020%2C30%20Z%22/%3E%0A%20%20%3Cpath%20d%3D%22M42%2C68%20L58%2C84%22/%3E%0A%20%20%3Cpath%20d%3D%22M55%2C82%20L66%2C93%22/%3E%0A%20%20%3C%21--%20Brique%20--%3E%0A%20%20%3Crect%20x%3D%22110%22%20y%3D%2230%22%20width%3D%2260%22%20height%3D%2230%22%20rx%3D%222%22/%3E%0A%20%20%3Cline%20x1%3D%22140%22%20y1%3D%2230%22%20x2%3D%22140%22%20y2%3D%2260%22/%3E%0A%20%20%3Cline%20x1%3D%22110%22%20y1%3D%2245%22%20x2%3D%22125%22%20y2%3D%2245%22/%3E%0A%20%20%3Cline%20x1%3D%22155%22%20y1%3D%2245%22%20x2%3D%22170%22%20y2%3D%2245%22/%3E%0A%20%20%3C%21--%20Niveau%20%C3%A0%20bulle%20--%3E%0A%20%20%3Crect%20x%3D%2220%22%20y%3D%22120%22%20width%3D%2290%22%20height%3D%2216%22%20rx%3D%223%22/%3E%0A%20%20%3Ccircle%20cx%3D%2265%22%20cy%3D%22128%22%20r%3D%226%22/%3E%0A%20%20%3Ccircle%20cx%3D%2265%22%20cy%3D%22128%22%20r%3D%222%22%20fill%3D%22%238A5240%22/%3E%0A%20%20%3C%21--%20Seau%20--%3E%0A%20%20%3Cpath%20d%3D%22M130%2C150%20L170%2C150%20L163%2C190%20L137%2C190%20Z%22/%3E%0A%20%20%3Cpath%20d%3D%22M130%2C150%20Q150%2C144%20170%2C150%22/%3E%0A%20%20%3Cpath%20d%3D%22M138%2C150%20Q150%2C138%20162%2C150%22/%3E%0A%3C/g%3E%0A%3C/svg%3E%0A")`,
-  },
-  peinture: {
-    label: "Peinture",
-    description: "Rouleau, pinceau et pot de peinture — coloré et vivant.",
-    values: { ink: "#3A2418", inkSoft: "#7A5E4C", paper: "#FAEDE4", surface: "#FFFFFF", brass: "#D9682E", brassDark: "#B0501F", slate: "#5E8A6E", moss: "#5E9460", brick: "#C15F4A", line: "#F3DCC9" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%0A%3Cg%20stroke%3D%22%23B0512E%22%20stroke-width%3D%221.6%22%20fill%3D%22none%22%20opacity%3D%220.24%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3C%21--%20Rouleau%20--%3E%0A%20%20%3Crect%20x%3D%2220%22%20y%3D%2220%22%20width%3D%2255%22%20height%3D%2218%22%20rx%3D%229%22/%3E%0A%20%20%3Cline%20x1%3D%2260%22%20y1%3D%2229%22%20x2%3D%2280%22%20y2%3D%2229%22/%3E%0A%20%20%3Cpath%20d%3D%22M80%2C29%20L80%2C55%20L95%2C60%22/%3E%0A%20%20%3C%21--%20Pinceau%20--%3E%0A%20%20%3Cpath%20d%3D%22M140%2C15%20L165%2C40%22/%3E%0A%20%20%3Cpath%20d%3D%22M130%2C25%20Q124%2C31%20130%2C37%20L140%2C47%20Q146%2C53%20152%2C47%20L156%2C43%20L142%2C29%20Z%22/%3E%0A%20%20%3Cpath%20d%3D%22M128%2C38%20Q118%2C42%20116%2C54%20Q126%2C50%20132%2C42%20Z%22/%3E%0A%20%20%3C%21--%20Pot%20de%20peinture%20--%3E%0A%20%20%3Cpath%20d%3D%22M115%2C110%20L165%2C110%20L160%2C165%20L120%2C165%20Z%22/%3E%0A%20%20%3Cpath%20d%3D%22M115%2C110%20Q140%2C102%20165%2C110%22/%3E%0A%20%20%3Crect%20x%3D%22132%22%20y%3D%2295%22%20width%3D%2216%22%20height%3D%2215%22%20rx%3D%222%22/%3E%0A%20%20%3C%21--%20%C3%89claboussures%20--%3E%0A%20%20%3Ccircle%20cx%3D%2235%22%20cy%3D%22150%22%20r%3D%223%22/%3E%0A%20%20%3Ccircle%20cx%3D%2250%22%20cy%3D%22165%22%20r%3D%224%22/%3E%0A%20%20%3Ccircle%20cx%3D%2225%22%20cy%3D%22175%22%20r%3D%222.5%22/%3E%0A%3C/g%3E%0A%3C/svg%3E%0A")`,
-  },
-  jardinage: {
-    label: "Jardinage & Paysage",
-    description: "Pelle, râteau, arrosoir et feuille — naturel et frais.",
-    values: { ink: "#25321E", inkSoft: "#5E6E4E", paper: "#EDF3E7", surface: "#FBFDF8", brass: "#5E8A44", brassDark: "#476B32", slate: "#5C7A64", moss: "#5E8A44", brick: "#B5623F", line: "#DCE9D0" },
-    pattern: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%0A%3Cg%20stroke%3D%22%234C7A3E%22%20stroke-width%3D%221.6%22%20fill%3D%22none%22%20opacity%3D%220.24%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%3C%21--%20Pelle%20--%3E%0A%20%20%3Cpath%20d%3D%22M35%2C20%20L60%2C45%22/%3E%0A%20%20%3Cpath%20d%3D%22M55%2C42%20Q68%2C55%2060%2C68%20Q52%2C80%2038%2C72%20Q26%2C64%2034%2C52%20Q42%2C44%2055%2C42%20Z%22/%3E%0A%20%20%3C%21--%20R%C3%A2teau%20--%3E%0A%20%20%3Cpath%20d%3D%22M140%2C15%20L165%2C40%22/%3E%0A%20%20%3Cpath%20d%3D%22M150%2C45%20L180%2C45%22/%3E%0A%20%20%3Cline%20x1%3D%22150%22%20y1%3D%2245%22%20x2%3D%22146%22%20y2%3D%2258%22/%3E%0A%20%20%3Cline%20x1%3D%22158%22%20y1%3D%2245%22%20x2%3D%22156%22%20y2%3D%2258%22/%3E%0A%20%20%3Cline%20x1%3D%22166%22%20y1%3D%2245%22%20x2%3D%22166%22%20y2%3D%2258%22/%3E%0A%20%20%3Cline%20x1%3D%22174%22%20y1%3D%2245%22%20x2%3D%22176%22%20y2%3D%2258%22/%3E%0A%20%20%3Cline%20x1%3D%22180%22%20y1%3D%2245%22%20x2%3D%22184%22%20y2%3D%2258%22/%3E%0A%20%20%3C%21--%20Arrosoir%20--%3E%0A%20%20%3Cpath%20d%3D%22M20%2C130%20L60%2C130%20L56%2C165%20L24%2C165%20Z%22/%3E%0A%20%20%3Cpath%20d%3D%22M20%2C130%20Q15%2C120%2022%2C112%22/%3E%0A%20%20%3Cpath%20d%3D%22M60%2C135%20L80%2C120%22/%3E%0A%20%20%3Ccircle%20cx%3D%2282%22%20cy%3D%22118%22%20r%3D%222%22/%3E%0A%20%20%3Ccircle%20cx%3D%2288%22%20cy%3D%22112%22%20r%3D%222%22/%3E%0A%20%20%3Ccircle%20cx%3D%2286%22%20cy%3D%22122%22%20r%3D%222%22/%3E%0A%20%20%3C%21--%20Feuille%20--%3E%0A%20%20%3Cpath%20d%3D%22M130%2C150%20Q150%2C135%20165%2C150%20Q150%2C175%20130%2C150%20Z%22/%3E%0A%20%20%3Cline%20x1%3D%22130%22%20y1%3D%22150%22%20x2%3D%22163%22%20y2%3D%22150%22/%3E%0A%3C/g%3E%0A%3C/svg%3E%0A")`,
-  },
-};
-
-// Applique les variables CSS du thème actif directement sur la page —
-// depuis un seul endroit central (voir le useEffect dédié plus bas
-// dans le composant principal), ça couvre automatiquement tous les
-// écrans (chargement, connexion, tableau de bord...) sans avoir à
-// transmettre le thème à chacun des nombreux composants du site.
-function applyTheme(themeId) {
-  const theme = THEMES[themeId] || THEMES.classique;
-  Object.entries(theme.values).forEach(([k, v]) => {
-    const cssVarName = `--df-${k.replace(/([A-Z])/g, "-$1").toLowerCase()}`;
-    document.documentElement.style.setProperty(cssVarName, v);
-  });
-  document.documentElement.style.setProperty("--df-bg-pattern", theme.pattern || "none");
 }
 
 // Ferme un menu déroulant/popover avec la touche Échap — au clavier,
@@ -1503,7 +1377,9 @@ function accountingExportRow(d) {
   }
   if (d.type === "situation") {
     const sit = computeSituation(d);
-    return [...head, Number(sit.subtotalHT.toFixed(2)), Number(sit.totalTVA.toFixed(2)), Number(sit.netAPayer.toFixed(2))];
+    // TTC brut = HT + TVA (la retenue de garantie et l'acompte déjà versé
+    // relèvent du règlement, pas de la pièce) — même règle que l'écriture 411.
+    return [...head, Number(sit.subtotalHT.toFixed(2)), Number(sit.totalTVA.toFixed(2)), Number(sit.totalTTCBrut.toFixed(2))];
   }
   if (d.type === "contrat") {
     const ht = Number(d.montantTotalHT) || 0;
@@ -1516,6 +1392,27 @@ function accountingExportRow(d) {
   const sign = d.type === "avoir" ? -1 : 1;
   const signed = (n) => { const v = Number((sign * n).toFixed(2)); return v === 0 ? 0 : v; };
   return [...head, signed(t.subtotalHT), signed(t.totalTVA), signed(t.totalTTC)];
+}
+// Acompte déjà versé d'une facture (montant TTC saisi) ramené en HT et TVA
+// au taux moyen de la facture : sert au budget chantier, à la feuille export
+// et aux écritures pour ne pas compter deux fois ce qui a déjà été facturé
+// par la facture d'acompte. RÈGLE À CONFIRMER PAR L'EXPERT-COMPTABLE.
+function acompteDeduitSplit(t) {
+  const ttc = Math.round((Number(t?.acompteVerse) || 0) * 100) / 100;
+  if (ttc <= 0 || !(Number(t?.totalTTC) > 0)) return { ttc: 0, ht: 0, tva: 0 };
+  const ht = Math.round(ttc * (t.subtotalHT / t.totalTTC) * 100) / 100;
+  return { ttc, ht, tva: Math.round((ttc - ht) * 100) / 100 };
+}
+// Lignes de la feuille export pour un document : la ligne du document et, pour
+// une facture qui déduit un acompte déjà facturé, une ligne « Acompte déduit »
+// négative (la somme des colonnes ne compte l'acompte qu'une fois).
+function accountingExportRows(d) {
+  const rows = [accountingExportRow(d)];
+  if (d.type === "facture") {
+    const a = acompteDeduitSplit(computeTotals(d));
+    if (a.ttc > 0) rows.push(["Acompte déduit", d.docNumber, fr(d.issueDate), d.client?.name || "", d.status, -a.ht, -a.tva, -a.ttc]);
+  }
+  return rows;
 }
 // Lignes { productId, totalHT, tva } servant aux écritures comptables :
 // pour une situation, le montant de cette situation par poste.
@@ -1571,7 +1468,10 @@ function computePvGaranties(doc) {
   if (doc.typeReception === "refusee") return null; // réception refusée : aucune garantie ne court
   const base = localDateOf(doc.dateReceptionEffective);
   if (isNaN(base.getTime())) return null;
-  const addTime = (months) => { const d = new Date(base); d.setMonth(d.getMonth() + months); return d; };
+  // Même jour n mois plus tard ; si ce jour n'existe pas (29 février), le
+  // dernier jour du mois (art. 641 du Code de procédure civile) — sans le
+  // débordement JavaScript qui donnait le 1er mars.
+  const addTime = (months) => { const d = new Date(base.getFullYear(), base.getMonth() + months, 1); const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); d.setDate(Math.min(base.getDate(), last)); return d; };
   return {
     parfaitAchevement: addTime(12),
     biennale: addTime(24),
@@ -2442,6 +2342,46 @@ function creditNotesTotalFor(doc, documents) {
   const total = documents.reduce((s, d) => (d && d.type === "avoir" && d.factureOrigineId === doc.id && d.status !== "brouillon" ? s + computeTotals(d).totalTTC : s), 0);
   return Math.round(total * 100) / 100;
 }
+// Devis passé à « signé » : le montant accepté (et les options retenues)
+// sont figés dans la signature, comme le fait la signature en ligne — la
+// référence du bandeau d'écart et de la ligne « Montant accepté » du PDF.
+function stampAcceptedTotal(doc) {
+  if (!doc || doc.type !== "devis") return doc;
+  const sig = doc.signature && typeof doc.signature === "object" ? doc.signature : EMPTY_SIGNATURE;
+  if (sig.acceptedTotalTTC !== undefined && sig.acceptedTotalTTC !== null && Number.isFinite(Number(sig.acceptedTotalTTC))) return doc;
+  const acceptedOptionIds = (doc.items || []).filter((it) => it?.type === "line" && it.optional === true && it.optionAccepted === true).map((it) => it.id);
+  return { ...doc, signature: { ...sig, acceptedTotalTTC: computeTotals(doc).totalTTC, acceptedOptionIds } };
+}
+// Passage manuel d'un devis à « signé » alors que des options ne sont pas
+// cochées « Retenue » : rappel, car elles seront exclues de la facture.
+function confirmSignedOptions(doc, nextStatus) {
+  if (!doc || doc.type !== "devis" || nextStatus !== "signé" || doc.status === "signé") return true;
+  const proposed = proposedOptionsOf(doc).length;
+  if (!proposed || typeof window === "undefined" || typeof window.confirm !== "function") return true;
+  const answer = window.confirm(`${proposed} option${proposed > 1 ? "s" : ""} de ce devis n'${proposed > 1 ? "ont" : "a"} pas été cochée${proposed > 1 ? "s" : ""} « Retenue » : elle${proposed > 1 ? "s seront exclues" : " sera exclue"} de la facture. Si le client les a acceptées, coche « Retenue » avant de passer le devis en « signé ».\n\nPasser en « signé » quand même ?`);
+  return answer !== false; // « annuler » seulement ; un navigateur sans boîte de dialogue laisse passer
+}
+// Facture d'origine d'un avoir qui vient de changer (montant, statut,
+// rattachement) : repasse en « envoyée » si un reste à payer réapparaît,
+// passe en « payée » si l'avoir la solde. Renvoie { list, notices }.
+function reevaluateInvoicesAfterCreditChange(list, factureIds) {
+  const notices = [];
+  let out = list;
+  for (const fid of factureIds) {
+    const f = out.find((d) => d.id === fid);
+    if (!f || !isPayableDoc(f) || !f.status || f.status === "brouillon") continue;
+    const outstanding = documentOutstanding(f, out);
+    if (f.status === "payée" && outstanding > 0.005) {
+      out = out.map((d) => (d.id === fid ? { ...d, status: "envoyée", paidAt: null, paidTotal: null, updatedAt: Date.now() } : d));
+      notices.push({ docId: fid, docNumber: f.docNumber || "", amount: outstanding, currency: f.currency, text: `Facture ${f.docNumber || ""} : après modification de l'avoir, il reste ${formatMoney(outstanding, f.currency)} à payer — elle repasse en « envoyée ».` });
+    } else if ((f.status === "envoyée" || f.status === "en retard") && outstanding <= 0.005 && documentSettledTotal(f) > 0) {
+      const paidTotal = Math.max(0, Math.round((documentSettledTotal(f) - creditNotesTotalFor(f, out)) * 100) / 100);
+      out = out.map((d) => (d.id === fid ? { ...d, status: "payée", paidAt: new Date().toISOString(), paidTotal, updatedAt: Date.now() } : d));
+      notices.push({ docId: fid, docNumber: f.docNumber || "", amount: 0, currency: f.currency, text: `Facture ${f.docNumber || ""} soldée par cet avoir : elle passe en « payée ».` });
+    }
+  }
+  return { list: out, notices };
+}
 // Pièce comptable émise (facture, facture d'acompte, situation valant
 // facture, avoir — hors brouillon) : la loi impose de la conserver, elle ne
 // se supprime jamais ; elle s'annule par un avoir.
@@ -2519,6 +2459,14 @@ function computeTotals(doc) {
     return { ...l, totalHTBrut: r2(afterLine), totalHT: r2(afterGlobal) };
   });
   const subtotalHTBrut = r2(computedLines.reduce((s, l) => s + l.totalHTBrut, 0));
+  // Remise en montant : la somme des lignes arrondies peut s'écarter d'un
+  // centime du montant saisi (3 × 333,33 − 50 → « −50,01 ») ; le résidu est
+  // absorbé sur la dernière ligne pour que la remise imprimée soit celle saisie.
+  if (doc.globalDiscountMode === "amount" && computedLines.length && globalRate > 0) {
+    const target = r2(subtotalHTBrut - Math.min(Math.max(0, Number(doc.globalDiscount) || 0), subtotalHTBrut));
+    const diff = r2(target - r2(computedLines.reduce((s, l) => s + l.totalHT, 0)));
+    if (diff !== 0) { const last = computedLines[computedLines.length - 1]; computedLines[computedLines.length - 1] = { ...last, totalHT: r2(last.totalHT + diff) }; }
+  }
   const subtotalHT = r2(computedLines.reduce((s, l) => s + l.totalHT, 0));
   const globalDiscountAmount = r2(subtotalHTBrut - subtotalHT);
   const tvaGroups = {};
@@ -2552,18 +2500,10 @@ const GlobalStyle = () => (
     .df-display { font-family: 'Space Grotesk', sans-serif; }
     .df-mono { font-family: 'IBM Plex Mono', monospace; }
     .df-input:focus, .df-select:focus, .df-textarea:focus { outline: none; border-color: ${colors.brass} !important; box-shadow: 0 0 0 3px rgba(184,118,62,0.15); }
-    /* Mode sombre — un réglage personnel (mémorisé sur cet appareil),
-       indépendant du thème de couleurs choisi par l'administrateur du
-       site : couleurs douces (jamais noir pur), appliquées le plus
-       largement possible — y compris aux champs de saisie, qui
-       gardent sinon un fond blanc imposé par le navigateur. */
-    body.df-dark {
-      --df-ink: #E8EAED;
-      --df-ink-soft: #9AA5B5;
-      --df-paper: #1B212C;
-      --df-surface: #262D3A;
-      --df-line: #3A4353;
-    }
+    /* Mode sombre — un réglage personnel (mémorisé sur cet appareil) :
+       couleurs douces (jamais noir pur), appliquées le plus largement
+       possible — y compris aux champs de saisie, qui gardent sinon un fond
+       blanc imposé par le navigateur (variables : bloc body.df-dark plus bas). */
     body.df-dark img { opacity: 0.92; }
     body.df-dark input, body.df-dark select, body.df-dark textarea {
       background: var(--df-surface) !important;
@@ -2572,11 +2512,10 @@ const GlobalStyle = () => (
     }
     body.df-dark input::placeholder, body.df-dark textarea::placeholder { color: var(--df-ink-soft); opacity: 1; }
     body.df-dark input[type="checkbox"], body.df-dark input[type="radio"] { background: transparent !important; }
-    /* Version "Atelier" : palette fixe appliquée à tout le site connecté
-       (pages partagées et éditeurs compris) en redéfinissant les
-       variables de couleur — priorité sur le thème admin, qui est posé
-       sur <html>. Le bloc sombre est après pour gagner en cascade. */
-    body.df-atelier {
+    /* Palette du site (pages partagées et éditeurs compris) : les
+       variables de couleur sont posées sur body. Le bloc sombre est après
+       pour gagner en cascade. */
+    body {
       --df-ink: #1C2733;
       --df-ink-soft: #5A6B78;
       --df-paper: #F4F6F8;
@@ -2589,7 +2528,7 @@ const GlobalStyle = () => (
       --df-line: #D8DEE4;
       --df-bg-pattern: none;
     }
-    body.df-atelier.df-dark {
+    body.df-dark {
       --df-ink: #E6EBF0;
       --df-ink-soft: #9AA7B4;
       --df-paper: #151B22;
@@ -2601,9 +2540,9 @@ const GlobalStyle = () => (
       --df-brick: #E06356;
       --df-line: #2E3944;
     }
-    body.df-atelier .df-at-tap { min-height: 44px; }
-    body.df-atelier .df-at-bottom-pad { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
-    @media (min-width: 768px) { body.df-atelier .df-at-bottom-pad { padding-bottom: 0; } }
+    .df-at-tap { min-height: 44px; }
+    .df-at-bottom-pad { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+    @media (min-width: 768px) { .df-at-bottom-pad { padding-bottom: 0; } }
     @keyframes df-marquee {
       0% { transform: translateX(-100vw); opacity: 0; }
       8% { opacity: 1; }
@@ -2723,7 +2662,7 @@ function legalMentionLines(doc, companyProfile, options = {}) {
   return lines;
 }
 
-const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSettings, watermarkEnabled = true, publicQr = null, companyProfile = null }, ref) {
+const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSettings, watermarkEnabled = true, publicQr = null, companyProfile = null, creditTotal = 0, creditNotes = [] }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const hasGlobalDiscount = (totals.globalDiscountPct || 0) > 0 && (totals.globalDiscountAmount || 0) > 0;
   const validityDate = addDaysLocal(doc.issueDate, doc.validityDays);
@@ -2766,7 +2705,9 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   const settledRef = isMarkedPaid ? (Number(doc.paidTotal) > 0 ? Number(doc.paidTotal) : totalTTC) : 0;
   const settledBalance = isMarkedPaid ? Math.max(0, settledRef - receivedTotal) : 0;
   const amountPaid = receivedTotal + settledBalance;
-  const amountToPay = Math.max(0, Math.round((totalTTC - amountPaid) * 100) / 100);
+  // Avoirs rattachés (hors brouillon) : déduits du reste à payer, ligne dédiée.
+  const creditDeducted = isInvoiceLike ? Math.max(0, Math.round((Number(creditTotal) || 0) * 100) / 100) : 0;
+  const amountToPay = Math.max(0, Math.round((totalTTC - amountPaid - creditDeducted) * 100) / 100);
   const isPaid = isMarkedPaid && amountToPay <= 0.005;
   const paidDate = doc.paidAt ? localDateOf(doc.paidAt).toLocaleDateString("fr-FR") : "";
   const paymentsReceived = [];
@@ -3071,8 +3012,18 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
               </div>
             )}
             {/* Facture : acompte déjà versé déduit du total, montant TTC à régler */}
-            {isInvoiceLike && (totals.totalPaid || 0) > 0 && (
+            {doc.type === "devis" && doc.status === "signé" && Number.isFinite(Number(doc.signature?.acceptedTotalTTC)) && doc.signature?.acceptedTotalTTC !== null && (
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontSize: "9pt", color: Math.abs(Number(doc.signature.acceptedTotalTTC) - totalTTC) > 0.005 ? brassDark : inkSoft }}>
+                <span>Montant accepté à la signature{Math.abs(Number(doc.signature.acceptedTotalTTC) - totalTTC) > 0.005 ? " (le total ci-dessus a changé depuis)" : ""}</span><span style={mono}>{formatMoney(Number(doc.signature.acceptedTotalTTC), doc.currency)}</span>
+              </div>
+            )}
+            {isInvoiceLike && ((totals.totalPaid || 0) > 0 || creditDeducted > 0) && (
               <>
+                {creditDeducted > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: inkSoft }}>
+                    <span>{creditNotes.length > 1 ? `Avoirs ${creditNotes.join(", ")}` : creditNotes.length === 1 ? `Avoir ${creditNotes[0]}` : "Avoir rattaché"}</span><span style={mono}>- {formatMoney(creditDeducted, doc.currency)}</span>
+                  </div>
+                )}
                 {(totals.acompteVerse || 0) > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", border: `1px solid ${line}`, borderTop: "none", padding: "6px 10px", color: inkSoft }}>
                     <span>Acompte déjà versé</span><span style={mono}>- {formatMoney(totals.acompteVerse, doc.currency)}</span>
@@ -3176,7 +3127,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
 // chargement réussi et à chaque modification depuis Admin.
 // ---------------------------------------------------------------------------
 const SITE_SETTINGS_CACHE_KEY = "devifact_site_settings";
-const DEFAULT_SITE_SETTINGS = { name: "Chantiflow", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfTextColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" };
+const DEFAULT_SITE_SETTINGS = { name: "Chantiflow", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfTextColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr" };
 function readCachedSiteSettings() {
   try {
     const raw = lsGet(SITE_SETTINGS_CACHE_KEY);
@@ -3199,7 +3150,6 @@ function siteSettingsFromRow(data) {
     pdfBlockColor: data.pdf_block_color || "#F1F0EA",
     visibleServices: data.visible_services || null,
     contactEmail: data.contact_email || "contact@chantiflow.fr",
-    theme: data.theme || "classique",
     desktopAppUrlWindows: data.desktop_app_url_windows || "",
     desktopAppUrlMac: data.desktop_app_url_mac || "",
     desktopAppEnabled: data.desktop_app_enabled || false,
@@ -3211,17 +3161,6 @@ function siteSettingsFromRow(data) {
     legalInfo: data.legal_info && typeof data.legal_info === "object" && !Array.isArray(data.legal_info) ? data.legal_info : {},
   };
 }
-// Classe df-atelier sur le corps de page et variables du thème posées dès le
-// chargement du script, avant le premier rendu : l'écran de chargement
-// lui-même a déjà la bonne apparence.
-function applyCachedSiteAppearance() {
-  if (typeof document === "undefined") return;
-  document.body.classList.add("df-atelier");
-  const cached = readCachedSiteSettings();
-  if (!cached) return;
-  applyTheme(cached.theme || "classique");
-}
-applyCachedSiteAppearance();
 
 // Lien du logo / nom du site : une vraie balise <a>
 // avec un href, pour que le clic droit propose « Ouvrir dans un nouvel
@@ -3443,18 +3382,6 @@ function DeviFactAppInner() {
   useEffect(() => {
     if (siteSettings?.name) document.title = siteSettings.name;
   }, [siteSettings?.name]);
-  // Applique le thème choisi dans Admin → Apparence du site — à
-  // chaque changement, et dès le chargement initial (thème "classique"
-  // par défaut tant que les vrais paramètres n'ont pas encore chargé).
-  useEffect(() => {
-    applyTheme(siteSettings?.theme || "classique");
-  }, [siteSettings?.theme]);
-  // Interface Atelier (la seule) : classe sur le corps de page qui porte sa
-  // palette fixe (voir GlobalStyle).
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    document.body.classList.add("df-atelier");
-  }, []);
   const [atelierCreateOpen, setAtelierCreateOpen] = useState(false);
   // Filtre pré-appliqué à la page Documents Atelier (carte « À faire »).
   const [atelierDocsPreset, setAtelierDocsPreset] = useState(null);
@@ -3735,7 +3662,7 @@ function DeviFactAppInner() {
   }
   async function updateSiteSettings(patch) {
     setSavingSiteSettings(true);
-    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfTextColor: "pdf_text_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", theme: "theme", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", legalInfo: "legal_info", connectFeePercent: "connect_fee_percent" };
+    const column = { name: "name", logo: "logo_url", logoWidth: "logo_width", logoHeight: "logo_height", pdfBackground: "pdf_background", pdfHeaderColor: "pdf_header_color", pdfTextColor: "pdf_text_color", pdfBlockColor: "pdf_block_color", visibleServices: "visible_services", contactEmail: "contact_email", desktopAppUrlWindows: "desktop_app_url_windows", desktopAppUrlMac: "desktop_app_url_mac", desktopAppEnabled: "desktop_app_enabled", contactInstagramUrl: "contact_instagram_url", legalInfo: "legal_info", connectFeePercent: "connect_fee_percent" };
     const dbPatch = {};
     Object.entries(patch).forEach(([k, v]) => { if (column[k]) dbPatch[column[k]] = v; });
     const { error } = await db.from("site_settings").update(dbPatch).eq("id", 1);
@@ -4226,11 +4153,17 @@ function DeviFactAppInner() {
     // Supprime les données applicatives de l'organisation. La suppression
     // du compte d'authentification lui-même se fait depuis le dashboard
     // du fournisseur (Authentication → Users), jamais depuis le navigateur.
+    removeDocumentsPhotoFiles(documents);
+    removeDocumentsPurchaseFiles(documents);
     const results = await Promise.allSettled([
       window.storage.set("documents", JSON.stringify([]), false),
       window.storage.set("clients", JSON.stringify([]), false),
       window.storage.set("prestations", JSON.stringify([]), false),
+      window.storage.set("team-planning", JSON.stringify([]), false),
+      window.storage.set("chantier-tasks", JSON.stringify([]), false),
       window.storage.set("company-profile", JSON.stringify(emptyCompanyProfile()), false),
+      db.from("bank_transactions").delete().eq("organization_id", account.organizationId),
+      removeCompanyFolder(account.organizationId), // attestations et assurances (fichiers)
       db.from("organizations").update({ plan: "gratuit", payment_status: "gratuit" }).eq("id", account.organizationId),
     ]);
     const failed = results.filter((r) => r.status === "rejected");
@@ -4488,10 +4421,15 @@ function DeviFactAppInner() {
     setPrestations([]);
     setSelectedIds([]);
     try {
+      // Planning, tâches par chantier et opérations bancaires importées
+      // repartent aussi de zéro (ils n'ont plus de document auquel se rattacher).
       await Promise.all([
         window.storage.set("documents", JSON.stringify([]), false),
         window.storage.set("clients", JSON.stringify([]), false),
         window.storage.set("prestations", JSON.stringify([]), false),
+        window.storage.set("team-planning", JSON.stringify([]), false),
+        window.storage.set("chantier-tasks", JSON.stringify([]), false),
+        account?.organizationId ? db.from("bank_transactions").delete().eq("organization_id", account.organizationId) : Promise.resolve(),
       ]);
     } catch (e) {
       console.error("Erreur de réinitialisation", e);
@@ -4577,7 +4515,9 @@ function DeviFactAppInner() {
       // correspondante, sans naviguer ailleurs ni interrompre ce que la
       // personne était en train de faire — juste une notification.
       if (original && original.type === "devis" && patch.status === "signé" && original.status !== "signé") {
-        const updatedOriginal = { ...original, ...patch, updatedAt: Date.now() };
+        // Montant accepté et options retenues figés dans la signature (la
+        // signature en ligne le fait déjà ; ici, passage manuel).
+        const updatedOriginal = stampAcceptedTotal({ ...original, ...patch, updatedAt: Date.now() });
         // Une facture existe déjà pour ce devis (signé, repassé en « envoyé »
         // par erreur, puis signé de nouveau ; ou signé par le client via le
         // lien public) : jamais de seconde facture.
@@ -4638,7 +4578,26 @@ function DeviFactAppInner() {
         patch = { ...patch, ...revert.patch };
         setPaymentRevertNotice({ docId: id, ...revert.notice });
       }
-      persist(documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
+      // Facture reçue « payée » dont le montant augmente : même règle que les
+      // factures émises, elle repasse « à payer » et l'éditeur l'annonce.
+      if (original && original.type === "facture_recue" && original.status === "payée" && patch.status === undefined) {
+        const before = factureRecueTotals(original).ttc, after = factureRecueTotals({ ...original, ...patch }).ttc;
+        if (after > before + 0.005) {
+          patch = { ...patch, status: "à payer", paidAt: null };
+          setPaymentRevertNotice({ docId: id, docNumber: original.docNumber || "", amount: Math.round((after - before) * 100) / 100, currency: original.currency, text: `Facture reçue ${original.docNumber || ""} modifiée après paiement : le montant a augmenté de ${formatMoney(Math.round((after - before) * 100) / 100, original.currency)}, elle repasse « à payer ».` });
+        }
+      }
+      let nextList = documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d));
+      // Avoir modifié (montant, statut, rattachement) : la facture d'origine
+      // suit — retour en « envoyée » si un reste réapparaît, « payée » si
+      // l'avoir la solde. L'éditeur de l'avoir l'annonce.
+      if (original && original.type === "avoir") {
+        const ids = [...new Set([original.factureOrigineId, patch.factureOrigineId].filter(Boolean))];
+        const r = reevaluateInvoicesAfterCreditChange(nextList, ids);
+        nextList = r.list;
+        if (r.notices.length) setPaymentRevertNotice({ ...r.notices[0], docId: id });
+      }
+      persist(nextList);
       return;
     }
     // Sinon, c'est le document "en attente" (voir openNew) — tant
@@ -4676,6 +4635,53 @@ function DeviFactAppInner() {
     }
     updateDoc(id, { workStage: "termine" });
   }
+  // Liste kv (planning, tâches) relue puis réécrite avec une transformation ;
+  // absente : rien à faire.
+  async function rewriteKvList(key, transform) {
+    let list;
+    try { list = JSON.parse((await window.storage.get(key, false)).value); } catch (err) { if (err?.code !== "KEY_NOT_FOUND") console.error(`Lecture de ${key} impossible`, err); return; }
+    if (!Array.isArray(list)) return;
+    const next = transform(list);
+    if (next && next !== list) await window.storage.set(key, JSON.stringify(next), false);
+  }
+  // Fiche « sans accès » remplacée par un compte : technicien, responsable
+  // et créneaux passent au nouvel identifiant.
+  async function relinkStaffMember(staffKey, userId) {
+    if (!staffKey || !userId) return;
+    const list = documentsRef.current;
+    let changed = false;
+    const next = list.map((d) => {
+      let n = d;
+      if (d.technicienMemberId === staffKey) n = { ...n, technicienMemberId: userId };
+      if (d.responsableMemberId === staffKey) n = { ...n, responsableMemberId: userId };
+      if (n !== d) { changed = true; n = { ...n, updatedAt: Date.now() }; }
+      return n;
+    });
+    if (changed) await persist(next);
+    await rewriteKvList("team-planning", (slots) => (slots.some((s) => s?.memberUserId === staffKey) ? slots.map((s) => (s?.memberUserId === staffKey ? { ...s, memberUserId: userId, updatedAt: Date.now() } : s)) : slots));
+  }
+  // Chantier renommé depuis sa fiche : tous ses documents (devis, factures,
+  // PV, factures reçues…) prennent le nouveau nom ; tâches et créneaux sont
+  // renommés par la fiche elle-même.
+  function renameChantierDocuments(oldName, newName) {
+    if (isLocked) return;
+    const key = String(oldName || "").trim().toLowerCase();
+    const clean = String(newName || "").trim();
+    if (!key || !clean) return;
+    const list = documentsRef.current;
+    if (!list.some((d) => String(d.chantier || "").trim().toLowerCase() === key)) return;
+    persist(list.map((d) => (String(d.chantier || "").trim().toLowerCase() === key ? { ...d, chantier: clean, updatedAt: Date.now() } : d)));
+  }
+  // Dernier document d'un chantier supprimé : ses tâches et créneaux
+  // disparaissent avec lui (sinon ils réapparaissaient, en retard, sur un
+  // chantier homonyme créé plus tard).
+  async function removeChantierExtras(name, remaining) {
+    const key = String(name || "").trim().toLowerCase();
+    if (!key || (remaining || []).some((d) => String(d.chantier || "").trim().toLowerCase() === key)) return;
+    const keep = (x) => String(x?.chantier || "").trim().toLowerCase() !== key;
+    await rewriteKvList("team-planning", (slots) => (slots.every(keep) ? slots : slots.filter(keep)));
+    await rewriteKvList("chantier-tasks", (tasks) => (tasks.every(keep) ? tasks : tasks.filter(keep)));
+  }
   function deleteDoc(id) {
     if (isLocked) return;
     const doc = documents.find((d) => d.id === id);
@@ -4687,7 +4693,8 @@ function DeviFactAppInner() {
     // Les photos de chantier du document disparaissent avec lui — une fois
     // la suppression réellement enregistrée (sinon un échec réseau laissait
     // un document sans ses photos).
-    persist(documents.filter((d) => d.id !== id)).then((ok) => { if (ok && doc) { removeDocumentsPhotoFiles([doc]); removeDocumentsPurchaseFiles([doc]); } });
+    const remaining = documents.filter((d) => d.id !== id);
+    persist(remaining).then((ok) => { if (ok && doc) { removeDocumentsPhotoFiles([doc]); removeDocumentsPurchaseFiles([doc]); if (doc.chantier) removeChantierExtras(doc.chantier, remaining).catch((err) => console.error("Tâches et créneaux du chantier non nettoyés", err)); } });
     if (activeId === id) backToDashboard();
   }
   function duplicateDoc(id) {
@@ -5007,7 +5014,7 @@ function DeviFactAppInner() {
         const daysLeft = Math.round((validityDate - today) / 86400000);
         if (daysLeft <= 3) list.push({ doc: d, reason: daysLeft < 0 ? "Devis expiré" : daysLeft === 0 ? "Expire aujourd'hui" : `Expire dans ${daysLeft} j`, urgent: daysLeft <= 0 });
       }
-      if (d.type === "facture" && (d.status === "envoyée" || d.status === "en retard")) {
+      if (isPayableDoc(d) && (d.status === "envoyée" || d.status === "en retard")) { // facture, facture d'acompte, situation valant facture
         if (documentOutstanding(d, documents) <= 0.005) return; // soldée par les paiements ou un avoir
         const dueDate = addDaysLocal(d.issueDate, d.dueDays);
         const daysLate = Math.round((today - dueDate) / 86400000);
@@ -5019,10 +5026,11 @@ function DeviFactAppInner() {
 
   function reminderMailto({ doc }) {
     const amountDue = documentOutstanding(doc, documents); // reste réel (acompte, paiements et avoirs déduits)
-    const subject = doc.type === "devis" ? `Relance — Devis ${doc.docNumber}` : `Relance — Facture ${doc.docNumber}`;
+    const payableLabel = doc.type === "acompte" ? "facture d'acompte" : doc.type === "situation" ? "situation de travaux" : "facture";
+    const subject = doc.type === "devis" ? `Relance — Devis ${doc.docNumber}` : `Relance — ${payableLabel.charAt(0).toUpperCase() + payableLabel.slice(1)} ${doc.docNumber}`;
     const body = doc.type === "devis"
       ? `Bonjour ${doc.client.name || ""},\n\nJe me permets de vous relancer au sujet du devis ${doc.docNumber}, dont la date de validité approche.\n\nN'hésitez pas à me contacter pour toute question.\n\nCordialement.`
-      : `Bonjour ${doc.client.name || ""},\n\nSauf erreur de notre part, la facture ${doc.docNumber} reste impayée à ce jour : il reste ${formatMoney(amountDue, doc.currency)} à régler.\n\nMerci de bien vouloir procéder au règlement dans les meilleurs délais.\n\nCordialement.`;
+      : `Bonjour ${doc.client.name || ""},\n\nSauf erreur de notre part, la ${payableLabel} ${doc.docNumber} reste impayée à ce jour : il reste ${formatMoney(amountDue, doc.currency)} à régler.\n\nMerci de bien vouloir procéder au règlement dans les meilleurs délais.\n\nCordialement.`;
     return `mailto:${doc.client.email || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
@@ -5033,7 +5041,7 @@ function DeviFactAppInner() {
     documents
       .filter(isSalesDocument)
       .sort((a, b) => localDateOf(a.issueDate) - localDateOf(b.issueDate))
-      .forEach((d) => { rows.push(accountingExportRow(d)); });
+      .forEach((d) => { accountingExportRows(d).forEach((r) => rows.push(r)); });
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [{ wch: 10 }, { wch: 16 }, { wch: 14 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
@@ -5170,6 +5178,7 @@ function DeviFactAppInner() {
         onSyncOnlinePayments={syncOnlinePayments}
         linkableInvoices={documents.filter((d) => isPayableDoc(d) && d.status !== "brouillon" && d.id !== activeDoc.id)}
         creditTotal={creditNotesTotalFor(activeDoc, documents)}
+        creditNotes={documents.filter((d) => d.type === "avoir" && d.factureOrigineId === activeDoc.id && d.status !== "brouillon").map((d) => d.docNumber || "")}
         acompteSuggestion={acompteSuggestionFor(activeDoc, documents)}
       />
     );
@@ -5281,6 +5290,8 @@ function DeviFactAppInner() {
         onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onGoToPricing={() => setView("pricing")}
+        paymentNotice={paymentRevertNotice?.docId === activeDoc.id ? paymentRevertNotice : null}
+        onDismissPaymentNotice={() => setPaymentRevertNotice(null)}
       />
     );
   }
@@ -5409,7 +5420,7 @@ function DeviFactAppInner() {
         preset={atelierDocsPreset}
         onPresetConsumed={() => setAtelierDocsPreset(null)}
         onOpenDoc={openDoc}
-        onChangeStatus={(id, status) => updateDoc(id, { status })}
+        onChangeStatus={(id, status) => { if (confirmSignedOptions(documents.find((d) => d.id === id), status)) updateDoc(id, { status }); }}
         onDuplicate={duplicateDoc}
         onDelete={deleteDoc}
         selectedIds={selectedIds}
@@ -5427,7 +5438,7 @@ function DeviFactAppInner() {
   } else if (view === "chantiers") {
     page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
   } else if (view === "atelier-chantier" && atelierChantier) {
-    page = <AtelierChantierView name={atelierChantier} documents={documents} account={account} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onBack={() => setView("chantiers")} onOpenDoc={openDoc} onCreateForChantier={openCreateForChantier} />;
+    page = <AtelierChantierView name={atelierChantier} documents={documents} account={account} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onBack={() => setView("chantiers")} onOpenDoc={openDoc} onCreateForChantier={openCreateForChantier} onRename={(oldName, newName) => { renameChantierDocuments(oldName, newName); setAtelierChantier(newName); }} />;
   } else if (view === "atelier-chantier") {
     page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
   } else if (view === "clients") {
@@ -5437,7 +5448,7 @@ function DeviFactAppInner() {
   } else if (view === "banque" && bankModuleVisible(siteSettings)) {
     page = <BankView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} onPatchDocument={updateDoc} />;
   } else if (view === "team") {
-    page = <TeamView account={account} />;
+    page = <TeamView account={account} onRelinkStaff={relinkStaffMember} />;
   } else if (view === "planning-equipe") {
     page = <PlanningView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} />;
   } else if (view === "api") {
@@ -5560,7 +5571,7 @@ function DeviFactAppInner() {
           if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
-          return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} siteSettings={siteSettings} creditTotal={creditNotesTotalFor(batchExportDoc, documents)} creditNotes={documents.filter((d) => d.type === "avoir" && d.factureOrigineId === batchExportDoc.id && d.status !== "brouillon").map((d) => d.docNumber || "")} watermarkEnabled={wmEnabled} />;
         })()}
       </div>
     </AtelierShell>
@@ -5693,7 +5704,9 @@ function PublicDocumentView({ token }) {
     : state.document;
   const totals = state.document && !isSituationDoc ? computeTotals(effectiveDocument) : null;
   const creditTotal = Math.max(0, Number(state.creditTotal) || 0); // avoirs rattachés (serveur)
-  const amountDue = Math.max(0, Math.round(((isSituationDoc ? sit.montantARegler : totals ? (payable ? totals.montantARegler : totals.totalTTC) : 0) - creditTotal) * 100) / 100);
+  // Marquée « payée » par l'artisan (règlement hors liste) : plus rien à payer.
+  const settledByStatus = payable && state.document?.status === "payée" && documentOutstanding(state.document) <= 0.005;
+  const amountDue = settledByStatus ? 0 : Math.max(0, Math.round(((isSituationDoc ? sit.montantARegler : totals ? (payable ? totals.montantARegler : totals.totalTTC) : 0) - creditTotal) * 100) / 100);
   const totalPaid = isSituationDoc ? sit.totalPaid : totals ? totals.totalPaid : 0;
   const totalTTC = isSituationDoc ? sit.netAPayer + sit.acompteVerse : totals ? totals.totalTTC : 0;
   const summaryLines = isSituationDoc ? sit.lines.map((l) => ({ id: l.id, designation: l.designation, totalHT: l.montantCetteSituation })) : totals ? totals.computedLines : [];
@@ -5705,7 +5718,6 @@ function PublicDocumentView({ token }) {
   const canPay = payable && state.document.status !== "payée" && !state.paidAt && amountDue > 0.005 && !awaitingConfirmation;
   // Règlement par virement : coordonnées bancaires de l'artisan (fiche Mon
   // entreprise, renvoyées par le serveur), tant qu'il reste à payer.
-  const settledByStatus = payable && state.document?.status === "payée" && documentOutstanding(state.document) <= 0.005;
   const awaitingTransfer = payable && !settledByStatus && !state.paidAt && amountDue > 0.005;
   const transferIban = String(state.paymentInfo?.iban || "").trim();
   const transferBic = String(state.paymentInfo?.bic || "").trim();
@@ -5862,6 +5874,9 @@ function PublicDocumentView({ token }) {
               </div>
               <div className="text-right">
                 <div className="df-mono text-xl font-bold">{formatMoney(amountDue, state.document.currency)}</div>
+                {state.document.type === "devis" && alreadySigned && Number.isFinite(Number(state.document.signature?.acceptedTotalTTC)) && state.document.signature?.acceptedTotalTTC !== null && (
+                  <div className="text-xs" style={{ color: colors.inkSoft }} data-testid="public-accepted-total">Montant accepté à la signature : {formatMoney(Number(state.document.signature.acceptedTotalTTC), state.document.currency)}</div>
+                )}
                 {payable && totalPaid > 0 && (
                   <div className="text-xs" style={{ color: colors.inkSoft }}>{isSituationDoc ? "Net à payer" : "Total TTC"} {formatMoney(totalTTC, state.document.currency)} − déjà payé {formatMoney(totalPaid, state.document.currency)}{creditTotal > 0 && <> − avoir {formatMoney(creditTotal, state.document.currency)}</>}</div>
                 )}
@@ -9763,7 +9778,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
 
 // Facture reçue (fournisseur ou sous-traitant) : formulaire simple, sans
 // PDF généré ; scan en pièce jointe ; dépense du chantier rattaché.
-function FactureRecueEditor({ doc, documents = [], clients = [], companyProfile = null, saving, account, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
+function FactureRecueEditor({ doc, documents = [], clients = [], companyProfile = null, saving, account, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, paymentNotice = null, onDismissPaymentNotice = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   const pendingPatchRef = useRef(null);
@@ -9864,6 +9879,7 @@ function FactureRecueEditor({ doc, documents = [], clients = [], companyProfile 
         </div>
       </div>
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />
       {isLocked && (
         <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.brick}14`, border: `1px solid ${colors.brick}55` }}>
           <span className="flex items-center gap-2 text-sm" style={{ color: colors.brick }}><Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}</span>
@@ -11811,7 +11827,7 @@ function atelierChantierStats(documents, slots) {
     const nom = (d.chantier || "").trim();
     if (!nom) continue;
     const key = nom.toLowerCase(); // « Dupont » et « dupont » : un seul chantier
-    if (!map.has(key)) map.set(key, { nom, docs: [], devisTotal: 0, factureTotal: 0, depensesTotal: 0, photos: 0, clients: new Map(), lastUpdate: 0 });
+    if (!map.has(key)) map.set(key, { nom, docs: [], devisTotal: 0, factureTotal: 0, acomptesHT: 0, acompteDeduitHT: 0, depensesTotal: 0, photos: 0, clients: new Map(), lastUpdate: 0 });
     const c = map.get(key);
     c.docs.push(d);
     const emis = !!d.status && d.status !== "brouillon";
@@ -11820,7 +11836,11 @@ function atelierChantierStats(documents, slots) {
     // émis, situations valant facture, avoirs déduits. Dépenses : factures
     // reçues des fournisseurs et sous-traitants rattachées au chantier.
     if (d.type === "devis" && emis && !["refusé", "expiré", "expirée", "annulé"].includes(d.status)) c.devisTotal += computeTotals(d).subtotalHT;
-    if ((d.type === "facture" || d.type === "acompte") && emis) c.factureTotal += computeTotals(d).subtotalHT;
+    // Factures d'acompte : comptées seulement pour ce que les factures du
+    // chantier n'ont pas encore déduit (acompteVerse ramené en HT), sinon
+    // l'acompte était facturé deux fois dans le budget.
+    if (d.type === "facture" && emis) { const t = computeTotals(d); c.factureTotal += t.subtotalHT; c.acompteDeduitHT += acompteDeduitSplit(t).ht; }
+    if (d.type === "acompte" && emis) c.acomptesHT += computeTotals(d).subtotalHT;
     if (d.type === "situation" && d.vautFacture === true && emis) c.factureTotal += computeSituation(d).subtotalHT;
     if (d.type === "avoir" && emis) c.factureTotal -= computeTotals(d).subtotalHT;
     if (d.type === "facture_recue") c.depensesTotal += factureRecueTotals(d).ht;
@@ -11834,7 +11854,8 @@ function atelierChantierStats(documents, slots) {
     const client = [...c.clients.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
     const mine = (slots || []).filter((s) => (s.chantier || "").trim().toLowerCase() === c.nom.toLowerCase()).sort((a, b) => a.start.localeCompare(b.start));
     const next = mine.find((s) => s.end >= todayIso) || null;
-    return { ...c, client, slots: mine, nextSlot: next, ecart: c.devisTotal - c.factureTotal, marge: c.factureTotal - c.depensesTotal };
+    const factureTotal = Math.round((c.factureTotal + Math.max(0, c.acomptesHT - c.acompteDeduitHT)) * 100) / 100;
+    return { ...c, factureTotal, client, slots: mine, nextSlot: next, ecart: c.devisTotal - factureTotal, marge: factureTotal - c.depensesTotal };
   }).sort((a, b) => b.lastUpdate - a.lastUpdate);
 }
 
@@ -11983,7 +12004,7 @@ function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLo
 
 // Fiche d'un chantier : documents groupés par famille, créneaux du
 // planning, photos de tous ses rapports, PV et situations.
-function AtelierChantierView({ name, documents, account, darkMode, isLocked, isViewer, onBack, onOpenDoc, onCreateForChantier }) {
+function AtelierChantierView({ name, documents, account, darkMode, isLocked, isViewer, onBack, onOpenDoc, onCreateForChantier, onRename = null }) {
   const tone = atelierTone(darkMode);
   const [tab, setTab] = useState("documents");
   const [editing, setEditing] = useState(null);
@@ -12057,6 +12078,20 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
     persist((slots || []).filter((s) => s.id !== editing.id));
     setEditing(null);
   }
+  // Renommer le chantier : documents (par l'application), créneaux et
+  // tâches (ici) suivent tous le nouveau nom.
+  function renameChantier() {
+    if (!canEdit || !onRename) return;
+    const answer = window.prompt("Nouveau nom du chantier :", name);
+    if (answer === null) return;
+    const clean = answer.trim();
+    if (!clean || clean === name) return;
+    const key = String(name || "").trim().toLowerCase();
+    const same = (v) => String(v || "").trim().toLowerCase() === key;
+    if (Array.isArray(slots) && slots.some((s) => same(s.chantier))) persist(slots.map((s) => (same(s.chantier) ? { ...s, chantier: clean, updatedAt: Date.now() } : s)));
+    if (Array.isArray(tasksStore.tasks) && tasksStore.tasks.some((t) => same(t.chantier))) tasksStore.persist(tasksStore.tasks.map((t) => (same(t.chantier) ? { ...t, chantier: clean, updatedAt: Date.now() } : t)));
+    onRename(name, clean);
+  }
   const slotRow = (s) => (
     <button key={s.id} onClick={() => setEditing({ ...s })} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: `1px solid ${tone.line}` }}>
       <span className="df-mono shrink-0 text-sm" style={{ color: tone.inkSoft }}>{fr(s.start)}{s.end !== s.start ? ` → ${fr(s.end)}` : ""}</span>
@@ -12074,6 +12109,9 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
           <h1 className="df-display truncate text-2xl font-bold">{name}</h1>
           <p className="text-sm" style={{ color: tone.inkSoft }}>{stats.client || "Client non renseigné"} · {stats.docs.length} document{stats.docs.length > 1 ? "s" : ""}</p>
         </div>
+        {canEdit && onRename && (
+          <button onClick={renameChantier} className="df-at-tap flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${tone.line}`, color: tone.ink }} data-testid="rename-chantier"><Pencil size={15} /> Renommer</button>
+        )}
         {canEdit && (
           <button onClick={() => onCreateForChantier(name)} className="df-at-tap flex items-center gap-2 rounded-lg px-4 py-2 text-[15px] font-bold" style={{ background: tone.action, color: "#1C2733" }}><Plus size={18} /> Créer pour ce chantier</button>
         )}
@@ -12884,6 +12922,17 @@ async function removeCompanyFile(path) {
   const { error } = await db.storage.from(COMPANY_FILES_BUCKET).remove([path]);
   if (error) console.error("Fichier d'attestation non supprimé", path, error);
 }
+// Tous les fichiers d'attestation de l'organisation (suppression du compte).
+async function removeCompanyFolder(organizationId) {
+  if (!organizationId) return;
+  const folder = `${organizationId}/attestations`;
+  const { data, error } = await db.storage.from(COMPANY_FILES_BUCKET).list(folder, { limit: 1000 });
+  if (error) throw error;
+  const paths = (data || []).map((f) => `${folder}/${f.name}`);
+  if (!paths.length) return;
+  const { error: removeError } = await db.storage.from(COMPANY_FILES_BUCKET).remove(paths);
+  if (removeError) throw removeError;
+}
 async function downloadCompanyFile(path) {
   const { data, error } = await db.storage.from(COMPANY_FILES_BUCKET).download(path);
   if (error) throw error;
@@ -13333,7 +13382,7 @@ const ACCOUNT_KIND_LABELS = { produits: "Comptes de produits (ventes)", achats: 
 const ACCOUNT_DEFAULT_FIELDS = [
   ["sales", "Compte de produits par défaut"], ["purchases", "Compte d'achats par défaut"],
   ["vatSales", "TVA collectée par défaut"], ["vatPurchases", "TVA déductible par défaut"],
-  ["customer", "Compte clients"], ["supplier", "Compte fournisseurs"], ["subcontracting", "Sous-traitance (604)"],
+  ["customer", "Compte clients"], ["supplier", "Compte fournisseurs"], ["subcontracting", "Sous-traitance (604)"], ["advances", "Acomptes reçus (4191)"],
   ["journalSales", "Journal des ventes"], ["journalPurchases", "Journal des achats"],
 ];
 const amount2 = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -14207,7 +14256,7 @@ function ApiView({ account }) {
   );
 }
 
-function TeamView({ account }) {
+function TeamView({ account, onRelinkStaff = null }) {
   const [members, setMembers] = useState(null);
   const [membersError, setMembersError] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -14278,8 +14327,23 @@ function TeamView({ account }) {
         setInviteEmail("");
         setInviteProfile({ fullName: "", jobTitle: "", phone: "" });
         // Fiche sans accès remplacée par l'invitation (nom, poste et
-        // téléphone repris) : la fiche disparaît.
-        if (convertingStaffId) { await db.from("organization_members").delete().eq("id", convertingStaffId).select(); setConvertingStaffId(null); }
+        // téléphone repris) : la fiche disparaît — seulement si c'est bien la
+        // même personne (nom inchangé), et ses documents et créneaux passent au
+        // nouveau compte.
+        if (convertingStaffId) {
+          const staff = (members || []).find((m) => m.id === convertingStaffId);
+          const sameName = !!staff && String(staff.full_name || "").trim().toLowerCase() === String(inviteProfile.fullName || "").trim().toLowerCase();
+          if (sameName) {
+            if (typeof data?.userId === "string" && data.userId && onRelinkStaff) {
+              try { await onRelinkStaff(`staff:${convertingStaffId}`, data.userId); } catch (err) { console.error("Documents et créneaux non reliés au nouveau compte", err); }
+            }
+            const { data: removed, error: removeError } = await db.from("organization_members").delete().eq("id", convertingStaffId).select();
+            if (removeError || !removed || removed.length === 0) { console.error("Fiche sans accès non supprimée après invitation", removeError); setInfo(`${cleanEmail} a été ajouté à l'équipe, mais l'ancienne fiche sans accès n'a pas pu être retirée : retire-la à la main.`); }
+          } else {
+            setInfo(`${cleanEmail} a été ajouté à l'équipe ; la fiche sans accès de ${staff?.full_name || "ce collaborateur"} est conservée (le nom saisi ne correspond pas).`);
+          }
+          setConvertingStaffId(null);
+        }
         await loadMembers();
       }
     } catch (err) {
@@ -15203,7 +15267,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
 
       <AttestationsCard profile={profile} account={account} isLocked={isLocked} isViewer={isViewer} saving={saving} onSave={(list) => { patch({ attestations: list }); return onSave({ ...profile, attestations: list }); }} />
 
-      <AccountingExportCard profile={profile} account={account} isLocked={isLocked} isViewer={isViewer} saving={saving} onSave={(cfg) => { patch({ accountingExport: cfg }); onSave({ ...profile, accountingExport: cfg }); }} />
+      <AccountingExportCard key={JSON.stringify(profile?.accountingExport || null)} profile={profile} account={account} isLocked={isLocked} isViewer={isViewer} saving={saving} onSave={(cfg) => { patch({ accountingExport: cfg }); onSave({ ...profile, accountingExport: cfg }); }} />
 
       <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.brick}40` }}>
         <div className="mb-2 flex items-center gap-2 text-sm font-semibold" style={{ color: colors.brick }}>
@@ -15944,36 +16008,6 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
 
       {tab === "apparence" && (
         <div className="space-y-3">
-          <CollapsibleSection title="Apparence du site" subtitle={THEMES[siteSettings.theme]?.label} icon={Palette}>
-            <p className="border-b px-4 py-2 text-xs" style={{ borderColor: colors.line, color: colors.inkSoft }}>
-              Choisis un thème de couleurs pour tout le site — le changement s'applique immédiatement pour tous les visiteurs.
-            </p>
-            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              {Object.entries(THEMES).map(([id, theme]) => (
-                <button
-                  key={id}
-                  onClick={() => onUpdateSiteSettings({ theme: id })}
-                  className="overflow-hidden rounded-xl text-left transition"
-                  style={{ border: `2px solid ${siteSettings.theme === id ? theme.values.brass : colors.line}`, background: theme.values.surface }}
-                >
-                  <div className="flex h-16" style={{ background: theme.values.paper }}>
-                    <div className="flex-1" style={{ background: theme.values.ink }} />
-                    <div className="flex-1" style={{ background: theme.values.brass }} />
-                    <div className="flex-1" style={{ background: theme.values.moss }} />
-                    <div className="flex-1" style={{ background: theme.values.brick }} />
-                  </div>
-                  <div className="p-3">
-                    <div className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: theme.values.ink }}>
-                      {theme.label}
-                      {siteSettings.theme === id && <Check size={14} style={{ color: theme.values.brass }} />}
-                    </div>
-                    <p className="mt-0.5 text-xs" style={{ color: theme.values.inkSoft }}>{theme.description}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </CollapsibleSection>
-
           <CollapsibleSection title="Logiciel de bureau" subtitle={siteSettings.desktopAppEnabled ? "Affiché" : "Masqué"} icon={Monitor}>
             <DesktopAppSettings siteSettings={siteSettings} saving={savingSiteSettings} onSave={onUpdateSiteSettings} />
           </CollapsibleSection>
@@ -16414,12 +16448,14 @@ function RevenueChart({ documents }) {
     const byPrevKey = new Map(months.map((m) => [m.prevKey, m]));
     let hasPrevious = false;
     for (const doc of documents) {
-      // Chiffre d'affaires : factures émises, avoirs en déduction.
-      if ((doc.type !== "facture" && doc.type !== "avoir") || doc.status === "brouillon" || !doc.issueDate) continue;
+      // Chiffre d'affaires : factures et situations valant facture émises,
+      // avoirs en déduction — même périmètre que les indicateurs (src/kpis.js).
+      const isSituationSale = doc.type === "situation" && doc.vautFacture === true;
+      if ((doc.type !== "facture" && doc.type !== "avoir" && !isSituationSale) || doc.status === "brouillon" || !doc.issueDate) continue;
       const issued = localDateOf(doc.issueDate);
       if (isNaN(issued.getTime())) continue;
       const key = monthKey(issued);
-      const amount = (computeTotals(doc).subtotalHT || 0) * (doc.type === "avoir" ? -1 : 1);
+      const amount = ((isSituationSale ? computeSituation(doc).subtotalHT : computeTotals(doc).subtotalHT) || 0) * (doc.type === "avoir" ? -1 : 1);
       if (byKey.has(key)) byKey.get(key).current += amount;
       if (byPrevKey.has(key)) { byPrevKey.get(key).previous += amount; hasPrevious = true; }
     }
@@ -16660,7 +16696,7 @@ function PaymentRevertNotice({ notice, onDismiss }) {
     <div className="no-print mb-4 flex flex-wrap items-start justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.brassDark}14`, border: `1px solid ${colors.brassDark}55` }} data-testid="payment-revert-notice">
       <span className="flex items-start gap-2 text-sm" style={{ color: colors.brassDark }}>
         <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-        <span>Facture <strong>{notice.docNumber}</strong> modifiée après paiement : il reste <strong>{formatMoney(notice.amount, notice.currency)}</strong> à payer, elle repasse en « envoyée ». Pour corriger une facture déjà réglée, la voie habituelle est un avoir suivi d'une nouvelle facture.</span>
+        {notice.text ? <span>{notice.text}</span> : <span>Facture <strong>{notice.docNumber}</strong> modifiée après paiement : il reste <strong>{formatMoney(notice.amount, notice.currency)}</strong> à payer, elle repasse en « envoyée ». Pour corriger une facture déjà réglée, la voie habituelle est un avoir suivi d'une nouvelle facture.</span>}
       </span>
       {onDismiss && <button onClick={onDismiss} style={{ color: colors.inkSoft }} aria-label="Fermer"><X size={15} /></button>}
     </div>
@@ -16766,9 +16802,10 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
     const doc = list.find((d) => d.id === documentId);
     if (!doc) throw new Error("Cette facture n'existe plus.");
     const patch = applyBankPayment(doc, bankTx(row), documentAmountDue(doc, documents));
-    if (patch) onPatchDocument(doc.id, patch);
+    // La ligne bancaire d'abord : si elle est refusée, la facture n'est pas touchée.
     const { error } = await db.from("bank_transactions").update({ status: "rapproche", document_id: doc.id, payment_id: `pay_bank_${row.id}`, matched_by: matchedBy }).eq("id", row.id);
     if (error) throw error;
+    if (patch) onPatchDocument(doc.id, patch);
     if (workingDocs && patch) { const i = workingDocs.findIndex((d) => d.id === doc.id); workingDocs[i] = { ...doc, ...patch }; }
   }
   async function setRowStatus(row, status) {
@@ -16787,12 +16824,12 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
   const reconcileManual = (row, documentId) => run(row, () => reconcile(row, documentId, "manuel"));
   const undo = (row) => run(row, async () => {
     const doc = docById(row.document_id);
+    await setRowStatus(row, "a_traiter"); // la ligne bancaire d'abord, comme au rapprochement
     if (doc) {
       // Reste NON plafonné : un trop-perçu par ailleurs doit laisser la facture « payée ».
       const patch = revertBankPayment(doc, row.id, Math.round((documentSettledTotal(doc) - creditNotesTotalFor(doc, documents) - documentPaidTotal(doc)) * 100) / 100);
       if (patch) onPatchDocument(doc.id, patch);
     }
-    await setRowStatus(row, "a_traiter");
   });
 
   async function importFiles(fileList) {
@@ -17068,7 +17105,7 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false, creditTotal = 
   );
 }
 
-function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, acompteSuggestion = null }) {
+function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, creditNotes = [], acompteSuggestion = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const [clientQuery, setClientQuery] = useState("");
@@ -17758,7 +17795,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         <div className="flex items-center gap-2">
           <select
             value={localDoc.status}
-            onChange={(e) => patch({ status: e.target.value })}
+            onChange={(e) => { if (confirmSignedOptions(localDoc, e.target.value)) patch({ status: e.target.value }); }}
             className="df-select rounded-full px-3 py-1.5 text-xs font-medium"
             style={{ background: `${statusColor(localDoc.status)}22`, color: "white", border: `1px solid ${statusColor(localDoc.status)}` }}
           >
@@ -17799,6 +17836,12 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
         <QrCodeDialog key={qrDialog?.url || "closed"} qr={qrDialog} title={localDoc.type === "devis" ? "QR code du lien de signature" : "QR code du lien de paiement"} onClose={() => setQrDialog(null)} />
         <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />
+        {localDoc.type === "devis" && localDoc.status === "signé" && Number.isFinite(Number(localDoc.signature?.acceptedTotalTTC)) && localDoc.signature?.acceptedTotalTTC !== null && Math.abs(totals.totalTTC - Number(localDoc.signature.acceptedTotalTTC)) > 0.005 && (
+          <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brassDark}14`, border: `1px solid ${colors.brassDark}55`, color: colors.brassDark }} data-testid="accepted-total-notice">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+            <span>Devis signé pour <strong>{formatMoney(Number(localDoc.signature.acceptedTotalTTC), localDoc.currency)}</strong> TTC ; le total actuel est de <strong>{formatMoney(totals.totalTTC, localDoc.currency)}</strong>. Le client n'a accepté que le montant signé : pour un changement, établis un avenant ou un nouveau devis. Le PDF rappelle le montant accepté.</span>
+          </div>
+        )}
         {!isViewer && <AcompteSuggestionNotice suggestion={acompteSuggestion} currency={localDoc.currency} onApply={(amount) => patch({ acompteVerse: amount })} onDismiss={() => patch({ acompteSuggestionDismissed: true })} />}
         {splitNotice && (
           <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.moss}15`, border: `1px solid ${colors.moss}40` }}>
@@ -18725,7 +18768,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         </div>
       </div>
       <FinalizeButton doc={localDoc} onFinalize={(...args) => { flushPendingPatch(); onFinalize(...args); }} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
-      <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+      <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} creditTotal={creditTotal} creditNotes={creditNotes} />
 
       {presentationMode && (
         <div className="df-presentation no-print" style={{ background: colors.ink }}>
@@ -18733,7 +18776,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <Minimize2 size={15} /> Quitter
           </button>
           <div style={{ padding: "24px 12px 48px", zoom: presentationZoom }}>
-            <PrintDocument doc={localDoc} totals={totals} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
+            <PrintDocument doc={localDoc} totals={totals} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} creditTotal={creditTotal} creditNotes={creditNotes} />
           </div>
         </div>
       )}
@@ -18750,5 +18793,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, accountingExportRows, acompteDeduitSplit, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange, RevenueChart, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

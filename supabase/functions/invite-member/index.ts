@@ -146,7 +146,8 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Impossible d'ajouter ce membre pour le moment." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // userId : le site relie au nouveau compte les documents et créneaux d'une fiche « sans accès » convertie.
+    return new Response(JSON.stringify({ success: true, userId: memberUserId }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error(err);
     return new Response(JSON.stringify({ error: "Erreur serveur" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });

@@ -13,7 +13,7 @@ beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = 
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const full = (extra = {}) => ({ ...newPvReceptionDocument([]), docNumber: "PV-003", issueDate: "2026-09-13", objet: "Rénovation salle de bain", dateReceptionEffective: "2026-09-10", company: { ...newPvReceptionDocument([]).company, name: "Bâti Plus" }, client: { ...newPvReceptionDocument([]).client, name: "Mme Martin" }, ...extra });
 const textOf = (html) => new DOMParser().parseFromString(html, "text/html").body.textContent;
 const pdf = (d, photoUrls = {}) => renderToStaticMarkup(<PrintPvReception doc={d} siteSettings={siteSettings} watermarkEnabled={false} photoUrls={photoUrls} />);

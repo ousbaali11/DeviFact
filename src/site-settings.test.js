@@ -14,13 +14,14 @@ describe("cache des paramètres du site", () => {
     expect(readCachedSiteSettings()).toBeNull();
   });
   it("écriture puis relecture", () => {
-    writeCachedSiteSettings({ landingPageVersion: "avancee", theme: "nuit" });
-    expect(readCachedSiteSettings()).toEqual({ landingPageVersion: "avancee", theme: "nuit" });
+    writeCachedSiteSettings({ name: "Chantiflow", contactEmail: "x@y.fr" });
+    expect(readCachedSiteSettings()).toEqual({ name: "Chantiflow", contactEmail: "x@y.fr" });
   });
   it("colonnes de la table → paramètres, avec les valeurs par défaut", () => {
-    const s = siteSettingsFromRow({ id: 1, landing_page_version: "atelier", legal_info: { rcs: "x" } });
-    expect(s).toMatchObject({ theme: "classique", name: "Chantiflow", legalInfo: { rcs: "x" } });
+    const s = siteSettingsFromRow({ id: 1, theme: "moderne", legal_info: { rcs: "x" } });
+    expect(s).toMatchObject({ name: "Chantiflow", legalInfo: { rcs: "x" } });
     expect(s.landingPageVersion).toBeUndefined(); // une seule interface : le réglage n'existe plus
+    expect(s.theme).toBeUndefined(); // sélecteur de thème retiré : la colonne, si elle existe encore, est ignorée
     // Commission Stripe Connect : nombre, 0 si absente ou invalide
     expect(siteSettingsFromRow({ id: 1, connect_fee_percent: "2.50" }).connectFeePercent).toBe(2.5);
     expect(siteSettingsFromRow({ id: 1 }).connectFeePercent).toBe(0);

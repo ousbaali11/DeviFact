@@ -14,7 +14,7 @@ beforeAll(() => {
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const common = { saving: false, account, plans: PLANS, siteSettings, isLocked: false, isViewer: false, onChange: noop, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients: [], products: [], stockByProduct: {}, companyProfile: emptyCompanyProfile(), onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop };
 const line = (extra = {}) => ({ id: "l1", type: "line", designation: "Carrelage 60x60 posé", details: [], qty: 100, unitPrice: 45, unit: "m²", tva: 20, discount: 0, ...extra });
 const doc = (type, extra = {}) => ({ ...newDocument(type, []), docNumber: `${type.toUpperCase()}-002`, client: { ...newDocument(type, []).client, name: "Commune de Lyon" }, items: [line()], ...extra });

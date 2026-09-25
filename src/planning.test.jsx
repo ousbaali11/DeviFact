@@ -12,7 +12,7 @@ beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = 
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const tache = (extra = {}) => ({ ...emptyTachePlanning(), designation: "Gros œuvre", corpsMetier: "Maçon", dateDebut: "2026-10-01", dateFin: "2026-10-20", ...extra });
 const full = (extra = {}) => ({ ...newPlanningChantierDocument([]), docNumber: "PLN-002", issueDate: "2026-09-13", objet: "Extension", adresseChantier: "12 rue des Lilas, Lyon", responsable: "Karim", company: { ...newPlanningChantierDocument([]).company, name: "Bâti Plus", address: "1 rue des Lilas" }, client: { ...newPlanningChantierDocument([]).client, name: "Mme Martin", address: "2 av. du Port" }, taches: [tache(), tache({ designation: "Charpente", corpsMetier: "Charpentier", dateDebut: "2026-10-21", dateFin: "2026-11-05", avancementPct: 40, statut: "en_cours" })], ...extra });
 const textOf = (html) => new DOMParser().parseFromString(html, "text/html").body.textContent;

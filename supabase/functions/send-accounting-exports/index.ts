@@ -19,7 +19,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as XLSX from "https://esm.sh/xlsx@0.18.5";
-import { buildExportSheets, previousPeriod, exportDueToday, type ExportFrequency } from "../_shared/accounting.ts";
+import { buildExportSheets, previousPeriod, exportDueToday, type ExportFrequency, type ExportState } from "../_shared/accounting.ts";
 
 const dbAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
@@ -54,15 +54,15 @@ async function writeState(organizationId: string, state: Record<string, unknown>
 
 // Construit et envoie l'export d'une période. Renvoie { ok, error? } — une
 // lecture en échec n'envoie rien (et ne marque pas la période).
-async function sendExport(organizationId: string, profile: any, period: ReturnType<typeof previousPeriod>, siteName: string, trigger: "auto" | "manuel"): Promise<{ ok: boolean; error?: string; documentCount?: number; to?: string; cc?: string[] }> {
+async function sendExport(organizationId: string, profile: any, period: ReturnType<typeof previousPeriod>, siteName: string, trigger: "auto" | "manuel", state: ExportState | null = null): Promise<{ ok: boolean; empty?: boolean; error?: string; documentCount?: number; to?: string; cc?: string[]; label?: string; exportedNext?: Record<string, unknown> }> {
   try {
-    return await sendExportUnsafe(organizationId, profile, period, siteName, trigger);
+    return await sendExportUnsafe(organizationId, profile, period, siteName, trigger, state);
   } catch (err) {
     console.error("Export comptable non construit :", organizationId, err);
     return { ok: false, error: `Export non envoyé : ${(err as Error)?.message || "lecture des données impossible"}.` };
   }
 }
-async function sendExportUnsafe(organizationId: string, profile: any, period: ReturnType<typeof previousPeriod>, siteName: string, trigger: "auto" | "manuel") {
+async function sendExportUnsafe(organizationId: string, profile: any, period: ReturnType<typeof previousPeriod>, siteName: string, trigger: "auto" | "manuel", state: ExportState | null) {
   const cfg = profile?.accountingExport || {};
   const to = String(cfg.email || "").trim();
   if (!EMAIL_RE.test(to)) return { ok: false, error: "Adresse de l'expert-comptable manquante ou invalide." };
@@ -84,7 +84,10 @@ async function sendExportUnsafe(organizationId: string, profile: any, period: Re
     if (m.error) throw new Error(`Lecture des mouvements de stock impossible : ${m.error.message}`);
     products = p.data || []; movements = m.data || []; clients = Array.isArray(c) ? c : [];
   }
-  const sheets = buildExportSheets(Array.isArray(documents) ? documents : [], period, { includeEntries, products, movements, defaults: profile?.accounting, clients });
+  const sheets = buildExportSheets(Array.isArray(documents) ? documents : [], period, { includeEntries, products, movements, defaults: profile?.accounting, clients }, state);
+  // Rien de nouveau (période déjà envoyée, aucun complément) : pas d'e-mail.
+  if (sheets.documentCount === 0) return { ok: false, empty: true, error: `Rien de nouveau à envoyer pour ${period.label} : tout a déjà été transmis.`, exportedNext: sheets.exportedNext };
+  period = { ...period, label: sheets.label };
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(sheets.rows);
@@ -125,7 +128,7 @@ async function sendExportUnsafe(organizationId: string, profile: any, period: Re
     console.error("Erreur d'envoi de l'export comptable :", resp.status, detail, organizationId);
     return { ok: false, error: `Le service d'envoi a refusé l'e-mail (${resp.status}).` };
   }
-  return { ok: true, documentCount: sheets.documentCount, to, cc };
+  return { ok: true, documentCount: sheets.documentCount, to, cc, label: period.label, exportedNext: sheets.exportedNext };
 }
 
 serve(async (req) => {
@@ -157,10 +160,13 @@ serve(async (req) => {
           const state = (await readKv(row.organization_id, STATE_KEY)) || {};
           if (!exportDueToday(now, frequency, state.lastSentPeriod, SEND_DAY)) continue;
           const period = previousPeriod(now, frequency);
-          const result = await sendExport(row.organization_id, row.value, period, siteName, "auto");
+          const result = await sendExport(row.organization_id, row.value, period, siteName, "auto", state);
           if (result.ok) {
             sent += 1;
-            await writeState(row.organization_id, { lastSentPeriod: period.id, lastSentAt: now.toISOString(), lastSentTo: result.to, lastError: null });
+            await writeState(row.organization_id, { lastSentPeriod: period.id, lastSentAt: now.toISOString(), lastSentTo: result.to, lastError: null, sentThrough: period.to, exported: result.exportedNext });
+          } else if (result.empty) {
+            // Tout était déjà parti (changement de fréquence, par exemple) : période close, sans e-mail.
+            await writeState(row.organization_id, { lastSentPeriod: period.id, lastError: null, sentThrough: period.to, exported: result.exportedNext });
           } else {
             failed += 1;
             await writeState(row.organization_id, { lastError: result.error, lastErrorAt: now.toISOString() });
@@ -194,13 +200,13 @@ serve(async (req) => {
     const cfg = profile?.accountingExport || {};
     const frequency = frequencyOf(cfg.frequency);
     const period = previousPeriod(now, frequency);
-    const result = await sendExport(organizationId, profile, period, siteName, "manuel");
+    const result = await sendExport(organizationId, profile, period, siteName, "manuel", state);
     if (!result.ok) {
-      await writeState(organizationId, { lastError: result.error, lastErrorAt: now.toISOString() });
+      if (!result.empty) await writeState(organizationId, { lastError: result.error, lastErrorAt: now.toISOString() });
       return json({ error: result.error }, 400);
     }
-    await writeState(organizationId, { lastSentPeriod: period.id, lastSentAt: now.toISOString(), lastSentTo: result.to, lastError: null, manualSends: [...recentManual, nowMs] });
-    return json({ sent: true, period: period.id, label: period.label, to: result.to, documentCount: result.documentCount });
+    await writeState(organizationId, { lastSentPeriod: period.id, lastSentAt: now.toISOString(), lastSentTo: result.to, lastError: null, manualSends: [...recentManual, nowMs], sentThrough: period.to, exported: result.exportedNext });
+    return json({ sent: true, period: period.id, label: result.label || period.label, to: result.to, documentCount: result.documentCount });
   } catch (err) {
     console.error("Erreur send-accounting-exports", err);
     return json({ error: "Une erreur inattendue est survenue." }, 500);

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Démarrage : écran d'attente puis Atelier, jamais un autre rendu
+// Démarrage : écran d'attente puis l'application, jamais un autre rendu
 // même un instant, même si le serveur ne répond pas au premier
 // essai. Application complète avec une base simulée.
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
@@ -28,7 +28,7 @@ function builder(table) {
       state.calls += 1;
       if (state.delayMs) await new Promise((r) => setTimeout(r, state.delayMs));
       if (mode === "fail") return { data: null, error: { message: "réseau indisponible (test)" } };
-      return { data: [{ id: 1, name: "Chantiflow", landing_page_version: "atelier", theme: "classique", visible_services: state.visibleServices || null }], error: null };
+      return { data: [{ id: 1, name: "Chantiflow", visible_services: state.visibleServices || null }], error: null };
     }
     const rows = fixtures[table] ? fixtures[table](filters) : [];
     return { data: rows, error: null, count: rows.length };
@@ -57,10 +57,9 @@ beforeAll(() => {
   window.matchMedia = window.matchMedia || (() => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
   if (!window.HTMLCanvasElement.prototype.getContext) window.HTMLCanvasElement.prototype.getContext = () => null;
 });
-beforeEach(() => { localStorage.clear(); document.body.className = ""; state.calls = 0; state.delayMs = 0; state.responses = ["ok"]; state.visibleServices = null; localStorage.setItem("devifact_lastView", "dashboard"); });
+beforeEach(() => { localStorage.clear(); state.calls = 0; state.delayMs = 0; state.responses = ["ok"]; state.visibleServices = null; localStorage.setItem("devifact_lastView", "dashboard"); });
 
-const isAtelierShown = (c) => document.body.classList.contains("df-atelier") && !!c.querySelector('button[title="Menu"]');
-const isClassicShown = (c) => [...c.querySelectorAll("button")].some((b) => b.textContent.trim() === "Tableau de bord") && !document.body.classList.contains("df-atelier");
+const isAppShown = (c) => !!c.querySelector('button[title="Menu"]');
 const isSpinnerOnly = (c) => !!c.querySelector(".animate-spin") && c.querySelectorAll("button").length === 0;
 async function waitFor(check, timeout = 10000) {
   const start = Date.now();
@@ -77,36 +76,29 @@ async function openApp() {
   return { container, unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); } };
 }
 
-describe("démarrage dans la bonne version", () => {
-  it("première visite, réponse lente : uniquement l'écran de chargement jusqu'à la réponse, puis Atelier, et les réglages sont mémorisés", async () => {
+describe("démarrage de l'application", () => {
+  it("première visite, réponse lente : uniquement l'écran de chargement jusqu'à la réponse, puis l'application, et les réglages sont mémorisés", async () => {
     state.delayMs = 400;
     const { container, unmount } = await openApp();
     expect(isSpinnerOnly(container)).toBe(true);
-    expect(isClassicShown(container)).toBe(false);
     await act(async () => { await new Promise((r) => setTimeout(r, 200)); });
     expect(isSpinnerOnly(container)).toBe(true); // toujours rien d'autre que le chargement
-    expect(await waitFor(() => isAtelierShown(container))).toBe(true);
-    expect(JSON.parse(localStorage.getItem("devifact_site_settings")).theme).toBe("classique"); // réglages mémorisés (une seule interface : plus de version)
+    expect(await waitFor(() => isAppShown(container))).toBe(true);
+    expect(JSON.parse(localStorage.getItem("devifact_site_settings")).name).toBe("Chantiflow"); // réglages mémorisés
     await unmount();
   }, 30000);
-  it("version mémorisée « atelier » et serveur qui ne répond pas : Atelier dès le premier rendu, jamais Classique", async () => {
-    localStorage.setItem("devifact_site_settings", JSON.stringify({ landingPageVersion: "atelier", theme: "classique", name: "Chantiflow" }));
+  it("réglages mémorisés et serveur qui ne répond pas : l'application s'ouvre quand même, après trois tentatives", async () => {
+    localStorage.setItem("devifact_site_settings", JSON.stringify({ name: "Chantiflow" }));
     state.responses = ["fail", "fail", "fail"];
     const { container, unmount } = await openApp();
-    expect(document.body.classList.contains("df-atelier")).toBe(true); // avant même la réponse du serveur
-    expect(isClassicShown(container)).toBe(false);
-    expect(await waitFor(() => isAtelierShown(container))).toBe(true);
-    expect(isClassicShown(container)).toBe(false);
+    expect(await waitFor(() => isAppShown(container))).toBe(true);
     expect(state.calls).toBe(3); // trois tentatives
     await unmount();
   }, 30000);
-  it("premier essai en échec puis réponse : Atelier, sans passage par une autre version", async () => {
+  it("premier essai en échec puis réponse : l'application s'ouvre", async () => {
     state.responses = ["fail", "ok"];
     const { container, unmount } = await openApp();
-    let classicSeen = false;
-    const ok = await waitFor(() => { if (isClassicShown(container)) classicSeen = true; return isAtelierShown(container); });
-    expect(ok).toBe(true);
-    expect(classicSeen).toBe(false);
+    expect(await waitFor(() => isAppShown(container))).toBe(true);
     expect(state.calls).toBe(2);
     await unmount();
   }, 30000);
@@ -116,7 +108,7 @@ describe("module Banque masqué : pas d'accès direct", () => {
   it("vue « banque » mémorisée sur l'appareil : accueil affiché tant que l'Admin n'a pas activé le module, page Banque ensuite", async () => {
     localStorage.setItem("devifact_lastView", "banque");
     const { container, unmount } = await openApp();
-    expect(await waitFor(() => isAtelierShown(container))).toBe(true);
+    expect(await waitFor(() => isAppShown(container))).toBe(true);
     expect(container.textContent).not.toContain("Relevés importés et rapprochement avec tes factures");
     await unmount();
     state.visibleServices = ["devis", "facture", "banque"];

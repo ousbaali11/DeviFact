@@ -14,7 +14,7 @@ beforeAll(() => {
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const products = [
   { ...emptyProduct("org"), id: "p1", name: "Carrelage 60x60", reference: "CAR-60", sale_price_ht: 25, sale_vat_rate: 20, is_active: true, quantity_restricted: false, default_quantity: 2, unit: "m²" },
   { ...emptyProduct("org"), id: "p2", name: "Colle flex", reference: "COL-FLX", sale_price_ht: 8, sale_vat_rate: 20, is_active: true, quantity_restricted: false },

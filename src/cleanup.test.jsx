@@ -11,7 +11,7 @@ beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = 
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const clients = [
   { id: "cli_1", name: "Mme Martin", address: "2 av. du Port", email: "martin@exemple.fr", phone: "06 11" },
   { id: "cli_2", name: "Commune de Lyon", address: "Hôtel de ville", email: "", phone: "" },

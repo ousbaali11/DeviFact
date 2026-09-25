@@ -19,7 +19,7 @@ beforeAll(() => {
 });
 
 const account = { id: "user_test", organizationId: "org_test", plan: "pro", paymentStatus: "payé", role: "owner", email: "test@exemple.fr", firstName: "Test", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique", theme: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const noop = () => {};
 const common = { saving: false, account, plans: PLANS, siteSettings, isLocked: false, isViewer: false, onChange: noop, onFinalize: noop, onBack: noop, onGoToPricing: noop };
 

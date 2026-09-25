@@ -10,7 +10,7 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { amountDueOf, formatAmount } from "../_shared/totals.ts";
+import { amountDueOf, formatAmount, isPayableDoc } from "../_shared/totals.ts";
 import { parisTodayIso } from "../_shared/dates.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 
@@ -68,7 +68,9 @@ serve(async (req) => {
           // bord : factures « envoyée » ou « en retard » (statut posé à la
           // main) — jamais un brouillon (jamais transmis au client), ni une
           // facture déjà payée.
-          if (doc.type !== "facture" || (doc.status !== "envoyée" && doc.status !== "en retard")) continue;
+          // Facture, facture d'acompte ou situation valant facture (même règle que le tableau de bord).
+          if (!isPayableDoc(doc) || (doc.status !== "envoyée" && doc.status !== "en retard")) continue;
+          const docLabel = doc.type === "acompte" ? "Facture d'acompte" : doc.type === "situation" ? "Situation de travaux" : "Facture";
           if (doc.remindersEnabled === false) continue; // désactivé explicitement sur cette facture
           if (!doc.client?.email) continue;
 
@@ -92,11 +94,11 @@ serve(async (req) => {
             body: JSON.stringify({
               from: `${siteName} <${FROM_EMAIL}>`,
               to: [doc.client.email],
-              subject: `Rappel — Facture ${doc.docNumber} en attente de paiement`,
+              subject: `Rappel — ${docLabel} ${doc.docNumber} en attente de paiement`,
               html: `
                 <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto; color: #1B2A33;">
                   <p>Bonjour${doc.client.name ? " " + escapeHtml(doc.client.name) : ""},</p>
-                  <p>Un petit rappel : la facture <strong>${escapeHtml(doc.docNumber)}</strong>, d'un montant de <strong>${escapeHtml(amount)}</strong>, est arrivée à échéance et reste en attente de paiement.</p>
+                  <p>Un petit rappel : la ${docLabel.toLowerCase()} <strong>${escapeHtml(doc.docNumber)}</strong>, d'un montant de <strong>${escapeHtml(amount)}</strong>, est arrivée à échéance et reste en attente de paiement.</p>
                   <p>N'hésite pas à nous contacter si tu as la moindre question à ce sujet.</p>
                   <p>Merci !</p>
                 </div>

@@ -138,7 +138,7 @@ describe("éditeur", () => {
   it("bloc présent dans l'éditeur de facture, absent sur un devis ; lecture seule sans formulaire", async () => {
     const noop = () => {};
     const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-    const common = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow", landingPageVersion: "classique" }, isLocked: false, isViewer: false, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients: [], products: [], stockByProduct: {}, companyProfile: emptyCompanyProfile(), onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, onChange: noop };
+    const common = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow" }, isLocked: false, isViewer: false, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients: [], products: [], stockByProduct: {}, companyProfile: emptyCompanyProfile(), onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, onChange: noop };
     const f = await mount(<Editor {...common} doc={facture({ payments: [] })} />);
     expect(f.container.querySelector(".print-payments-editor")).toBeTruthy();
     expect(button(f.container, "Ajouter le paiement")).toBeTruthy();
@@ -164,7 +164,7 @@ describe("éditeur — paiement en ligne désactivé, règlement par virement", 
   }
   const noop = () => {};
   const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-  const common = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow", landingPageVersion: "classique" }, isLocked: false, isViewer: false, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients: [], products: [], stockByProduct: {}, companyProfile: emptyCompanyProfile(), onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, onChange: noop };
+  const common = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow" }, isLocked: false, isViewer: false, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients: [], products: [], stockByProduct: {}, companyProfile: emptyCompanyProfile(), onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, onChange: noop };
   it("aucune vérification auprès du serveur à l'ouverture, même si la fonction est fournie ; bloc Paiements reçus intact", async () => {
     const asked = [];
     const doc = facture({ payments: pays });

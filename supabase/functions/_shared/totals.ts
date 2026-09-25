@@ -84,6 +84,12 @@ export function computeDocTotals(doc: any): DocTotals {
     return { item, baseHT, totalHTBrut: round2(totalHTBrut), totalHT: round2(totalHTBrut * (1 - rate)), rate: num(item.tva) };
   });
   const subtotalHTBrut = round2(lines.reduce((s: number, l) => s + l.totalHTBrut, 0));
+  // Remise en montant : résidu d'arrondi absorbé sur la dernière ligne (même règle que computeTotals côté site).
+  if (doc?.globalDiscountMode === "amount" && lines.length && rate > 0) {
+    const target = round2(subtotalHTBrut - Math.min(Math.max(0, num(doc.globalDiscount)), subtotalHTBrut));
+    const diff = round2(target - round2(lines.reduce((s: number, l) => s + l.totalHT, 0)));
+    if (diff !== 0) { const last = lines[lines.length - 1]; lines[lines.length - 1] = { ...last, totalHT: round2(last.totalHT + diff) }; }
+  }
   const subtotalHT = round2(lines.reduce((s: number, l) => s + l.totalHT, 0));
   const tvaByRate: Record<string, number> = {};
   for (const l of lines) tvaByRate[String(l.rate)] = (tvaByRate[String(l.rate)] || 0) + l.totalHT;

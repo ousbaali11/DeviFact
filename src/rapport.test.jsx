@@ -13,7 +13,7 @@ beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = 
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const full = (extra = {}) => ({ ...newRapportInterventionDocument([]), docNumber: "RI-005", issueDate: "2026-09-13", technicien: "Karim", motifAppel: "Fuite sous évier", company: { ...newRapportInterventionDocument([]).company, name: "Bâti Plus", address: "1 rue des Lilas", phone: "04 00", email: "contact@batiplus.fr" }, client: { ...newRapportInterventionDocument([]).client, name: "Mme Martin", address: "2 av. du Port", phone: "06 11", email: "m@exemple.fr" }, ...extra });
 const textOf = (html) => new DOMParser().parseFromString(html, "text/html").body.textContent.replace(/[  ]/g, " ");
 const pdf = (d) => textOf(renderToStaticMarkup(<PrintRapportIntervention doc={d} siteSettings={siteSettings} watermarkEnabled={false} />));

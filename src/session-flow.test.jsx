@@ -21,7 +21,7 @@ const fixtures = {
   profiles: () => [{ id: USER.id, email: USER.email, first_name: "Thomas", last_name: "T", is_admin: false, company_name: "" }],
   organization_members: () => [{ role: "owner", organization_id: ORG, organizations: { id: ORG, name: "Test SARL", plan: "pro", billing_cycle: "mensuel", payment_status: "payé", activated_via_free_button: false, expires_at: null, subscription_cancelled: false, stripe_subscription_id: null, paypal_subscription_id: null, stripe_customer_id: null, paid_at: null, price_at_activation: null } }],
   kv_store: (f) => (f.key in kv ? [{ value: kv[f.key] }] : []),
-  site_settings: () => [{ id: 1, name: "Chantiflow", landing_page_version: "classique", theme: "classique" }],
+  site_settings: () => [{ id: 1, name: "Chantiflow" }],
 };
 function builder(table) {
   const filters = {};
@@ -76,7 +76,7 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear(); document.body.className = "";
   Object.assign(auth, { session: null, listener: null, profileDelayMs: 0, profileFailures: 0, emitOnSignIn: true, signInCalls: 0 });
-  localStorage.setItem("devifact_site_settings", JSON.stringify({ landingPageVersion: "classique", theme: "classique", name: "Chantiflow" }));
+  localStorage.setItem("devifact_site_settings", JSON.stringify({ name: "Chantiflow" }));
   localStorage.setItem("devifact_lastView", "dashboard");
 });
 

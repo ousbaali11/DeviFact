@@ -15,7 +15,7 @@ beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = 
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const profile = { ...emptyCompanyProfile(), name: "Bâti Plus", legalForm: "SARL", capital: "5 000 €", registration: "RCS Lyon 1", iban: "FR76 1234" };
 const line = { id: "s1", type: "line", designation: "Gros œuvre", qty: 1, unitPrice: 10000, tva: 20, avancementPct: 30, montantCumulePrecedent: 2000 }; // marché 10 000, cumul 3 000, déjà 2 000 → cette situation 1 000 HT
 const full = (extra = {}) => ({ ...newSituationDocument([]), docNumber: "SIT-003", issueDate: "2026-09-13", numeroSituation: 2, marcheNumero: "M-2026-1", periodeDebut: "2026-08-01", periodeFin: "2026-08-31", company: { ...newSituationDocument([]).company, name: "Bâti Plus" }, client: { ...newSituationDocument([]).client, name: "Client SAS" }, items: [line], retenueGarantiePct: 5, acompteVerse: 100, status: "envoyée", ...extra });
@@ -34,15 +34,18 @@ async function renderOnce(element) {
   return { html, text, disabled };
 }
 
-describe("export comptable — bug du TTC brut", () => {
-  it("situation : 1 000 HT, 200 TVA, retenue 5 % de 1 200 = 60, acompte 100 → TTC exporté = net à payer 1 040 (avant : 1 200)", () => {
+describe("export comptable — TTC de la situation", () => {
+  // Décision du 26/09/2026 : la colonne TTC est le TTC brut (HT + TVA), la
+  // retenue de garantie et l'acompte déjà versé relevant du règlement, pas de
+  // la pièce — même montant que l'écriture 411.
+  it("situation : 1 000 HT, 200 TVA, retenue 5 % de 1 200 = 60, acompte 100 → TTC exporté = 1 200 (net à payer 1 040 hors export)", () => {
     const sit = computeSituation(full());
     expect(sit.subtotalHT).toBe(1000);
     expect(sit.totalTTCBrut).toBe(1200);
     expect(sit.netAPayer).toBe(1040);
     const row = accountingExportRow(full());
     expect(row.slice(0, 5)).toEqual(["Situation de travaux", "SIT-003", "13 sept. 2026", "Client SAS", "envoyée"]);
-    expect(row.slice(5)).toEqual([1000, 200, 1040]);
+    expect(row.slice(5)).toEqual([1000, 200, 1200]);
   });
   it("les autres types gardent leurs colonnes", () => {
     const f = { ...newDocument("facture", []), docNumber: "FAC-1", issueDate: "2026-09-13", client: { name: "C" }, status: "payée", items: [{ id: "l", type: "line", designation: "x", details: [], qty: 2, unitPrice: 50, tva: 20, discount: 0 }] };

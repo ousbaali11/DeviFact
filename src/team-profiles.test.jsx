@@ -32,7 +32,7 @@ beforeEach(() => { calls.rpc = []; calls.invoke = []; state.members = [
 ]; });
 
 const noop = () => {};
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const owner = { id: "u1", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "patron@exemple.fr", memberships: [] };
 const editorAccount = { ...owner, id: "u2", role: "editor", email: "karim@exemple.fr" };
 const click = (el) => act(async () => { el.dispatchEvent(new MouseEvent("click", { bubbles: true })); });

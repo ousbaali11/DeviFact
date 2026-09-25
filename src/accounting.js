@@ -4,6 +4,9 @@
 // Principes retenus (à valider avec un expert-comptable) :
 //   * Ventes : une écriture par facture, facture d'acompte ou avoir émis
 //     (hors brouillon), datée du jour d'émission, au journal des ventes :
+//     (facture d'acompte : produits remplacés par 4191 « acomptes reçus » ;
+//     facture finale qui déduit un acompte : reprise 4191 + TVA au débit,
+//     client au crédit — l'acompte n'est compté qu'une fois en produits)
 //       débit  411 client            = TTC
 //       crédit compte de produits    = HT (par compte : celui du produit
 //                                        lié à la ligne, sinon compte par défaut)
@@ -29,6 +32,7 @@ export const DEFAULT_ACCOUNTS = {
   vatPurchases: "445660", // TVA déductible sur biens et services
   customer: "411000",     // clients
   supplier: "401000",     // fournisseurs
+  advances: "419100",     // clients, avances et acomptes reçus sur commandes
   journalSales: "VE",
   journalPurchases: "AC",
 };
@@ -51,6 +55,17 @@ export function isSalesDocument(doc) {
   return ["facture", "acompte", "avoir"].includes(doc.type) || (doc.type === "situation" && doc.vautFacture === true);
 }
 
+
+// Facture finale qui déduit un acompte déjà facturé (acompteVerse, en TTC) :
+// part HT et TVA au taux moyen de la facture. RÈGLE À CONFIRMER PAR
+// L'EXPERT-COMPTABLE (écriture d'acompte en 4191, reprise sur la facture finale).
+export function acompteSplitOf(doc, totalHT, totalTVA) {
+  const ttc = doc?.type === "facture" ? r2(Math.max(0, Number(doc.acompteVerse) || 0)) : 0;
+  const total = r2((Number(totalHT) || 0) + (Number(totalTVA) || 0));
+  if (ttc <= 0 || total <= 0) return { ttc: 0, ht: 0, tva: 0 };
+  const ht = r2(ttc * ((Number(totalHT) || 0) / total));
+  return { ttc, ht, tva: r2(ttc - ht) };
+}
 function entry(base, account, debit, credit) {
   return { ...base, account, debit: r2(debit), credit: r2(credit) };
 }
@@ -75,7 +90,7 @@ export function buildSalesEntries(documents, { productById = new Map(), defaults
       const rate = Number(l.tva) || 0;
       const tva = r2((ht * rate) / 100);
       const product = l.productId ? productById.get(l.productId) : null;
-      const salesAccount = nonEmpty(product?.account_sales) || acc.sales;
+      const salesAccount = doc.type === "acompte" ? acc.advances : nonEmpty(product?.account_sales) || acc.sales; // acompte : 4191, pas un produit
       const vatAccount = nonEmpty(product?.account_vat_sales) || acc.vatSales;
       const activity = nonEmpty(product?.activity_code);
       if (nonEmpty(product?.journal_code)) journal = product.journal_code.trim();
@@ -86,7 +101,7 @@ export function buildSalesEntries(documents, { productById = new Map(), defaults
       totalHT += ht; totalTVA += tva;
     }
     if (lines.length === 0) continue;
-    const base = { date: doc.issueDate, journal, piece: doc.docNumber, label: `${doc.type === "avoir" ? "Avoir" : doc.type === "situation" ? "Facture de situation" : "Facture"} ${doc.docNumber}${doc.client?.name ? ` - ${doc.client.name}` : ""}`, source: "vente", documentId: doc.id, activity: "" };
+    const base = { date: doc.issueDate, journal, piece: doc.docNumber, label: `${doc.type === "avoir" ? "Avoir" : doc.type === "acompte" ? "Facture d'acompte" : doc.type === "situation" ? "Facture de situation" : "Facture"} ${doc.docNumber}${doc.client?.name ? ` - ${doc.client.name}` : ""}`, source: "vente", documentId: doc.id, activity: "" };
     const ttc = r2(totalHT + totalTVA);
     // Client : débit TTC (crédit pour un avoir)
     entries.push(entry(base, acc.customer, sign > 0 ? ttc : 0, sign > 0 ? 0 : ttc));
@@ -97,6 +112,14 @@ export function buildSalesEntries(documents, { productById = new Map(), defaults
     for (const { account, activity, amount } of vatByAccount.values()) {
       if (r2(amount) === 0) continue;
       entries.push(entry({ ...base, activity }, account, sign > 0 ? 0 : amount, sign > 0 ? amount : 0));
+    }
+    // Reprise de l'acompte déduit sur la facture finale.
+    const a = acompteSplitOf(doc, totalHT, totalTVA);
+    if (a.ttc > 0) {
+      const rbase = { ...base, label: `Reprise de l'acompte - Facture ${doc.docNumber}` };
+      entries.push(entry(rbase, acc.advances, a.ht, 0));
+      if (a.tva !== 0) entries.push(entry(rbase, acc.vatSales, a.tva, 0));
+      entries.push(entry(rbase, acc.customer, 0, a.ttc));
     }
   }
   return entries;

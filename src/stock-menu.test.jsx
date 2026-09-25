@@ -45,7 +45,7 @@ describe("menu déroulant (en-tête Atelier)", () => {
 describe("Atelier (barre principale)", () => {
   const account = { id: "u", organizationId: "org", plan: "pro", role: "owner", email: "t@e.fr", firstName: "Thomas", memberships: [{ organizationId: "org", role: "owner", name: "Org" }] };
   const shell = (view, setView = () => {}) => (
-    <AtelierShell view={view} setView={setView} account={account} siteSettings={{ name: "Chantiflow", landingPageVersion: "atelier" }} darkMode={false} setDarkMode={() => {}} onLogout={() => {}} onSwitchOrganization={() => {}} onCreateOwnOrg={() => {}} creatingOwnOrg={false} onOpenCreate={() => {}} commandPaletteOpen={false} setCommandPaletteOpen={() => {}} paletteCommands={[]}>
+    <AtelierShell view={view} setView={setView} account={account} siteSettings={{ name: "Chantiflow" }} darkMode={false} setDarkMode={() => {}} onLogout={() => {}} onSwitchOrganization={() => {}} onCreateOwnOrg={() => {}} creatingOwnOrg={false} onOpenCreate={() => {}} commandPaletteOpen={false} setCommandPaletteOpen={() => {}} paletteCommands={[]}>
       <div>page</div>
     </AtelierShell>
   );

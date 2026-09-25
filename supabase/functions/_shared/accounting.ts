@@ -13,6 +13,9 @@ const num = (v: unknown) => (Number(v) || 0);
 const r2 = (n: unknown) => Math.round((Number(n) || 0) * 100) / 100;
 const nonEmpty = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
 const fixed2 = (n: number) => Number(n.toFixed(2));
+// Jour (heure de Paris) d'un horodatage — l'export manuel du site prend le
+// jour local de l'appareil : même jour pour une entrée de stock à 22 h 30 UTC.
+const parisDayOf = (v: unknown) => { const dt = new Date(v as string); return isNaN(dt.getTime()) ? String(v || "").slice(0, 10) : parisDateParts(dt).iso; };
 
 export const DEFAULT_ACCOUNTS = {
   sales: "706000",
@@ -22,6 +25,7 @@ export const DEFAULT_ACCOUNTS = {
   vatPurchases: "445660",
   customer: "411000",
   supplier: "401000",
+  advances: "419100",
   journalSales: "VE",
   journalPurchases: "AC",
 };
@@ -147,7 +151,7 @@ export function accountingExportRow(d: any): Array<string | number> {
   }
   if (d.type === "situation") {
     const sit = computeSituationTotals(d);
-    return [...head, fixed2(sit.subtotalHT), fixed2(sit.totalTVA), fixed2(sit.netAPayer)];
+    return [...head, fixed2(sit.subtotalHT), fixed2(sit.totalTVA), fixed2(sit.totalTTCBrut)]; // TTC brut = HT + TVA, comme le site
   }
   if (d.type === "contrat") {
     const ht = num(d.montantTotalHT);
@@ -160,6 +164,27 @@ export function accountingExportRow(d: any): Array<string | number> {
   const sign = d.type === "avoir" ? -1 : 1;
   const signed = (n: number) => { const v = fixed2(sign * n); return v === 0 ? 0 : v; };
   return [...head, signed(t.subtotalHT), signed(t.totalTVA), signed(t.totalTTC)];
+}
+// Facture finale qui déduit un acompte déjà facturé (acompteVerse, TTC) :
+// part HT et TVA au taux moyen de la facture — même règle que le site
+// (acompteDeduitSplit / acompteSplitOf). À CONFIRMER PAR L'EXPERT-COMPTABLE.
+export function acompteSplitOf(doc: any, totalHT: number, totalTVA: number): { ttc: number; ht: number; tva: number } {
+  const ttc = doc?.type === "facture" ? r2(Math.max(0, num(doc.acompteVerse))) : 0;
+  const total = r2(num(totalHT) + num(totalTVA));
+  if (ttc <= 0 || total <= 0) return { ttc: 0, ht: 0, tva: 0 };
+  const ht = r2(ttc * (num(totalHT) / total));
+  return { ttc, ht, tva: r2(ttc - ht) };
+}
+// Lignes de la feuille export d'un document : la ligne du document et, pour
+// une facture qui déduit un acompte, une ligne « Acompte déduit » négative.
+export function accountingExportRows(d: any): Array<Array<string | number>> {
+  const rows = [accountingExportRow(d)];
+  if (d?.type === "facture") {
+    const t = computeDocTotals(d);
+    const a = acompteSplitOf(d, t.subtotalHT, t.totalTVA);
+    if (a.ttc > 0) rows.push(["Acompte déduit", d.docNumber, frDate(d.issueDate), d.client?.name || "", d.status, -a.ht, -a.tva, -a.ttc]);
+  }
+  return rows;
 }
 export const EXPORT_HEADER = ["Type", "Numéro", "Date d'émission", "Client", "Statut", "Montant HT", "Montant TVA", "Montant TTC"];
 export const ENTRIES_HEADER = ["Date", "Journal", "Pièce", "Libellé", "Compte", "Débit", "Crédit", "Code activité", "Source"];
@@ -233,7 +258,7 @@ export function buildSalesEntries(documents: any[], { productById = new Map<stri
       const rate = num(l.tva);
       const tva = r2((ht * rate) / 100);
       const product = l.productId ? productById.get(l.productId) : null;
-      const salesAccount = nonEmpty(product?.account_sales) || acc.sales;
+      const salesAccount = doc.type === "acompte" ? acc.advances : nonEmpty(product?.account_sales) || acc.sales; // acompte : 4191, pas un produit
       const vatAccount = nonEmpty(product?.account_vat_sales) || acc.vatSales;
       const activity = nonEmpty(product?.activity_code);
       if (nonEmpty(product?.journal_code)) journal = product.journal_code.trim();
@@ -244,7 +269,7 @@ export function buildSalesEntries(documents: any[], { productById = new Map<stri
       totalHT += ht; totalTVA += tva;
     }
     if (lines.length === 0) continue;
-    const base = { date: doc.issueDate, journal, piece: doc.docNumber, label: `${doc.type === "avoir" ? "Avoir" : doc.type === "situation" ? "Facture de situation" : "Facture"} ${doc.docNumber}${doc.client?.name ? ` - ${doc.client.name}` : ""}`, source: "vente", documentId: doc.id, activity: "" };
+    const base = { date: doc.issueDate, journal, piece: doc.docNumber, label: `${doc.type === "avoir" ? "Avoir" : doc.type === "acompte" ? "Facture d'acompte" : doc.type === "situation" ? "Facture de situation" : "Facture"} ${doc.docNumber}${doc.client?.name ? ` - ${doc.client.name}` : ""}`, source: "vente", documentId: doc.id, activity: "" };
     const ttc = r2(totalHT + totalTVA);
     entries.push(entry(base, acc.customer, sign > 0 ? ttc : 0, sign > 0 ? 0 : ttc));
     for (const { account, activity, amount } of byAccount.values()) {
@@ -254,6 +279,14 @@ export function buildSalesEntries(documents: any[], { productById = new Map<stri
     for (const { account, activity, amount } of vatByAccount.values()) {
       if (r2(amount) === 0) continue;
       entries.push(entry({ ...base, activity }, account, sign > 0 ? 0 : amount, sign > 0 ? amount : 0));
+    }
+    // Reprise de l'acompte déduit sur la facture finale (même règle que le site).
+    const a = acompteSplitOf(doc, totalHT, totalTVA);
+    if (a.ttc > 0) {
+      const rbase = { ...base, label: `Reprise de l'acompte - Facture ${doc.docNumber}` };
+      entries.push(entry(rbase, acc.advances, a.ht, 0));
+      if (a.tva !== 0) entries.push(entry(rbase, acc.vatSales, a.tva, 0));
+      entries.push(entry(rbase, acc.customer, 0, a.ttc));
     }
   }
   return entries;
@@ -293,7 +326,7 @@ export function buildStockEntries(movements: any[], { productById = new Map<stri
       totalHT += ht; totalTVA += tva;
     }
     if (r2(totalHT) === 0) continue;
-    const base = { date: String(d.date).slice(0, 10), journal, piece: d.ref, label: `Entrée de stock ${d.ref}${d.lines[0]?.reason ? ` - ${d.lines[0].reason}` : ""}`, source: "stock", documentId: d.ref, activity: "" };
+    const base = { date: parisDayOf(d.date), journal, piece: d.ref, label: `Entrée de stock ${d.ref}${d.lines[0]?.reason ? ` - ${d.lines[0].reason}` : ""}`, source: "stock", documentId: d.ref, activity: "" };
     for (const { account, activity, amount } of byAccount.values()) entries.push(entry({ ...base, activity }, account, amount, 0));
     for (const { account, activity, amount } of vatByAccount.values()) if (r2(amount) !== 0) entries.push(entry({ ...base, activity }, account, amount, 0));
     entries.push(entry(base, acc.supplier, 0, r2(totalHT + totalTVA)));
@@ -330,6 +363,41 @@ export function exportDueToday(now: Date, frequency: ExportFrequency, lastSentPe
   if (parisDateParts(now).day < sendDay) return false;
   return previousPeriod(now, frequency).id !== (lastSentPeriod || "");
 }
+// État d'export mémorisé (clé kv accounting-export-state, écrite par le serveur).
+export type ExportedMark = { fp: string; type: string; number: string; date: string; client: string; status: string; ht: number; tva: number; ttc: number };
+export type ExportState = { lastSentPeriod?: string | null; sentThrough?: string | null; exported?: Record<string, ExportedMark> | null };
+const nextDay = (isoDay: string) => { const d = new Date(`${isoDay}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
+// Dernier jour d'une période par son identifiant (« 2026-08 », « 2026-T3 »).
+export function periodEndOf(id: string | null | undefined): string | null {
+  const m = String(id || "").match(/^(\d{4})-(?:(\d{2})|T([1-4]))$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const month = m[2] ? Number(m[2]) : Number(m[3]) * 3;
+  if (month < 1 || month > 12) return null;
+  return iso(y, month, lastDay(y, month));
+}
+// Dernier jour déjà couvert par un envoi (état récent : sentThrough ; ancien
+// état : fin de la dernière période envoyée).
+export function sentThroughOf(state: ExportState | null | undefined): string | null {
+  const st = String(state?.sentThrough || "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(st)) return st;
+  return periodEndOf(state?.lastSentPeriod);
+}
+// Jours de la période restant à envoyer (null : tout est déjà parti). Un
+// passage mensuel → trimestriel n'envoie que les mois pas encore envoyés.
+export function exportWindow(period: ExportPeriod, state: ExportState | null | undefined): { from: string; to: string } | null {
+  const through = sentThroughOf(state);
+  const from = through && through >= period.from ? nextDay(through) : period.from;
+  return from > period.to ? null : { from, to: period.to };
+}
+// Empreinte d'un document tel qu'il a été envoyé (une modification après
+// envoi produit une correction dans l'export suivant).
+export function documentMark(d: any): ExportedMark {
+  const row = accountingExportRow(d);
+  const mark = { type: String(row[0]), number: String(row[1] ?? ""), date: String(d?.issueDate || "").slice(0, 10), client: String(row[3] ?? ""), status: String(row[4] ?? ""), ht: num(row[5]), tva: num(row[6]), ttc: num(row[7]) };
+  return { ...mark, fp: [mark.type, mark.date, mark.ht, mark.tva, mark.ttc].join("|") };
+}
+const markRow = (m: ExportedMark, prefix: string, sign: 1 | -1): Array<string | number> => [`${prefix} : ${m.type}`, m.number, frDate(m.date), m.client, m.status, fixed2(sign * m.ht), fixed2(sign * m.tva), fixed2(sign * m.ttc)];
 export function documentsInPeriod(documents: any[], period: { from: string; to: string }): any[] {
   return (documents || []).filter((d) => {
     const day = String(d?.issueDate || "").slice(0, 10);
@@ -343,20 +411,47 @@ export function entriesInPeriod(entries: Entry[], period: { from: string; to: st
 // Feuilles de l'export d'une période : lignes de la feuille « Export
 // comptable » et, si demandé (forfaits Pro/Entreprise), de la feuille
 // « Écritures » (ventes + entrées de stock de la période).
-export function buildExportSheets(documents: any[], period: ExportPeriod, opts: { includeEntries: boolean; products?: any[]; movements?: any[]; defaults?: any; clients?: any[] }) {
+// Feuille « Export comptable » d'une période : les documents des jours pas
+// encore envoyés, puis les compléments (documents datés dans une période
+// déjà envoyée mais apparus depuis) et les corrections (documents déjà
+// envoyés dont les montants ont changé : une ligne d'annulation négative de
+// ce qui avait été envoyé, puis la ligne corrigée) — jamais de doublon chez
+// l'expert-comptable. exportedNext : empreintes à mémoriser après l'envoi.
+export function buildExportSheets(documents: any[], period: ExportPeriod, opts: { includeEntries: boolean; products?: any[]; movements?: any[]; defaults?: any; clients?: any[] }, state: ExportState | null | undefined = null) {
+  const window = exportWindow(period, state);
   // Documents de vente émis seulement (même filtre que l'export manuel).
-  const docs = documentsInPeriod(documents, period).filter(isSalesDocument);
-  const rows: Array<Array<string | number>> = [EXPORT_HEADER, ...docs.map(accountingExportRow)];
+  const docs = window ? documentsInPeriod(documents, window).filter(isSalesDocument) : [];
+  const exported: Record<string, ExportedMark> = state?.exported && typeof state.exported === "object" ? { ...state.exported } : {};
+  const canDetect = !!(state?.exported && typeof state.exported === "object"); // ancien état sans empreintes : rien à rattraper
+  const through = sentThroughOf(state);
+  const complements: any[] = [], corrections: Array<{ d: any; prev: ExportedMark }> = [];
+  if (canDetect && through) {
+    for (const d of (documents || []).filter(isSalesDocument)) {
+      const day = String(d?.issueDate || "").slice(0, 10);
+      if (!day || day > through || (window && day >= window.from)) continue;
+      const prev = exported[d.id];
+      if (!prev) complements.push(d);
+      else if (prev.fp !== documentMark(d).fp) corrections.push({ d, prev });
+    }
+  }
+  const rows: Array<Array<string | number>> = [EXPORT_HEADER, ...docs.flatMap(accountingExportRows)];
+  for (const d of complements) { const m = documentMark(d); rows.push(markRow(m, "Complément (période déjà envoyée)", 1)); }
+  for (const { d, prev } of corrections) { rows.push(markRow(prev, "Annulation (ligne envoyée précédemment)", -1)); rows.push(markRow(documentMark(d), "Correction", 1)); }
+  const exportedNext: Record<string, ExportedMark> = { ...exported };
+  for (const d of [...docs, ...complements, ...corrections.map((c) => c.d)]) exportedNext[d.id] = documentMark(d);
   let entryRows: Array<Array<string | number>> | null = null;
   if (opts.includeEntries) {
     const productById = new Map((opts.products || []).map((p: any) => [p.id, p]));
     const defaults = accountingDefaults(opts.defaults);
-    const entries = entriesInPeriod([
+    const entries = window ? entriesInPeriod([
       ...buildSalesEntries(documents, { productById, defaults }),
       ...buildPurchaseEntries(documents, { clients: opts.clients || [], defaults }),
       ...buildStockEntries(opts.movements || [], { productById, defaults }).entries,
-    ], period);
+    ], window) : [];
     entryRows = [ENTRIES_HEADER, ...entries.map((e) => [e.date, e.journal, e.piece, e.label, e.account, e.debit, e.credit, e.activity || "", e.source])];
   }
-  return { rows, entryRows, documentCount: docs.length };
+  const partial = !!window && window.from > period.from;
+  const fr = (d: string) => d.split("-").reverse().join("/");
+  const label = `${period.label}${partial ? ` (du ${fr(window!.from)} au ${fr(period.to)}, le reste déjà envoyé)` : ""}${complements.length || corrections.length ? ` + ${complements.length + corrections.length} complément${complements.length + corrections.length > 1 ? "s" : ""}/correction${complements.length + corrections.length > 1 ? "s" : ""} de périodes précédentes` : ""}`;
+  return { rows, entryRows, documentCount: docs.length + complements.length + corrections.length, exportedNext, window, label, complementCount: complements.length, correctionCount: corrections.length };
 }

@@ -17,7 +17,7 @@ beforeAll(() => {
 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
-const siteSettings = { name: "Chantiflow", landingPageVersion: "classique" };
+const siteSettings = { name: "Chantiflow" };
 const common = { saving: false, account, plans: PLANS, siteSettings, isLocked: false, isViewer: false, onChange: noop, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients: [], products: [], stockByProduct: {}, companyProfile: emptyCompanyProfile(), onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop };
 const base = () => ({ ...newDocument("acompte", []), sourceDevisRef: "DEV-014", montantMarcheHT: "1000", acomptePourcentage: 30, client: { ...newDocument("acompte", []).client, name: "Client SAS" } });
 const textOf = (html) => new DOMParser().parseFromString(html, "text/html").body.textContent;

@@ -64,7 +64,7 @@ describe("éditeur : choisir un client existant", () => {
     const noop = () => {};
     const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
     const patches = [];
-    const common = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow", landingPageVersion: "classique" }, isLocked: false, isViewer: false, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients, products: [], stockByProduct: {}, companyProfile: profile, onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, onChange: (p) => patches.push(p) };
+    const common = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow" }, isLocked: false, isViewer: false, onFinalize: noop, onBack: noop, onGoToPricing: noop, clients, products: [], stockByProduct: {}, companyProfile: profile, onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, onChange: (p) => patches.push(p) };
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);

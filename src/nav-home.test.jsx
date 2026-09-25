@@ -76,7 +76,7 @@ describe("logo dans les en-têtes", () => {
   it("Atelier : en-têtes ordinateur et téléphone, deux liens vers l'accueil", async () => {
     const views = [];
     const { container, unmount } = await mount(
-      <AtelierShell view="clients" setView={(v) => views.push(v)} account={account} siteSettings={{ name: "Chantiflow", landingPageVersion: "atelier" }} darkMode={false} setDarkMode={noop} onLogout={noop} onSwitchOrganization={noop} onCreateOwnOrg={noop} creatingOwnOrg={false} onOpenCreate={noop} commandPaletteOpen={false} setCommandPaletteOpen={noop} paletteCommands={[]}><div>page</div></AtelierShell>
+      <AtelierShell view="clients" setView={(v) => views.push(v)} account={account} siteSettings={{ name: "Chantiflow" }} darkMode={false} setDarkMode={noop} onLogout={noop} onSwitchOrganization={noop} onCreateOwnOrg={noop} creatingOwnOrg={false} onOpenCreate={noop} commandPaletteOpen={false} setCommandPaletteOpen={noop} paletteCommands={[]}><div>page</div></AtelierShell>
     );
     const links = homeLinks(container);
     expect(links).toHaveLength(2);
