@@ -47,7 +47,8 @@ describe("reste à payer réel", () => {
 describe("retour automatique en « envoyée »", () => {
   it("ligne ajoutée sur une facture payée : statut, date et référence effacés, message avec le reste", () => {
     const revert = paymentRevertPatch(paid, { items: modified.items });
-    expect(revert).toEqual({ patch: { status: "envoyée", paidAt: null, paidTotal: null }, notice: { docNumber: "FAC-021", amount: 600 } });
+    expect(revert.patch).toEqual({ status: "envoyée", paidAt: null, paidTotal: null });
+    expect(revert.notice).toEqual({ docNumber: "FAC-021", amount: 600, currency: paid.currency });
     // Sans référence mémorisée (ancienne facture) : le total d'avant modification fait foi.
     expect(paymentRevertPatch({ ...paid, paidTotal: undefined }, { items: modified.items }).notice.amount).toBe(600);
   });

@@ -100,7 +100,7 @@ serve(async (req) => {
       // passer à "signé" génère automatiquement sa facture — jamais
       // réappliqué si le document était déjà signé avant (vérifié plus
       // haut, ce cas est déjà écarté).
-      if (original.type === "devis") {
+      if (original.type === "devis" && !list.some((d: any) => d.type === "facture" && d.linkedDevisId === original.id)) {
         const nums = list.filter((d: any) => d.type === "facture").map((d: any) => parseInt((String(d.docNumber).match(/(\d+)$/) || [])[1] || "0", 10));
         const nextNum = (nums.length ? Math.max(...nums) : 0) + 1;
         list.unshift({

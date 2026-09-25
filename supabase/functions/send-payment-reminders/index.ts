@@ -70,7 +70,8 @@ serve(async (req) => {
           if (doc.remindersEnabled === false) continue; // désactivé explicitement sur cette facture
           if (!doc.client?.email) continue;
 
-          const dueDate = doc.issueDate ? new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 30) * 86400000) : null;
+          // Échéance : dueDays vide ou 0 = à réception, comme sur le site (avant : 30 jours par défaut).
+          const dueDate = doc.issueDate ? new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000) : null;
           if (!dueDate || Number.isNaN(dueDate.getTime()) || dueDate.toISOString().slice(0, 10) > todayStr) continue; // pas encore en retard, ou date invalide
 
           // Jamais plus d'une relance par semaine pour la même facture.
@@ -112,7 +113,7 @@ serve(async (req) => {
           // Seules les dates de relance sont reportées sur la version fraîche
           // de la liste : rien d'autre n'est écrasé.
           const sentAt = new Map(documents.filter((d: any) => d.lastReminderSentAt).map((d: any) => [d.id, d.lastReminderSentAt]));
-          const result = await updateKvValue<any[]>(dbAdmin, row.organization_id, "documents", (list) => list.map((d: any) => (sentAt.has(d.id) ? { ...d, lastReminderSentAt: sentAt.get(d.id) } : d)));
+          const result = await updateKvValue<any[]>(dbAdmin, row.organization_id, "documents", (list) => list.map((d: any) => (sentAt.has(d.id) ? { ...d, lastReminderSentAt: sentAt.get(d.id), updatedAt: Date.now() } : d)));
           if (!result.ok) console.error(`Dates de relance non enregistrées pour ${row.organization_id} : ${result.reason}`);
         }
       }

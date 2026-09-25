@@ -98,6 +98,12 @@ serve(async (req) => {
       const { drawing: _drawing, image: _image, ...sig } = publicDoc.signature;
       publicDoc.signature = sig;
     }
+    // Réglages internes copiés dans la fiche entreprise d'anciens documents
+    // (adresse de l'expert-comptable…) : jamais transmis au client.
+    if (publicDoc.company && typeof publicDoc.company === "object") {
+      const { accountingExport: _ax, accounting: _ac, googleReviewUrl: _gr, fiscalStartMonth: _fm, ...company } = publicDoc.company;
+      publicDoc.company = company;
+    }
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name, logo_url").limit(1).maybeSingle();
 
     const onlinePaymentEnabled = INVOICE_ONLINE_PAYMENTS_ENABLED && isPayableDoc(doc) && !!orgRow?.stripe_account_id && orgRow?.stripe_charges_enabled === true;

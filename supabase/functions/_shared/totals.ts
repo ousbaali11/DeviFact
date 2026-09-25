@@ -83,9 +83,13 @@ export function computeDocTotals(doc: any): DocTotals {
   for (const l of lines) tvaByRate[String(l.rate)] = (tvaByRate[String(l.rate)] || 0) + (l.totalHT * l.rate) / 100;
   const totalTVA = Object.values(tvaByRate).reduce((a: number, b: number) => a + b, 0);
   const totalTTC = subtotalHT + totalTVA;
-  const acompteVerse = doc?.type === "facture" ? Math.max(0, num(doc.acompteVerse)) : 0;
-  // Paiements reçus sur la facture (partiels ou solde), eux aussi déduits.
-  const paymentsReceived = doc?.type === "facture" ? paymentsTotalOf(doc) : 0;
+  // Facture ET facture d'acompte, comme sur le site (computeTotals) — sinon
+  // le serveur (paiement en ligne, relances) ignorait l'acompte déjà versé et
+  // les paiements reçus d'une facture d'acompte.
+  const payable = doc?.type === "facture" || doc?.type === "acompte";
+  const acompteVerse = payable ? Math.max(0, num(doc.acompteVerse)) : 0;
+  // Paiements reçus (partiels ou solde), eux aussi déduits.
+  const paymentsReceived = payable ? paymentsTotalOf(doc) : 0;
   const totalPaid = acompteVerse + paymentsReceived;
   return {
     subtotalHTBrut, globalDiscountPct: rate * 100, globalDiscountAmount: subtotalHTBrut - subtotalHT, subtotalHT,

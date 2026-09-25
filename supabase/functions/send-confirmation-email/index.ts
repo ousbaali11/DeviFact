@@ -69,13 +69,18 @@ serve(async (req) => {
       isAllowed = ageMinutes <= 10;
     }
     if (!isAllowed) {
-      return new Response(JSON.stringify({ error: "Non autorisé." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      // Réponse neutre (identique à un envoi réussi) : ne révèle pas si
+      // l'adresse visée a un compte, ni son ancienneté.
+      console.warn("send-confirmation-email : appel non autorisé ignoré");
+      return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     // Limite de fréquence — même pour un cas légitime, jamais plus
     // d'un envoi toutes les 60 secondes pour le même compte.
     if (profile.last_confirmation_sent_at) {
       const secondsSinceLast = (Date.now() - new Date(profile.last_confirmation_sent_at).getTime()) / 1000;
       if (secondsSinceLast < 60) {
+        // Hors Admin, même réponse neutre qu'un envoi : rien à déduire.
+        if (!callerIsAdmin) return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
         return new Response(JSON.stringify({ error: "Un email a déjà été envoyé il y a moins d'une minute — patiente un peu avant de réessayer." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }

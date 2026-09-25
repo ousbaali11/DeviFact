@@ -7,6 +7,7 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { safeOrigin } from "../_shared/stripe.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -81,7 +82,7 @@ serve(async (req) => {
     // Sinon, crée le compte et lui envoie un email d'invitation.
     if (!memberUserId) {
       const { data: invited, error: inviteError } = await dbAdmin.auth.admin.inviteUserByEmail(cleanEmail, {
-        redirectTo: req.headers.get("origin") || undefined,
+        redirectTo: safeOrigin(req.headers.get("origin")),
       });
       if (inviteError) {
         // Cas particulier : le compte existe déjà dans auth.users mais
@@ -97,7 +98,7 @@ serve(async (req) => {
           memberUserId = found.id;
         } else {
           console.error("Erreur d'invitation :", inviteError.message);
-          return new Response(JSON.stringify({ error: "Impossible d'envoyer l'invitation : " + inviteError.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          return new Response(JSON.stringify({ error: "Impossible d'envoyer l'invitation pour le moment." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       } else {
         memberUserId = invited.user.id;
@@ -131,7 +132,7 @@ serve(async (req) => {
     });
     if (insertError) {
       console.error("Erreur d'ajout du membre :", insertError.message);
-      return new Response(JSON.stringify({ error: "Impossible d'ajouter ce membre : " + insertError.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Impossible d'ajouter ce membre pour le moment." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

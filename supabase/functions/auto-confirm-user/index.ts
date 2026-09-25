@@ -56,7 +56,7 @@ serve(async (req) => {
     const { error } = await dbAdmin.auth.admin.updateUserById(userId, { email_confirm: true });
     if (error) {
       console.error("Erreur de confirmation forcée :", error);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Confirmation impossible pour le moment." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });

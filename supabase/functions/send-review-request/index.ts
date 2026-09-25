@@ -21,6 +21,7 @@ const dbAdmin = createClient(
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
 const FROM_EMAIL = Deno.env.get("CONFIRMATION_FROM_EMAIL") || "noreply@chantiflow.fr";
 const FROM_NAME = Deno.env.get("CONFIRMATION_FROM_NAME") || "Chantiflow";
+const REVIEW_STATE_KEY = "review-request-state";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -83,12 +84,28 @@ serve(async (req) => {
     // Uniquement une adresse Google : cet e-mail part au nom de la
     // plateforme, il ne doit jamais servir à envoyer un lien arbitraire.
     const host = parsedUrl.hostname.toLowerCase();
-    if (!/(^|\.)google\.[a-z.]+$|(^|\.)g\.page$|(^|\.)goo\.gl$/.test(host)) {
+    // Domaine Google exact (google.fr, google.com, google.co.uk, g.page,
+    // goo.gl) — jamais « google.evil.com », que l'ancien motif acceptait.
+    if (!/(^|\.)google\.[a-z]{2,3}(\.[a-z]{2})?$|(^|\.)g\.page$|(^|\.)goo\.gl$/.test(host)) {
       return json({ error: "Le lien d'avis doit être une adresse Google (g.page, google.com, maps.app.goo.gl)." }, 400);
     }
 
     const clientEmail = String(doc.client?.email || "").trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) return json({ error: "Le client de cette facture n'a pas d'adresse email valide." }, 400);
+
+    // Limites d'envoi (état écrit par le serveur seulement, clé kv
+    // « review-request-state ») : une demande par facture tous les 7 jours,
+    // 20 demandes par organisation et par jour — un membre ne peut pas se
+    // servir de la plateforme pour arroser une adresse.
+    const { data: stateRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", REVIEW_STATE_KEY).eq("shared", false).maybeSingle();
+    const state = (stateRow?.value && typeof stateRow.value === "object") ? stateRow.value as { day?: string; count?: number; sent?: Record<string, number> } : {};
+    const today = new Date().toISOString().slice(0, 10);
+    const sent = state.sent && typeof state.sent === "object" ? state.sent : {};
+    const dayCount = state.day === today ? Number(state.count) || 0 : 0;
+    if (sent[documentId] && Date.now() - Number(sent[documentId]) < 7 * 86400000) {
+      return json({ error: "Une demande d'avis a déjà été envoyée pour cette facture il y a moins de 7 jours." }, 429);
+    }
+    if (dayCount >= 20) return json({ error: "Limite atteinte : 20 demandes d'avis par jour. Réessaie demain." }, 429);
     const clientName = String(doc.client?.name || "").trim();
     const companyName = String(company.name || doc.company?.name || "").trim() || FROM_NAME;
     const companyEmail = String(company.email || doc.company?.email || "").trim();
@@ -125,6 +142,17 @@ serve(async (req) => {
       console.error("Erreur d'envoi de la demande d'avis", errText);
       return json({ error: "L'envoi de l'email a échoué. Réessaie dans un instant." }, 502);
     }
+
+    // Envoi réussi : compteur du jour et date par facture (entrées de plus de
+    // 7 jours oubliées pour ne pas grossir sans fin).
+    const keptSent: Record<string, number> = {};
+    for (const [id, ts] of Object.entries(sent)) if (Date.now() - Number(ts) < 7 * 86400000) keptSent[id] = Number(ts);
+    keptSent[documentId] = Date.now();
+    const { error: stateError } = await dbAdmin.from("kv_store").upsert(
+      { organization_id: organizationId, key: REVIEW_STATE_KEY, shared: false, value: { day: today, count: dayCount + 1, sent: keptSent }, updated_at: new Date().toISOString() },
+      { onConflict: "organization_id,key,shared" },
+    );
+    if (stateError) console.error("État des demandes d'avis non enregistré :", stateError.message);
 
     return json({ success: true });
   } catch (err) {

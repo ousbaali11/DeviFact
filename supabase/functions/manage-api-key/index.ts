@@ -63,8 +63,8 @@ serve(async (req) => {
     }
 
     // Vérifie que l'organisation est bien sur le forfait Entreprise.
-    const { data: org } = await dbAdmin.from("organizations").select("plan").eq("id", organizationId).maybeSingle();
-    if (org?.plan !== "entreprise") {
+    const { data: org } = await dbAdmin.from("organizations").select("plan, payment_status").eq("id", organizationId).maybeSingle();
+    if (org?.plan !== "entreprise" || org?.payment_status !== "payé") {
       return jsonResponse({ error: "L'accès API est réservé au forfait Entreprise" }, 403);
     }
 
@@ -79,7 +79,7 @@ serve(async (req) => {
         key_prefix: keyPrefix,
         created_by: user.id,
       }).select("id, name, key_prefix, created_at").single();
-      if (error) return jsonResponse({ error: "Erreur de création : " + error.message }, 500);
+      if (error) { console.error("Erreur de création de clé API :", error.message); return jsonResponse({ error: "Impossible de créer la clé pour le moment." }, 500); }
       // La clé en clair n'apparaît qu'ici, une seule fois — impossible
       // de la récupérer à nouveau après cette réponse.
       return jsonResponse({ ...created, key: plainKey });
@@ -90,7 +90,7 @@ serve(async (req) => {
       const { error } = await dbAdmin.from("api_keys")
         .update({ revoked_at: new Date().toISOString() })
         .eq("id", keyId).eq("organization_id", organizationId);
-      if (error) return jsonResponse({ error: "Erreur de révocation : " + error.message }, 500);
+      if (error) { console.error("Erreur de révocation de clé API :", error.message); return jsonResponse({ error: "Impossible de révoquer la clé pour le moment." }, 500); }
       return jsonResponse({ success: true });
     }
 

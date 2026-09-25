@@ -47,16 +47,18 @@ serve(async (req) => {
     const keyHash = await hashKey(key);
     const { data: apiKey } = await dbAdmin
       .from("api_keys")
-      .select("id, organization_id, revoked_at, organizations ( plan )")
+      .select("id, organization_id, revoked_at, organizations ( plan, payment_status )")
       .eq("key_hash", keyHash)
       .maybeSingle();
 
     if (!apiKey || apiKey.revoked_at) return jsonResponse({ error: "Clé API invalide ou révoquée" }, 401);
     // Relation "organizations" : un seul objet à l'exécution (clé étrangère
     // unique), mais typé comme un tableau par le client — on accepte les deux.
-    const orgRel = apiKey.organizations as unknown as { plan?: string } | { plan?: string }[] | null;
-    const orgPlan = Array.isArray(orgRel) ? orgRel[0]?.plan : orgRel?.plan;
-    if (orgPlan !== "entreprise") {
+    const orgRel = apiKey.organizations as unknown as { plan?: string; payment_status?: string } | { plan?: string; payment_status?: string }[] | null;
+    const org = Array.isArray(orgRel) ? orgRel[0] : orgRel;
+    // Forfait Entreprise réellement actif : abonnement payé (jamais un forfait
+    // posé sans paiement).
+    if (org?.plan !== "entreprise" || org?.payment_status !== "payé") {
       return jsonResponse({ error: "Cette organisation n'est plus sur le forfait Entreprise — l'accès API est désactivé" }, 403);
     }
 

@@ -694,7 +694,7 @@ function geoDefaults() {
 async function detectGeoCountry() {
   if (typeof window === "undefined" || detectedGeo) return;
   try {
-    const cached = JSON.parse(localStorage.getItem(GEO_STORAGE_KEY) || "null");
+    const cached = JSON.parse(lsGet(GEO_STORAGE_KEY) || "null");
     if (cached?.code && Date.now() - (cached.at || 0) < GEO_CACHE_DAYS * 86400000) {
       detectedGeo = geoFromCode(cached.code);
       if (detectedGeo) return;
@@ -709,7 +709,7 @@ async function detectGeoCountry() {
     const geo = geoFromCode(GEO_TIMEZONE_COUNTRIES[tz] || region);
     if (!geo) return;
     detectedGeo = geo;
-    try { localStorage.setItem(GEO_STORAGE_KEY, JSON.stringify({ code: geo.code, at: Date.now() })); } catch { /* ignoré */ }
+    try { lsSet(GEO_STORAGE_KEY, JSON.stringify({ code: geo.code, at: Date.now() })); } catch { /* ignoré */ }
   } catch {
     // Appareil sans ces informations : valeurs par défaut, sans bruit.
   }
@@ -721,16 +721,28 @@ const GEO_TIMEZONE_COUNTRIES = {
   "America/Toronto": "CA", "Indian/Reunion": "RE", "America/Martinique": "MQ", "America/Guadeloupe": "GP", "America/Cayenne": "GF",
   "Indian/Mayotte": "YT", "Pacific/Noumea": "NC", "Pacific/Tahiti": "PF", "Europe/Andorra": "AD", "Africa/Dakar": "SN", "Africa/Abidjan": "CI",
 };
-const fr = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+// Stockage local du navigateur : peut être bloqué (navigation privée,
+// réglages stricts) — jamais une raison de faire planter la page.
+function lsGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
+function lsSet(key, value) { try { localStorage.setItem(key, value); } catch { /* stockage local indisponible */ } }
+function lsRemove(key) { try { localStorage.removeItem(key); } catch { /* stockage local indisponible */ } }
+// Date « AAAA-MM-JJ » lue en heure LOCALE : new Date("2026-09-25") la lit à
+// minuit UTC, soit la veille au soir sur un fuseau à l'ouest (Antilles,
+// Guyane, Canada) — la date imprimée ou comparée était décalée d'un jour.
+function localDateOf(d) {
+  if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) { const [y, m, day] = d.split("-").map(Number); return new Date(y, m - 1, day); }
+  return d instanceof Date ? d : new Date(d);
+}
+const fr = (d) => localDateOf(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
 // Format court pour la colonne "Situation" des révisions de prix :
 // jour + mois sur 3 lettres, en majuscules, sans année (ex: "21 FEV").
 const MOIS_COURTS = ["JAN", "FEV", "MAR", "AVR", "MAI", "JUN", "JUL", "AOU", "SEP", "OCT", "NOV", "DEC"];
 const frShort = (d) => {
-  const date = new Date(d);
+  const date = localDateOf(d);
   const jour = String(date.getDate()).padStart(2, "0");
   return `${jour} ${MOIS_COURTS[date.getMonth()]}`;
 };
-const frLong = (d) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+const frLong = (d) => localDateOf(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 
 // Ligne d'article sans aucun contenu (désignation, sous-détails, prix) :
 // c'est celle qu'un produit inséré depuis la bibliothèque doit remplir.
@@ -816,7 +828,7 @@ function withGeoCountry(profile) {
 // tout ce que les PDF et Factur-X lisent (identité, coordonnées, IBAN, BIC,
 // option débits, mentions légales), sans les réglages propres à
 // l'application qui n'ont rien à faire dans un document.
-const COMPANY_SNAPSHOT_EXCLUDED = ["googleReviewUrl", "fiscalStartMonth", "accounting"];
+const COMPANY_SNAPSHOT_EXCLUDED = ["googleReviewUrl", "fiscalStartMonth", "accounting", "accountingExport"];
 function companySnapshotOf(profile) {
   const out = { ...(profile || {}) };
   for (const k of COMPANY_SNAPSHOT_EXCLUDED) delete out[k];
@@ -890,6 +902,17 @@ function duplicatedDocumentOf(original, documents) {
   if (copy.signature) copy.signature = null;
   if (copy.signatureTechnicien?.name) copy.signatureTechnicien = { ...copy.signatureTechnicien, name: "", date: "" };
   if (Array.isArray(copy.photos) && copy.photos.length) copy.photos = [];
+  // Liens avec d'autres documents, suivi des relances, total réglé mémorisé,
+  // signatures des PV / contrats / rapports : propres à l'original.
+  delete copy.linkedDevisId; delete copy.sourceDevisNumber; delete copy.lastReminderSentAt; delete copy.splitFrom; delete copy.paidTotal;
+  if (copy.signatureClient) copy.signatureClient = { ...copy.signatureClient, name: "", date: "" };
+  if (copy.signatureEntreprise) copy.signatureEntreprise = { ...copy.signatureEntreprise, name: "", date: "" };
+  if (copy.type === "situation") {
+    // Une situation copiée démarre une nouvelle chaîne : n° 1, rien de
+    // « déjà facturé » — sinon deux « Situation n° 2 » coexistaient.
+    delete copy.previousSituationId; copy.numeroSituation = 1;
+    if (Array.isArray(copy.items)) copy.items = copy.items.map((it) => (it && it.type === "line" ? { ...it, montantCumulePrecedent: 0 } : it));
+  }
   return copy;
 }
 // Client enregistré dont le nom correspond (sans tenir compte de la casse ni
@@ -918,7 +941,7 @@ function emptyCompanyProfile() {
 function nextNumber(documents, type) {
   const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", situation: "SIT", pv_reception: "PV", bpu: "BPU", rapport: "RI", contrat: "CTR", relance: "MED", planning: "PLN" };
   const prefix = prefixes[type] || "FAC";
-  const nums = documents.filter((d) => d.type === type).map((d) => parseInt((d.docNumber.match(/(\d+)$/) || [])[1] || "0", 10));
+  const nums = documents.filter((d) => d.type === type).map((d) => parseInt((String(d.docNumber ?? "").match(/(\d+)$/) || [])[1] || "0", 10));
   const next = (nums.length ? Math.max(...nums) : 0) + 1;
   return `${prefix}-${String(next).padStart(3, "0")}`;
 }
@@ -1081,7 +1104,7 @@ function emptyRevisionTerm() {
 
 function emptyRevisionSector(sector, country) {
   const info = getRevisionCountryInfo(country);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toIsoDate(new Date());
   return {
     id: nextId("rs"),
     sector: sector || REVISION_SECTORS[0],
@@ -1099,11 +1122,11 @@ function emptyRevisionSector(sector, country) {
 }
 
 function emptyMois() {
-  return { id: nextId("ms"), date: new Date().toISOString().slice(0, 10), jours: "", valeurs: {} };
+  return { id: nextId("ms"), date: toIsoDate(new Date()), jours: "", valeurs: {} };
 }
 
 function emptyDecompte() {
-  return { id: nextId("dc"), label: "", dateDecompte: new Date().toISOString().slice(0, 10), montantTotal: "", mois: [emptyMois()] };
+  return { id: nextId("dc"), label: "", dateDecompte: toIsoDate(new Date()), montantTotal: "", mois: [emptyMois()] };
 }
 
 function newRevisionDocument(sector, country, documents) {
@@ -1113,7 +1136,7 @@ function newRevisionDocument(sector, country, documents) {
     type: "revision",
     schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "revision"),
-    issueDate: new Date().toISOString().slice(0, 10),
+    issueDate: toIsoDate(new Date()),
     currency: info.currency || "EUR",
     country,
     marcheNumero: "",
@@ -1173,7 +1196,7 @@ function getRevisionSectors(doc) {
 // Le montant initial "de référence" d'un secteur : soit sa valeur
 // unique, soit la somme de ses décomptes s'il en utilise plusieurs.
 function getSectorMontantInitial(line) {
-  if (line?.useDecomptes && Array.isArray(line.decomptes)) {
+  if (line?.useDecomptes && Array.isArray(line.decomptes) && line.decomptes.length) {
     return line.decomptes.reduce((s, d) => s + (Number(d.montantTotal) || 0), 0);
   }
   return Number(line?.montantInitialHT) || 0;
@@ -1249,16 +1272,19 @@ function computeRevisionLine(line) {
     const results = line.decomptes.map((d) => computeDecompteRevision(line, d));
     const validResults = results.filter((r) => r.valid);
     if (!validResults.length) return { valid: false, montantRevise: 0, ecartMontant: 0, ecartPct: 0, coefficient: 0 };
-    const montantInitial = getSectorMontantInitial(line);
+    // Montant initial des seuls décomptes calculables : un décompte encore
+    // incomplet (indices manquants) ne compte ni au révisé ni à l'initial —
+    // sinon l'écart affiché était faussé d'autant.
+    const montantInitial = results.reduce((s, r, i) => s + (r.valid ? Number(line.decomptes[i]?.montantTotal) || 0 : 0), 0);
     const montantRevise = validResults.reduce((s, r) => s + r.montantRevise, 0);
     const ecartMontant = montantRevise - montantInitial;
     const ecartPct = montantInitial ? (ecartMontant / montantInitial) * 100 : 0;
-    return { valid: true, montantRevise, ecartMontant, ecartPct, coefficient: 0 };
+    return { valid: true, montantRevise, ecartMontant, ecartPct, coefficient: 0, montantInitial };
   }
   const result = computeRevisionAmount(line, line?.montantInitialHT, line?.valeursActuelles);
   const c0 = Number(line?.montantInitialHT) || 0;
   const ecartPct = result.valid && c0 ? (result.ecartMontant / c0) * 100 : 0;
-  return { ...result, ecartPct };
+  return { ...result, ecartPct, montantInitial: c0 };
 }
 
 // Total combiné de tous les secteurs d'un document — c'est cette
@@ -1285,7 +1311,7 @@ function newSituationDocument(documents) {
     type: "situation",
     schemaVersion: DOCUMENT_SCHEMA_VERSION,
     docNumber: nextNumber(documents, "situation"),
-    issueDate: new Date().toISOString().slice(0, 10),
+    issueDate: toIsoDate(new Date()),
     currency: "EUR",
     numeroSituation: 1,
     // Période couverte par la situation (du … au …), obligatoire pour les
@@ -1387,7 +1413,7 @@ function createNextSituation(sourceDoc, documents) {
 // le montant TTC est le NET À PAYER (après retenue de garantie et acompte),
 // comme partout ailleurs dans l'application — auparavant le TTC brut.
 function accountingExportRow(d) {
-  const head = [docTypeLabel(d.type), d.docNumber, fr(new Date(d.issueDate)), d.client?.name || "", d.status];
+  const head = [docTypeLabel(d.type), d.docNumber, fr(d.issueDate), d.client?.name || "", d.status];
   if (d.type === "revision") {
     // Montant de la révision (écart) HT par secteur, sa TVA au taux du
     // secteur, et le TTC — les totaux imprimés sur la note de calcul.
@@ -1429,7 +1455,7 @@ function emptyReserve() {
 }
 
 function newPvReceptionDocument(documents) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toIsoDate(new Date());
   return {
     id: nextId("doc"),
     type: "pv_reception",
@@ -1462,6 +1488,7 @@ function newPvReceptionDocument(documents) {
 // facile à faire à la main (et souvent oubliée).
 function computePvGaranties(doc) {
   if (!doc.dateReceptionEffective) return null;
+  if (doc.typeReception === "refusee") return null; // réception refusée : aucune garantie ne court
   const base = new Date(doc.dateReceptionEffective);
   if (isNaN(base.getTime())) return null;
   const addTime = (months) => { const d = new Date(base); d.setMonth(d.getMonth() + months); return d; };
@@ -1482,7 +1509,7 @@ function emptyMaterielUtilise() {
 }
 
 function newRapportInterventionDocument(documents) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toIsoDate(new Date());
   return {
     id: nextId("doc"),
     type: "rapport",
@@ -1539,7 +1566,7 @@ function computeInterventionDuree(doc) {
 // droit) avant signature — c'est rappelé dans le formulaire et sur
 // le PDF lui-même.
 function newContratChantierDocument(documents) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toIsoDate(new Date());
   return {
     id: nextId("doc"),
     type: "contrat",
@@ -1589,7 +1616,7 @@ function newContratChantierDocument(documents) {
 // forfaitaire de 40 € est une obligation légale française entre
 // professionnels (Code de commerce) — proposée par défaut, éditable.
 function newRelanceFormelleDocument(documents) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toIsoDate(new Date());
   return {
     id: nextId("doc"),
     type: "relance",
@@ -1640,7 +1667,7 @@ function emptyTachePlanning() {
 }
 
 function newPlanningChantierDocument(documents) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toIsoDate(new Date());
   return {
     id: nextId("doc"),
     type: "planning",
@@ -1670,8 +1697,8 @@ function computeTacheStatutEffectif(tache) {
   if (tache.statut === "termine" || tache.statut === "en_cours" || tache.statut === "retard") return tache.statut;
   if (!tache.dateDebut && !tache.dateFin) return "a_venir";
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const debut = tache.dateDebut ? new Date(tache.dateDebut) : null;
-  const fin = tache.dateFin ? new Date(tache.dateFin) : null;
+  const debut = tache.dateDebut ? localDateOf(tache.dateDebut) : null;
+  const fin = tache.dateFin ? localDateOf(tache.dateFin) : null;
   if (fin && today > fin) return "retard";
   if (debut && today >= debut) return "en_cours";
   return "a_venir";
@@ -1707,7 +1734,8 @@ function computeRevision(doc) {
   const lines = sectors.map(computeRevisionLine);
   const validLines = lines.filter((l) => l.valid);
   if (!validLines.length) return { valid: false, montantRevise: 0, ecartMontant: 0, ecartPct: 0, coefficient: 0 };
-  const montantInitialTotal = sectors.reduce((s, l) => s + getSectorMontantInitial(l), 0);
+  // Même périmètre que le révisé : les seuls secteurs calculables.
+  const montantInitialTotal = validLines.reduce((s, l) => s + (Number(l.montantInitial) || 0), 0);
   const montantRevise = validLines.reduce((s, l) => s + l.montantRevise, 0);
   const ecartMontant = montantRevise - montantInitialTotal;
   const ecartPct = montantInitialTotal ? (ecartMontant / montantInitialTotal) * 100 : 0;
@@ -2117,7 +2145,7 @@ function newDocument(type, documents) {
     schemaVersion: DOCUMENT_SCHEMA_VERSION,
     type,
     docNumber: nextNumber(documents, type),
-    issueDate: new Date().toISOString().slice(0, 10),
+    issueDate: toIsoDate(new Date()),
     currency: geoDefaults().currency,
     validityDays: 30,
     showValidity: true,
@@ -2273,7 +2301,7 @@ function paymentRevertPatch(original, patch) {
   const settledRef = Number(original.paidTotal) > 0 ? Number(original.paidTotal) : documentSettledTotal(original);
   const outstanding = documentOutstanding({ ...next, status: "payée", paidTotal: settledRef });
   if (outstanding <= 0.005) return null;
-  return { patch: { status: "envoyée", paidAt: null, paidTotal: null }, notice: { docNumber: next.docNumber || "", amount: outstanding } };
+  return { patch: { status: "envoyée", paidAt: null, paidTotal: null }, notice: { docNumber: next.docNumber || "", amount: outstanding, currency: original.currency } };
 }
 function documentPaidTotal(doc) {
   if (!doc) return 0;
@@ -2503,8 +2531,8 @@ function legalMentionLines(doc, companyProfile, options = {}) {
 const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSettings, watermarkEnabled = true, publicQr = null, companyProfile = null }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const hasGlobalDiscount = (totals.globalDiscountPct || 0) > 0 && (totals.globalDiscountAmount || 0) > 0;
-  const validityDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
-  const dueDate = new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
+  const validityDate = new Date(localDateOf(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
+  const dueDate = new Date(localDateOf(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
   const lineItems = (doc.items || []).filter((i) => i.type === "line" || i.type === "section");
   const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
   const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
@@ -2545,7 +2573,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   const amountPaid = receivedTotal + settledBalance;
   const amountToPay = Math.max(0, Math.round((totalTTC - amountPaid) * 100) / 100);
   const isPaid = isMarkedPaid && amountToPay <= 0.005;
-  const paidDate = doc.paidAt ? new Date(doc.paidAt).toLocaleDateString("fr-FR") : "";
+  const paidDate = doc.paidAt ? localDateOf(doc.paidAt).toLocaleDateString("fr-FR") : "";
   const paymentsReceived = [];
   if (paidBefore > 0) paymentsReceived.push({ amount: paidBefore, label: "Acompte versé" });
   docPayments.forEach((p) => paymentsReceived.push({ amount: Number(p.amount) || 0, date: paymentDateLabel(p.date), label: [(p.method || "").trim(), (p.note || "").trim()].filter(Boolean).join(" · ") }));
@@ -2586,7 +2614,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
         <div style={{ textAlign: "right" }}>
           <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontWeight: 700 }}>
             {docTypeLabel(doc.type).toUpperCase()} N° : 
-            <span style={mono}>{doc.docNumber || "—"}/{new Date(doc.issueDate).getFullYear()}</span>
+            <span style={mono}>{doc.docNumber || "—"}/{localDateOf(doc.issueDate).getFullYear()}</span>
           </div>
           <div style={{ fontSize: "9.5pt", color: inkSoft, marginTop: "4px" }}>Date d'émission : {frLong(doc.issueDate)}</div>
           {doc.type === "facture" && doc.serviceDate && (
@@ -2641,8 +2669,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
 
       {doc.type === "acompte" && (doc.sourceDevisRef || Number(doc.montantMarcheHT) > 0) && (() => {
         const montantMarche = Number(doc.montantMarcheHT) || 0;
-        const montantAcompte = (doc.acompteMode || "pourcentage") === "pourcentage" ? (montantMarche * (Number(doc.acomptePourcentage) || 0)) / 100 : (Number(doc.acompteMontantFixe) || 0);
-        const reste = montantMarche - montantAcompte;
+        const montantAcompte = acompteAmountOf(doc); // arrondi au centime, comme la ligne d'acompte
+        const reste = Math.round((montantMarche - montantAcompte) * 100) / 100;
         return (
           <div style={{ marginBottom: "18px", padding: "10px 14px", borderRadius: "4px", background: box, fontSize: "9.5pt", position: "relative", zIndex: 1 }}>
             {doc.sourceDevisRef && <div>Facture d'acompte sur devis / marché <strong>{doc.sourceDevisRef}</strong></div>}
@@ -2844,7 +2872,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
                   </div>
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 10px", fontWeight: 700, fontSize: "11.5pt", color: brassDark, border: `1px solid ${brassDark}` }}>
-                  <span>Montant TTC à régler</span><span style={mono}>{formatMoney(totals.montantARegler, doc.currency)}</span>
+                  <span>Montant TTC à régler</span><span style={mono}>{formatMoney(amountToPay, doc.currency)}</span>
                 </div>
               </>
             )}
@@ -2939,14 +2967,14 @@ const SITE_SETTINGS_CACHE_KEY = "devifact_site_settings";
 const DEFAULT_SITE_SETTINGS = { name: "Chantiflow", logo: null, logoWidth: 36, logoHeight: 36, pdfBackground: "#FBF7EF", pdfHeaderColor: "#1B2A33", pdfTextColor: "#1B2A33", pdfBlockColor: "#F1F0EA", contactEmail: "contact@chantiflow.fr", theme: "classique" };
 function readCachedSiteSettings() {
   try {
-    const raw = localStorage.getItem(SITE_SETTINGS_CACHE_KEY);
+    const raw = lsGet(SITE_SETTINGS_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
   } catch { return null; }
 }
 function writeCachedSiteSettings(settings) {
-  try { localStorage.setItem(SITE_SETTINGS_CACHE_KEY, JSON.stringify(settings)); } catch { /* stockage local indisponible : sans conséquence */ }
+  try { lsSet(SITE_SETTINGS_CACHE_KEY, JSON.stringify(settings)); } catch { /* stockage local indisponible : sans conséquence */ }
 }
 function siteSettingsFromRow(data) {
   return {
@@ -3011,7 +3039,7 @@ function initialView() {
       return "dashboard";
     }
   } catch { /* adresse non lisible : vue mémorisée */ }
-  const restored = localStorage.getItem("devifact_lastView") || "dashboard";
+  const restored = lsGet("devifact_lastView") || "dashboard";
   console.log("[Position] Vue restaurée au chargement :", restored);
   return restored;
 }
@@ -3039,7 +3067,10 @@ function DeviFactAppInner() {
   const [documents, setDocuments] = useState([]);
   // Échec d'enregistrement (réseau, droits, session) : { message, retry, dismiss }.
   const [saveError, setSaveError] = useState(null);
-  const saveFailure = (what, retry) => setSaveError({ message: `Impossible d'enregistrer ${what}. Tes dernières modifications ne sont pas sauvegardées.`, retry: () => { setSaveError(null); retry(); }, dismiss: () => setSaveError(null) });
+  // Une erreur par famille de données (documents, clients, entreprise) :
+  // la réussite d'un enregistrement n'efface que l'erreur de la même famille.
+  const clearSaveError = (key) => setSaveError((e) => (e && e.key !== key ? e : null));
+  const saveFailure = (what, retry) => setSaveError({ key: what, message: `Impossible d'enregistrer ${what}. Tes dernières modifications ne sont pas sauvegardées.`, retry: () => { setSaveError(null); retry(); }, dismiss: () => setSaveError(null) });
   // Toujours la liste la plus récente, y compris depuis une fonction
   // appelée en différé (enregistrement automatique des éditeurs, 400ms
   // après la frappe) — sans ça, une telle fonction repartait d'une
@@ -3068,11 +3099,11 @@ function DeviFactAppInner() {
   const [offlineMode, setOfflineMode] = useState(false);
   // Mode sombre — réglage personnel, mémorisé sur cet appareil (pas en
   // base de données, contrairement au thème choisi par l'Admin).
-  const [darkMode, setDarkMode] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_dark_mode") === "1"));
+  const [darkMode, setDarkMode] = useState(() => (typeof window !== "undefined" && lsGet("devifact_dark_mode") === "1"));
   useEffect(() => {
     if (typeof document === "undefined") return;
     document.body.classList.toggle("df-dark", darkMode);
-    localStorage.setItem("devifact_dark_mode", darkMode ? "1" : "0");
+    lsSet("devifact_dark_mode", darkMode ? "1" : "0");
   }, [darkMode]);
   // Notification après qu'une facture a été créée automatiquement à
   // partir d'un devis passé au statut "signé" — jamais de navigation
@@ -3123,7 +3154,7 @@ function DeviFactAppInner() {
   const [saving, setSaving] = useState(false);
   const [savingClients, setSavingClients] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
-  const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_lastActiveId")) || null);
+  const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && lsGet("devifact_lastActiveId")) || null);
   // Document tout juste ouvert ("Nouveau devis" etc.) mais jamais
   // encore réellement enregistré — reste ici, en mémoire seulement,
   // tant qu'il est vide. Dès qu'il contient un vrai contenu, il
@@ -3166,6 +3197,10 @@ function DeviFactAppInner() {
   // deux erreurs ont déjà été rencontrées ici, corrigées l'une après
   // l'autre : ne plus jamais déplacer ce bloc sans revérifier les deux.
   const visibleServices = siteSettings?.visibleServices || SERVICES.filter((s) => s.implemented).map((s) => s.id);
+  // La palette est mémorisée : ses actions passent par une référence pour
+  // toujours créer sur la liste courante (numéro suivant juste, fiche à jour).
+  const openNewServiceRef = useRef(null);
+  openNewServiceRef.current = openNewService;
   const paletteCommands = useMemo(() => {
     const cmds = [
       { id: "nav-dashboard", label: "Aller au Tableau de bord", icon: LayoutDashboard, action: () => setView("dashboard") },
@@ -3183,7 +3218,7 @@ function DeviFactAppInner() {
       ...(account?.isAdmin ? [{ id: "nav-admin", label: "Aller à Admin", icon: Shield, action: () => setView("admin") }] : []),
     ];
     SERVICES.filter((s) => visibleServices.includes(s.id) && s.implemented).forEach((s) => {
-      cmds.push({ id: `new-${s.id}`, label: `Nouveau : ${s.label}`, icon: s.icon, hint: "Créer", keywords: s.description, action: () => openNewService(s.id) });
+      cmds.push({ id: `new-${s.id}`, label: `Nouveau : ${s.label}`, icon: s.icon, hint: "Créer", keywords: s.description, action: () => openNewServiceRef.current?.(s.id) });
     });
     return cmds;
   }, [account, visibleServices]);
@@ -3518,7 +3553,7 @@ function DeviFactAppInner() {
     const orgId = getActiveOrganization();
     if (bothFailed && orgId) {
       try {
-        const cached = localStorage.getItem(`devifact_offline_cache_${orgId}`);
+        const cached = lsGet(`devifact_offline_cache_${orgId}`);
         if (cached) {
           const parsed = JSON.parse(cached);
           setDocuments(parsed.documents || []);
@@ -3548,7 +3583,7 @@ function DeviFactAppInner() {
     // prochaine fois.
     if (orgId) {
       try {
-        localStorage.setItem(`devifact_offline_cache_${orgId}`, JSON.stringify({ documents: docs, clients: cls, companyProfile: comp, prestations: prest, savedAt: Date.now() }));
+        lsSet(`devifact_offline_cache_${orgId}`, JSON.stringify({ documents: docs, clients: cls, companyProfile: comp, prestations: prest, savedAt: Date.now() }));
       } catch (err) {
         // Le stockage local peut être plein ou désactivé (navigation
         // privée) — jamais bloquant, juste pas de filet de secours
@@ -3595,12 +3630,12 @@ function DeviFactAppInner() {
     // même onglet (appareil partagé) pourrait retrouver les documents
     // du compte précédent via le cache hors ligne.
     if (typeof window !== "undefined") {
-      localStorage.removeItem("devifact_lastView");
-      localStorage.removeItem("devifact_lastActiveId");
+      lsRemove("devifact_lastView");
+      lsRemove("devifact_lastActiveId");
       // Toutes les organisations, pas seulement celle affichée : une copie
       // hors ligne contient clients, documents et coordonnées bancaires.
       try {
-        Object.keys(localStorage).filter((k) => k.startsWith("devifact_offline_cache_")).forEach((k) => localStorage.removeItem(k));
+        Object.keys(localStorage).filter((k) => k.startsWith("devifact_offline_cache_")).forEach((k) => lsRemove(k));
       } catch { /* stockage local indisponible */ }
     }
   }
@@ -3822,10 +3857,10 @@ function DeviFactAppInner() {
   // en était plutôt que d'être ramenée au tableau de bord.
   useEffect(() => {
     if (typeof window === "undefined" || !account) return;
-    if (view && view !== "dashboard") localStorage.setItem("devifact_lastView", view);
-    else localStorage.removeItem("devifact_lastView");
-    if (activeId) localStorage.setItem("devifact_lastActiveId", activeId);
-    else localStorage.removeItem("devifact_lastActiveId");
+    if (view && view !== "dashboard") lsSet("devifact_lastView", view);
+    else lsRemove("devifact_lastView");
+    if (activeId) lsSet("devifact_lastActiveId", activeId);
+    else lsRemove("devifact_lastActiveId");
   }, [view, activeId, account]);
 
   async function updatePlanPrice(planId, field, value) {
@@ -4009,10 +4044,12 @@ function DeviFactAppInner() {
         documentsRef.current = merged;
         setDocuments(merged);
       }
-      setSaveError(null);
+      clearSaveError("les documents");
+      return true;
     } catch (e) {
       console.error("Erreur d'enregistrement", e);
       saveFailure("les documents", () => persist(documentsRef.current));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -4023,7 +4060,7 @@ function DeviFactAppInner() {
     try {
       const res = await window.storage.set("clients", JSON.stringify(next), false);
       if (res?.merged) setClients(JSON.parse(res.value)); // fusion avec les changements d'un autre membre
-      setSaveError(null);
+      clearSaveError("les clients");
     } catch (e) {
       console.error("Erreur d'enregistrement clients", e);
       saveFailure("les clients", () => persistClients(next));
@@ -4037,7 +4074,7 @@ function DeviFactAppInner() {
     setSavingCompany(true);
     try {
       await window.storage.set("company-profile", JSON.stringify(next), false);
-      setSaveError(null);
+      clearSaveError("Mon entreprise");
     } catch (e) {
       console.error("Erreur d'enregistrement profil entreprise", e);
       saveFailure("Mon entreprise", () => persistCompanyProfile(next));
@@ -4324,12 +4361,21 @@ function DeviFactAppInner() {
       // personne était en train de faire — juste une notification.
       if (original && original.type === "devis" && patch.status === "signé" && original.status !== "signé") {
         const updatedOriginal = { ...original, ...patch, updatedAt: Date.now() };
+        // Une facture existe déjà pour ce devis (signé, repassé en « envoyé »
+        // par erreur, puis signé de nouveau ; ou signé par le client via le
+        // lien public) : jamais de seconde facture.
+        const existingInvoice = documents.find((d) => d.type === "facture" && d.linkedDevisId === original.id);
+        if (existingInvoice) {
+          persist(documents.map((d) => (d.id === id ? updatedOriginal : d)));
+          setAutoFactureNotice({ docNumber: existingInvoice.docNumber, id: existingInvoice.id, existing: true });
+          return;
+        }
         const invoice = {
           ...updatedOriginal,
           id: nextId("doc"),
           type: "facture",
           docNumber: nextNumber(documents, "facture"),
-          issueDate: new Date().toISOString().slice(0, 10),
+          issueDate: toIsoDate(new Date()),
           status: "brouillon",
           workStage: "brouillon",
           linkedDevisId: updatedOriginal.id,
@@ -4338,6 +4384,10 @@ function DeviFactAppInner() {
           acompte: 0,
           serviceDate: "", serviceDateEnd: "", paymentMethod: "",
           acompteVerse: "",
+          // Signature du devis, paiements, relances : jamais hérités ; fiche
+          // entreprise du moment (IBAN, mentions), pas la copie datant du devis.
+          signature: null, payments: [], lastReminderSentAt: undefined, paidAt: undefined, paidTotal: undefined,
+          company: companyProfile?.name ? companySnapshotOf(companyProfile) : updatedOriginal.company,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -4354,8 +4404,9 @@ function DeviFactAppInner() {
         if (reviewUrl && clientEmail) {
           setReviewNotice({ docId: id, docNumber: updated.docNumber, clientName: updated.client?.name || "", clientEmail, sending: false, sent: false, error: null });
         }
-        // Date de paiement : date de la vente pour les indicateurs (src/kpis.js).
-        patch = { ...patch, paidAt: new Date().toISOString() };
+        // Date de paiement : date de la vente pour les indicateurs (src/kpis.js) —
+        // celle du virement quand elle est fournie (rapprochement bancaire).
+        patch = { ...patch, paidAt: patch.paidAt || new Date().toISOString() };
       }
       // Passage en « payée » (tout document à encaisser) : total considéré
       // réglé mémorisé (paidTotal) — la référence qui permet, plus tard, de
@@ -4392,7 +4443,9 @@ function DeviFactAppInner() {
   // enregistrer un service resté vide.
   function finalizeDoc(id) {
     if (isLocked) return;
-    const doc = documents.find((d) => d.id === id) || (pendingDoc?.id === id ? pendingDoc : null);
+    // Liste la plus récente : l'éditeur vient de pousser ses dernières
+    // modifications juste avant (voir flushPendingPatch).
+    const doc = documentsRef.current.find((d) => d.id === id) || (pendingDoc?.id === id ? pendingDoc : null);
     if (!doc || isDocumentEmpty(doc)) {
       alert("Il n'y a encore rien à enregistrer — remplis au moins un champ avant.");
       return;
@@ -4408,9 +4461,10 @@ function DeviFactAppInner() {
     if (isLocked) return;
     const doc = documents.find((d) => d.id === id);
     if (!window.confirm(`Supprimer définitivement "${doc?.docNumber || "ce document"}" ? Cette action est irréversible.`)) return;
-    persist(documents.filter((d) => d.id !== id));
-    // Les photos de chantier du document disparaissent avec lui.
-    if (doc) removeDocumentsPhotoFiles([doc]);
+    // Les photos de chantier du document disparaissent avec lui — une fois
+    // la suppression réellement enregistrée (sinon un échec réseau laissait
+    // un document sans ses photos).
+    persist(documents.filter((d) => d.id !== id)).then((ok) => { if (ok && doc) removeDocumentsPhotoFiles([doc]); });
     if (activeId === id) backToDashboard();
   }
   function duplicateDoc(id) {
@@ -4427,7 +4481,7 @@ function DeviFactAppInner() {
       if (copy.recurrenceInterval === "annuel") next.setFullYear(next.getFullYear() + 1);
       else if (copy.recurrenceInterval === "trimestriel") next.setMonth(next.getMonth() + 3);
       else next.setMonth(next.getMonth() + 1);
-      copy.nextRecurrenceDate = next.toISOString().slice(0, 10);
+      copy.nextRecurrenceDate = toIsoDate(next);
     }
     persist([copy, ...documents]);
   }
@@ -4435,13 +4489,21 @@ function DeviFactAppInner() {
     if (isLocked) return;
     const original = documents.find((d) => d.id === id);
     if (!original || original.type !== "devis") return;
+    // Facture déjà créée pour ce devis (génération automatique à la
+    // signature, ou conversion précédente) : on l'ouvre au lieu d'en créer
+    // une seconde.
+    const existing = documents.find((d) => d.type === "facture" && d.linkedDevisId === original.id);
+    if (existing) { setActiveId(existing.id); setView("editor"); return; }
     const invoice = {
       ...original,
       id: nextId("doc"),
       type: "facture",
       docNumber: nextNumber(documents, "facture"),
-      issueDate: new Date().toISOString().slice(0, 10),
+      issueDate: toIsoDate(new Date()),
       status: "brouillon",
+      workStage: "brouillon",
+      signature: null, payments: [], lastReminderSentAt: undefined, paidAt: undefined, paidTotal: undefined,
+      company: companyProfile?.name ? companySnapshotOf(companyProfile) : original.company,
       linkedDevisId: original.id,
       sourceDevisNumber: original.docNumber || "",
       schemaVersion: DOCUMENT_SCHEMA_VERSION,
@@ -4522,7 +4584,7 @@ function DeviFactAppInner() {
         rows.push(["Référence", doc.docNumber]);
         rows.push(["Marché N°", doc.marcheNumero || ""]);
         if (doc.periodeDebut || doc.periodeFin) rows.push(["Période couverte", [doc.periodeDebut ? `du ${fr(doc.periodeDebut)}` : "", doc.periodeFin ? `au ${fr(doc.periodeFin)}` : ""].filter(Boolean).join(" ")]);
-        rows.push(["Vaut facture", doc.vautFacture === "Oui"]);
+        rows.push(["Vaut facture", doc.vautFacture === true]);
         rows.push(["Avancement global", `${s.avancementGlobalPct.toFixed(1)}%`]);
         rows.push([]);
         rows.push(["Désignation", "Montant marché", "% cumulé", "Cumul atteint", "Déjà facturé", "Cette situation"]);
@@ -4716,12 +4778,12 @@ function DeviFactAppInner() {
     const list = [];
     documents.forEach((d) => {
       if (d.type === "devis" && ["envoyé", "vu"].includes(d.status)) {
-        const validityDate = new Date(new Date(d.issueDate).getTime() + (Number(d.validityDays) || 0) * 86400000);
+        const validityDate = new Date(localDateOf(d.issueDate).getTime() + (Number(d.validityDays) || 0) * 86400000);
         const daysLeft = Math.round((validityDate - today) / 86400000);
         if (daysLeft <= 3) list.push({ doc: d, reason: daysLeft < 0 ? "Devis expiré" : daysLeft === 0 ? "Expire aujourd'hui" : `Expire dans ${daysLeft} j`, urgent: daysLeft <= 0 });
       }
       if (d.type === "facture" && d.status === "envoyée") {
-        const dueDate = new Date(new Date(d.issueDate).getTime() + (Number(d.dueDays) || 0) * 86400000);
+        const dueDate = new Date(localDateOf(d.issueDate).getTime() + (Number(d.dueDays) || 0) * 86400000);
         const daysLate = Math.round((today - dueDate) / 86400000);
         if (daysLate >= 0) list.push({ doc: d, reason: daysLate === 0 ? "Échéance aujourd'hui" : `${daysLate} j de retard`, urgent: daysLate > 0 });
       }
@@ -4730,11 +4792,11 @@ function DeviFactAppInner() {
   }, [documents]);
 
   function reminderMailto({ doc }) {
-    const { totalTTC } = computeTotals(doc);
+    const amountDue = documentOutstanding(doc); // reste réel (acompte et paiements déduits)
     const subject = doc.type === "devis" ? `Relance — Devis ${doc.docNumber}` : `Relance — Facture ${doc.docNumber}`;
     const body = doc.type === "devis"
       ? `Bonjour ${doc.client.name || ""},\n\nJe me permets de vous relancer au sujet du devis ${doc.docNumber}, dont la date de validité approche.\n\nN'hésitez pas à me contacter pour toute question.\n\nCordialement.`
-      : `Bonjour ${doc.client.name || ""},\n\nSauf erreur de notre part, la facture ${doc.docNumber} d'un montant de ${formatMoney(totalTTC, doc.currency)} reste impayée à ce jour.\n\nMerci de bien vouloir procéder au règlement dans les meilleurs délais.\n\nCordialement.`;
+      : `Bonjour ${doc.client.name || ""},\n\nSauf erreur de notre part, la facture ${doc.docNumber} reste impayée à ce jour : il reste ${formatMoney(amountDue, doc.currency)} à régler.\n\nMerci de bien vouloir procéder au règlement dans les meilleurs délais.\n\nCordialement.`;
     return `mailto:${doc.client.email || ""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
@@ -4766,7 +4828,7 @@ function DeviFactAppInner() {
       ws2["!cols"] = [{ wch: 12 }, { wch: 8 }, { wch: 16 }, { wch: 36 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 8 }];
       XLSX.utils.book_append_sheet(wb, ws2, "Écritures");
     }
-    XLSX.writeFile(wb, `export-comptable-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `export-comptable-${toIsoDate(new Date())}.xlsx`);
   }
 
   const activeDoc = documents.find((d) => d.id === activeId) || (pendingDoc?.id === activeId ? pendingDoc : undefined);
@@ -4862,7 +4924,7 @@ function DeviFactAppInner() {
         onChange={(patch) => updateDoc(activeDoc.id, patch)}
         onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
-        onConvert={() => convertToInvoice(activeDoc.id)}
+        onConvert={documents.some((d) => d.type === "facture" && d.linkedDevisId === activeDoc.id) ? null : () => convertToInvoice(activeDoc.id)}
         onSaveClient={upsertClient}
         onSaveProduct={saveLineAsProduct}
         onSplit={(extractedItems) => createSplitDocument(activeDoc, extractedItems)}
@@ -6664,7 +6726,7 @@ const PrintRevision = forwardRef(function PrintRevision({ doc, siteSettings, wat
             return;
           }
           if (d.label || d.dateDecompte) {
-            bodyRows.push(<tr key={`lbl-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.dpLabel, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(d.label || "DÉCOMPTE")}{d.dateDecompte ? ` — ${new Date(d.dateDecompte).toLocaleDateString("fr-FR")}` : ""}</td></tr>);
+            bodyRows.push(<tr key={`lbl-${dIdx}`}><td colSpan={nCols} style={{ ...cellStyle, background: REV_COL.dpLabel, fontWeight: 700, textAlign: "center", whiteSpace: "nowrap" }}>{upx(d.label || "DÉCOMPTE")}{d.dateDecompte ? ` — ${localDateOf(d.dateDecompte).toLocaleDateString("fr-FR")}` : ""}</td></tr>);
           }
           const dr = computeDecompteRevision(sec, d);
           const totalJours = (d.mois || []).reduce((s, m) => s + (Number(m.jours) || 0), 0);
@@ -7417,9 +7479,9 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   // « Cette situation vaut facture » : échéance et mentions légales de facture
   // (mêmes règles que PrintDocument, sur la copie du profil ou le profil courant).
   const vautFacture = doc.vautFacture === true;
-  const dueDate = vautFacture ? new Date(new Date(doc.issueDate).getTime() + (Number(doc.dueDays) || 30) * 86400000) : null;
+  const dueDate = vautFacture ? new Date(localDateOf(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000) : null;
   const legalLines = vautFacture ? legalMentionLines({ ...doc, type: "facture" }, companyProfile) : [];
-  const periode = doc.periodeDebut || doc.periodeFin ? [doc.periodeDebut ? `du ${new Date(doc.periodeDebut).toLocaleDateString("fr-FR")}` : "", doc.periodeFin ? `au ${new Date(doc.periodeFin).toLocaleDateString("fr-FR")}` : ""].filter(Boolean).join(" ") : "";
+  const periode = doc.periodeDebut || doc.periodeFin ? [doc.periodeDebut ? `du ${localDateOf(doc.periodeDebut).toLocaleDateString("fr-FR")}` : "", doc.periodeFin ? `au ${localDateOf(doc.periodeFin).toLocaleDateString("fr-FR")}` : ""].filter(Boolean).join(" ") : "";
   const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
   const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
@@ -7441,11 +7503,11 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: "14pt" }}>{vautFacture ? "FACTURE DE SITUATION" : "SITUATION DE TRAVAUX"} N° {doc.numeroSituation || 1}</div>
-          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}{dueDate ? ` — Échéance : ${dueDate.toLocaleDateString("fr-FR")}` : ""}</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}{dueDate ? ` — Échéance : ${dueDate.toLocaleDateString("fr-FR")}` : ""}</div>
           {periode && <div style={{ color: inkSoft }}>Période : {periode}</div>}
           {doc.marcheNumero && <div style={{ color: inkSoft }}>Marché N° : {doc.marcheNumero}</div>}
           {doc.chantier && <div style={{ color: inkSoft }}>Chantier : {doc.chantier}</div>}
-          {doc.dateDebut && <div style={{ color: inkSoft }}>Début des travaux : {new Date(doc.dateDebut).toLocaleDateString("fr-FR")}</div>}
+          {doc.dateDebut && <div style={{ color: inkSoft }}>Début des travaux : {localDateOf(doc.dateDebut).toLocaleDateString("fr-FR")}</div>}
         </div>
         {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
       </div>
@@ -7502,7 +7564,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
           {s.acompteVerse > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Acompte déjà versé</span><span style={mono}>-{formatMoney(s.acompteVerse, doc.currency)}</span></div>}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: band, color: "white", fontWeight: 700, borderRadius: "4px", marginTop: "4px" }}><span>Net à payer</span><span style={mono}>{formatMoney(s.netAPayer, doc.currency)}</span></div>
           {vautFacture && s.paymentsReceived > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", color: inkSoft }}><span>Paiements reçus</span><span style={mono}>-{formatMoney(s.paymentsReceived, doc.currency)}</span></div>}
-          {vautFacture && s.paymentsReceived > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", fontWeight: 700 }}><span>Reste à payer</span><span style={mono}>{formatMoney(doc.status === "payée" ? 0 : s.montantARegler, doc.currency)}</span></div>}
+          {vautFacture && s.paymentsReceived > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px", fontWeight: 700 }}><span>Reste à payer</span><span style={mono}>{formatMoney(documentOutstanding(doc), doc.currency)}</span></div>}
         </div>
       </div>
 
@@ -7515,7 +7577,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
         const amountPaidSit = s.totalPaid + settledBalanceSit;
         const amountToPaySit = Math.max(0, Math.round((totalSit - amountPaidSit) * 100) / 100);
         const isPaidSit = markedPaidSit && amountToPaySit <= 0.005;
-        const paidDateSit = doc.paidAt ? new Date(doc.paidAt).toLocaleDateString("fr-FR") : "";
+        const paidDateSit = doc.paidAt ? localDateOf(doc.paidAt).toLocaleDateString("fr-FR") : "";
         const list = [];
         if (s.acompteVerse > 0) list.push({ amount: s.acompteVerse, label: "Acompte versé" });
         (Array.isArray(doc.payments) ? doc.payments : []).filter((p) => p && (Number(p.amount) || 0) > 0).forEach((p) => list.push({ amount: Number(p.amount) || 0, date: paymentDateLabel(p.date), label: [(p.method || "").trim(), (p.note || "").trim()].filter(Boolean).join(" · ") }));
@@ -7588,6 +7650,21 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
   useEffect(() => setLocalDoc(doc), [doc.id]);
+  // Champs posés en dehors de cet éditeur (statut et date de paiement
+  // écrits à l'enregistrement, retour en « envoyée » après modification,
+  // paiement d'un autre membre, « Terminé ») : repris tant qu'aucune
+  // modification locale n'attend sur le même champ.
+  useEffect(() => {
+    setLocalDoc((prev) => {
+      if (!prev || prev.id !== doc.id) return prev;
+      const pending = pendingPatchRef.current || {};
+      let next = prev;
+      for (const key of ["status", "paidAt", "paidTotal", "payments", "workStage"]) {
+        if (!(key in pending) && prev[key] !== doc[key]) next = { ...next, [key]: doc[key] };
+      }
+      return next;
+    });
+  }, [doc.id, doc.status, doc.paidAt, doc.paidTotal, doc.payments, doc.workStage]);
 
   function patch(p) {
     setLocalDoc((prev) => ({ ...prev, ...p }));
@@ -7709,8 +7786,8 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
     if (localDoc.chantier) rows.push(["Chantier", localDoc.chantier]);
     if (localDoc.periodeDebut || localDoc.periodeFin) rows.push(["Période couverte", [localDoc.periodeDebut ? `du ${fr(localDoc.periodeDebut)}` : "", localDoc.periodeFin ? `au ${fr(localDoc.periodeFin)}` : ""].filter(Boolean).join(" ")]);
     if (localDoc.dateDebut) rows.push(["Début des travaux", fr(localDoc.dateDebut)]);
-    rows.push(["Vaut facture", localDoc.vautFacture === "Oui"]);
-    if (localDoc.vautFacture === true) rows.push(["Échéance", fr(new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 30) * 86400000))]);
+    rows.push(["Vaut facture", localDoc.vautFacture === true]);
+    if (localDoc.vautFacture === true) rows.push(["Échéance", fr(new Date(localDateOf(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 0) * 86400000))]);
     if ((localDoc.paymentTerms || "").trim()) rows.push(["Conditions de paiement", localDoc.paymentTerms.trim()]);
     if ((localDoc.visaMaitreOeuvre || "").trim()) rows.push(["Visa du maître d'œuvre", localDoc.visaMaitreOeuvre.trim()]);
     rows.push(["Avancement global", `${s.avancementGlobalPct.toFixed(1)}%`]);
@@ -7830,7 +7907,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                   <input type="number" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dueDays ?? 30} onChange={(e) => patch({ dueDays: Number(e.target.value) || 0 })} />
                 </div>
               )}
-              <div className={localDoc.vautFacture === ""}>
+              <div>
                 <label className="mb-1 block text-xs" style={{ color: colors.inkSoft }}>Conditions de paiement (optionnel)</label>
                 <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : 30 jours fin de mois" value={localDoc.paymentTerms || ""} onChange={(e) => patch({ paymentTerms: e.target.value })} />
               </div>
@@ -7963,7 +8040,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: "14pt" }}>PROCÈS-VERBAL DE RÉCEPTION DE TRAVAUX</div>
-          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}</div>
           {doc.marcheNumero && <div style={{ color: inkSoft }}>Marché N° : {doc.marcheNumero}</div>}
         </div>
         {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
@@ -7983,8 +8060,8 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
       </div>
 
       <div style={{ marginTop: "16px", display: "flex", flexWrap: "wrap", gap: "16px", position: "relative", zIndex: 1 }}>
-        {doc.dateDebutTravaux && <div style={{ fontSize: "9pt" }}>Début des travaux : <strong>{new Date(doc.dateDebutTravaux).toLocaleDateString("fr-FR")}</strong></div>}
-        <div style={{ fontSize: "9pt" }}>Date de réception effective : <strong>{doc.dateReceptionEffective ? new Date(doc.dateReceptionEffective).toLocaleDateString("fr-FR") : "—"}</strong></div>
+        {doc.dateDebutTravaux && <div style={{ fontSize: "9pt" }}>Début des travaux : <strong>{localDateOf(doc.dateDebutTravaux).toLocaleDateString("fr-FR")}</strong></div>}
+        <div style={{ fontSize: "9pt" }}>Date de réception effective : <strong>{doc.dateReceptionEffective ? localDateOf(doc.dateReceptionEffective).toLocaleDateString("fr-FR") : "—"}</strong></div>
         {(doc.maitreOeuvre || "").trim() && <div style={{ fontSize: "9pt" }}>Maître d'œuvre présent : <strong>{doc.maitreOeuvre.trim()}</strong></div>}
       </div>
 
@@ -8010,7 +8087,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
                   <td style={{ padding: "5px 4px" }}>{r.description}</td>
                   <td style={{ padding: "5px 4px" }}>{r.localisation}</td>
                   <td style={{ padding: "5px 4px", textAlign: "right" }}>{r.delaiJours} jours</td>
-                  <td style={{ padding: "5px 4px", textAlign: "center" }}>{r.levee ? (r.dateLevee ? `Levée le ${new Date(r.dateLevee).toLocaleDateString("fr-FR")}` : "Levée") : "Non levée"}</td>
+                  <td style={{ padding: "5px 4px", textAlign: "center" }}>{r.levee ? (r.dateLevee ? `Levée le ${localDateOf(r.dateLevee).toLocaleDateString("fr-FR")}` : "Levée") : "Non levée"}</td>
                 </tr>
               ))}
             </tbody>
@@ -8033,12 +8110,12 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
       <div style={{ display: "flex", gap: "24px", marginTop: "32px", position: "relative", zIndex: 1 }}>
         <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le client</div>
-          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureClient?.date ? localDateOf(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureClient?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
         </div>
         <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>L'entreprise</div>
-          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureEntreprise?.date ? new Date(doc.signatureEntreprise.date).toLocaleDateString("fr-FR") : ""}</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureEntreprise?.date ? localDateOf(doc.signatureEntreprise.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureEntreprise?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureEntreprise.name}</div>}
         </div>
       </div>
@@ -8395,7 +8472,7 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: "14pt" }}>RAPPORT D'INTERVENTION</div>
-          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}</div>
           <div style={{ color: inkSoft }}>{TYPES_INTERVENTION[doc.typeIntervention] || ""}{doc.technicien ? ` — Technicien : ${doc.technicien}` : ""}</div>
         </div>
         {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
@@ -8475,7 +8552,7 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
         </div>
       )}
       {doc.prochaineInterventionDate && (
-        <div style={{ marginTop: "8px", fontSize: "9pt", position: "relative", zIndex: 1 }}>Prochaine intervention recommandée : <strong>{new Date(doc.prochaineInterventionDate).toLocaleDateString("fr-FR")}</strong></div>
+        <div style={{ marginTop: "8px", fontSize: "9pt", position: "relative", zIndex: 1 }}>Prochaine intervention recommandée : <strong>{localDateOf(doc.prochaineInterventionDate).toLocaleDateString("fr-FR")}</strong></div>
       )}
 
       {doc.notes && <div style={{ marginTop: "16px", fontSize: "8.5pt", color: inkSoft, position: "relative", zIndex: 1 }}>{renderMarkup(doc.notes)}</div>}
@@ -8483,13 +8560,13 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
       <div style={{ display: "flex", gap: "24px", marginTop: "32px", position: "relative", zIndex: 1 }}>
         <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>Signature du client</div>
-          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Atteste de la réalisation de cette intervention — {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Atteste de la réalisation de cette intervention — {doc.signatureClient?.date ? localDateOf(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureClient?.name && <div style={{ marginTop: "16px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
         </div>
         {(doc.signatureTechnicien?.name || "").trim() && (
           <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
             <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le technicien</div>
-            <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureTechnicien?.date ? new Date(doc.signatureTechnicien.date).toLocaleDateString("fr-FR") : ""}</div>
+            <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>{doc.signatureTechnicien?.date ? localDateOf(doc.signatureTechnicien.date).toLocaleDateString("fr-FR") : ""}</div>
             <div style={{ marginTop: "16px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureTechnicien.name.trim()}</div>
           </div>
         )}
@@ -8917,7 +8994,7 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: "14pt" }}>CONTRAT DE CHANTIER</div>
-          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}</div>
         </div>
         {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
       </div>
@@ -8955,7 +9032,7 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
       {clause("Article 3 — Modalités de paiement", doc.modalitesPaiement)}
 
       <div style={{ marginTop: "14px", display: "flex", gap: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>
-        {doc.dateDebutTravaux && <div>Début des travaux prévu : <strong>{new Date(doc.dateDebutTravaux).toLocaleDateString("fr-FR")}</strong></div>}
+        {doc.dateDebutTravaux && <div>Début des travaux prévu : <strong>{localDateOf(doc.dateDebutTravaux).toLocaleDateString("fr-FR")}</strong></div>}
         {doc.dureeTravauxJours && <div>Durée prévisionnelle : <strong>{doc.dureeTravauxJours} jours</strong></div>}
       </div>
 
@@ -8968,17 +9045,17 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
       {doc.notes && clause("Notes complémentaires", doc.notes)}
 
       {((doc.lieuSignature || "").trim() || doc.signatureClient?.date) && (
-        <div style={{ marginTop: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>Fait {(doc.lieuSignature || "").trim() ? `à ${doc.lieuSignature.trim()}, ` : ""}le {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : "…"}, en deux exemplaires originaux.</div>
+        <div style={{ marginTop: "24px", fontSize: "9pt", position: "relative", zIndex: 1 }}>Fait {(doc.lieuSignature || "").trim() ? `à ${doc.lieuSignature.trim()}, ` : ""}le {doc.signatureClient?.date ? localDateOf(doc.signatureClient.date).toLocaleDateString("fr-FR") : "…"}, en deux exemplaires originaux.</div>
       )}
       <div style={{ display: "flex", gap: "24px", marginTop: "12px", position: "relative", zIndex: 1 }}>
         <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>Le maître d'ouvrage</div>
-          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureClient?.date ? new Date(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureClient?.date ? localDateOf(doc.signatureClient.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureClient?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureClient.name}</div>}
         </div>
         <div style={{ flex: 1, borderTop: `1px solid ${band}`, paddingTop: "6px" }}>
           <div style={{ fontWeight: 700, fontSize: "9pt" }}>L'entreprise</div>
-          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureEntreprise?.date ? new Date(doc.signatureEntreprise.date).toLocaleDateString("fr-FR") : ""}</div>
+          <div style={{ fontSize: "8.5pt", color: inkSoft, marginTop: "2px" }}>Lu et approuvé — {doc.signatureEntreprise?.date ? localDateOf(doc.signatureEntreprise.date).toLocaleDateString("fr-FR") : ""}</div>
           {doc.signatureEntreprise?.name && <div style={{ marginTop: "18px", fontFamily: "'Space Grotesk', sans-serif", fontSize: "13pt", fontStyle: "italic" }}>{doc.signatureEntreprise.name}</div>}
         </div>
       </div>
@@ -9294,7 +9371,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
         </div>
         <div style={{ textAlign: "right", fontSize: "9pt", color: inkSoft }}>
           {doc.docNumber && <div>Réf. {doc.docNumber}</div>}
-          <div>{new Date(doc.issueDate).toLocaleDateString("fr-FR")}</div>
+          <div>{localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}</div>
         </div>
       </div>
 
@@ -9312,7 +9389,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
       <div style={{ marginTop: "24px", position: "relative", zIndex: 1 }}>
         <p>Madame, Monsieur,</p>
         <p style={{ marginTop: "10px" }}>
-          {isMiseEnDemeure ? "Malgré nos relances précédentes, nous constatons" : niveau === "relance1" ? "Sauf erreur ou omission de notre part, nous constatons" : "Malgré notre première relance, nous constatons"} que la facture {doc.factureRef ? <strong>n° {doc.factureRef}</strong> : ""}{doc.factureDate ? ` du ${new Date(doc.factureDate).toLocaleDateString("fr-FR")}` : ""}, d'un montant de <strong>{formatMoney(Number(doc.montantDu) || 0, currency)}</strong>{doc.dateEcheanceOrigine ? `, échue depuis le ${new Date(doc.dateEcheanceOrigine).toLocaleDateString("fr-FR")}` : ""}, demeure impayée à ce jour.
+          {isMiseEnDemeure ? "Malgré nos relances précédentes, nous constatons" : niveau === "relance1" ? "Sauf erreur ou omission de notre part, nous constatons" : "Malgré notre première relance, nous constatons"} que la facture {doc.factureRef ? <strong>n° {doc.factureRef}</strong> : ""}{doc.factureDate ? ` du ${localDateOf(doc.factureDate).toLocaleDateString("fr-FR")}` : ""}, d'un montant de <strong>{formatMoney(Number(doc.montantDu) || 0, currency)}</strong>{doc.dateEcheanceOrigine ? `, échue depuis le ${localDateOf(doc.dateEcheanceOrigine).toLocaleDateString("fr-FR")}` : ""}, demeure impayée à ce jour.
         </p>
         <p style={{ marginTop: "10px" }}>
           {isMiseEnDemeure ? <>Par la présente, nous vous <strong>mettons en demeure</strong> (art. 1344 du Code civil) de régler l'intégralité de cette somme</> : <>Nous vous remercions de bien vouloir régler cette somme</>} dans un délai de <strong>{doc.delaiPaiementJours} jours</strong> à compter de la réception de ce courrier{dateLimite ? `, soit au plus tard le ${dateLimite.toLocaleDateString("fr-FR")}` : ""}.
@@ -9632,7 +9709,7 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: "14pt" }}>PLANNING DE CHANTIER</div>
-          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {new Date(doc.issueDate).toLocaleDateString("fr-FR")}{doc.marcheNumero ? ` — Marché N° ${doc.marcheNumero}` : ""}</div>
+          <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}{doc.marcheNumero ? ` — Marché N° ${doc.marcheNumero}` : ""}</div>
           {doc.objet && <div style={{ color: inkSoft }}>{doc.objet}</div>}
           {(doc.adresseChantier || "").trim() && <div style={{ color: inkSoft }}>Chantier : {doc.adresseChantier.trim()}</div>}
           {doc.client?.name && <div style={{ color: inkSoft }}>Client : {doc.client.name}{(doc.client.address || "").trim() ? ` — ${doc.client.address.trim()}` : ""}</div>}
@@ -10065,10 +10142,13 @@ function PlanningView({ documents, account, isLocked, isViewer }) {
 
   useEffect(() => {
     if (!account?.organizationId) return;
+    let cancelled = false;
     db.rpc("get_organization_members_with_profiles", { org_id: account.organizationId }).then(({ data, error }) => {
+      if (cancelled) return;
       if (error) { console.error("Erreur de chargement de l'équipe", error); return; }
       setMembers((data || []).filter((m) => m.status === "active").map((m) => ({ userId: m.user_id, label: memberDisplayName(m) })));
     });
+    return () => { cancelled = true; };
   }, [account?.organizationId]);
 
   const chantiers = useMemo(() => {
@@ -10734,7 +10814,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
       )}
       {autoFactureNotice && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3" style={{ background: `${tone.success}14`, border: `1px solid ${tone.success}55` }}>
-          <span className="flex items-center gap-2 text-sm font-medium" style={{ color: tone.success }}><Check size={16} /> Devis signé : la facture {autoFactureNotice.docNumber} a été créée automatiquement.</span>
+          <span className="flex items-center gap-2 text-sm font-medium" style={{ color: tone.success }}><Check size={16} /> {autoFactureNotice.existing ? <>Devis signé : la facture {autoFactureNotice.docNumber} existait déjà pour ce devis, aucune nouvelle facture créée.</> : <>Devis signé : la facture {autoFactureNotice.docNumber} a été créée automatiquement.</>}</span>
           <span className="flex items-center gap-3">
             <button onClick={onOpenAutoFacture} className="text-sm font-semibold underline" style={{ color: tone.success }}>Ouvrir</button>
             <button onClick={onDismissAutoFacture} style={{ color: tone.inkSoft }}><X size={16} /></button>
@@ -12298,7 +12378,7 @@ function StockDocumentsView({ movements, loading, products, warehouses, account,
     const rows = [["Document", "Type", "Date", "Entrepôt", "Produit", "Quantité", "Motif / référence", "Auteur"]];
     docs.forEach((d) => d.lines.forEach((l) => rows.push([d.ref, STOCK_KINDS[d.kind]?.label || d.kind, new Date(l.moved_at).toLocaleString("fr-FR"), warehouseName(warehouses, l.warehouse_id), productName(l.product_id), Number(l.quantity), l.reason || "", members[l.created_by] || ""])));
     const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\n");
-    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `documents-de-stock-${new Date().toISOString().slice(0, 10)}.csv`);
+    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `documents-de-stock-${toIsoDate(new Date())}.csv`);
   }
   const kindColor = (k) => (k === "entree" ? colors.moss : k === "sortie" ? colors.brick : colors.slate);
   return (
@@ -13153,7 +13233,7 @@ function ApiView({ account }) {
                 <div className="df-mono text-xs" style={{ color: colors.inkSoft }}>{k.key_prefix}</div>
               </div>
               <div className="text-xs" style={{ color: colors.inkSoft }}>
-                {k.revoked_at ? "Révoquée" : k.last_used_at ? `Utilisée le ${new Date(k.last_used_at).toLocaleDateString("fr-FR")}` : "Jamais utilisée"}
+                {k.revoked_at ? "Révoquée" : k.last_used_at ? `Utilisée le ${localDateOf(k.last_used_at).toLocaleDateString("fr-FR")}` : "Jamais utilisée"}
               </div>
               {!k.revoked_at && (
                 <button onClick={() => revokeKey(k.id, k.name)} disabled={revokingId === k.id} className="flex items-center gap-1 text-xs font-medium" style={{ color: colors.brick, opacity: revokingId === k.id ? 0.6 : 1 }}>
@@ -13711,7 +13791,7 @@ function AccountingExportCard({ profile, account, isLocked, isViewer, saving, on
         </div>
       )}
       {notice && <p className="mt-2 text-xs font-medium" style={{ color: notice.kind === "ok" ? colors.moss : colors.brick }}>{notice.text}</p>}
-      {state?.lastSentAt && <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Dernier envoi : {accountingExportPeriodLabel(state.lastSentPeriod)}, le {new Date(state.lastSentAt).toLocaleDateString("fr-FR")}, à {state.lastSentTo}.</p>}
+      {state?.lastSentAt && <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Dernier envoi : {accountingExportPeriodLabel(state.lastSentPeriod)}, le {localDateOf(state.lastSentAt).toLocaleDateString("fr-FR")}, à {state.lastSentTo}.</p>}
       {state?.lastError && (!state.lastSentAt || state.lastErrorAt > state.lastSentAt) && <p className="mt-1 text-xs" style={{ color: colors.brick }}>Dernier essai en échec : {state.lastError}</p>}
     </div>
   );
@@ -14058,12 +14138,22 @@ function PayPalButton({ planId, organizationId, onApproved }) {
     const clientId = import.meta.env.VITE_PAYPAL_CLIENT_ID;
     if (!clientId) { setSdkError(true); return; }
     if (window.paypal) { setSdkReady(true); return; }
+    // Un seul script pour toute la page, même avec plusieurs boutons montés.
+    const existing = document.querySelector("script[data-paypal-sdk]");
+    if (existing) {
+      const ready = () => setSdkReady(true), failed = () => setSdkError(true);
+      existing.addEventListener("load", ready); existing.addEventListener("error", failed);
+      return () => { existing.removeEventListener("load", ready); existing.removeEventListener("error", failed); };
+    }
     const script = document.createElement("script");
+    script.dataset.paypalSdk = "1";
     script.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&vault=true&intent=subscription`;
     script.onload = () => setSdkReady(true);
     script.onerror = () => setSdkError(true);
     document.body.appendChild(script);
   }, []);
+  const onApprovedRef = useRef(onApproved);
+  onApprovedRef.current = onApproved;
 
   useEffect(() => {
     if (!sdkReady || !containerRef.current || !window.paypal) return;
@@ -14071,7 +14161,7 @@ function PayPalButton({ planId, organizationId, onApproved }) {
     window.paypal.Buttons({
       style: { shape: "pill", color: "gold", layout: "horizontal", label: "subscribe", height: 40 },
       createSubscription: (data, actions) => actions.subscription.create({ plan_id: planId, custom_id: organizationId }),
-      onApprove: () => onApproved && onApproved(),
+      onApprove: () => onApprovedRef.current && onApprovedRef.current(),
     }).render(containerRef.current);
   }, [sdkReady, planId, organizationId]);
 
@@ -14610,10 +14700,10 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
   // Chaque carte utilisateur est repliée par défaut (juste l'essentiel
   // visible) — évite une page immense dès qu'il y a beaucoup de
   // comptes. Un identifiant présent dans cet ensemble = carte dépliée.
-  const [tab, setTab] = useState(() => (typeof window !== "undefined" && localStorage.getItem("devifact_lastAdminTab")) || "apercu");
+  const [tab, setTab] = useState(() => (typeof window !== "undefined" && lsGet("devifact_lastAdminTab")) || "apercu");
   useEffect(() => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("devifact_lastAdminTab", tab);
+    lsSet("devifact_lastAdminTab", tab);
   }, [tab]);
   const totalTTC = documents.reduce((s, d) => s + (
     d.type === "revision" ? computeRevision(d).montantRevise
@@ -15259,7 +15349,7 @@ function RevenueChart({ documents }) {
 // et bornes calculées dans src/kpis.js (testé unitairement).
 function SalesKpis({ documents, fiscalStartMonth = 1, darkMode = false }) {
   const kpis = useMemo(
-    () => computeSalesKpis(documents, { now: new Date(), fiscalStartMonth, amountOf: (d) => computeTotals(d).subtotalHT }),
+    () => computeSalesKpis(documents, { now: new Date(), fiscalStartMonth, amountOf: (d) => (d.type === "situation" ? computeSituation(d).subtotalHT : computeTotals(d).subtotalHT) }),
     [documents, fiscalStartMonth],
   );
   const monthName = FISCAL_MONTHS[(Number(fiscalStartMonth) || 1) - 1];
@@ -15312,7 +15402,7 @@ function PaymentRevertNotice({ notice, onDismiss }) {
     <div className="no-print mb-4 flex flex-wrap items-start justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.brassDark}14`, border: `1px solid ${colors.brassDark}55` }} data-testid="payment-revert-notice">
       <span className="flex items-start gap-2 text-sm" style={{ color: colors.brassDark }}>
         <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-        <span>Facture <strong>{notice.docNumber}</strong> modifiée après paiement : il reste <strong>{formatMoney(notice.amount)}</strong> à payer, elle repasse en « envoyée ». Pour corriger une facture déjà réglée, la voie habituelle est un avoir suivi d'une nouvelle facture.</span>
+        <span>Facture <strong>{notice.docNumber}</strong> modifiée après paiement : il reste <strong>{formatMoney(notice.amount, notice.currency)}</strong> à payer, elle repasse en « envoyée ». Pour corriger une facture déjà réglée, la voie habituelle est un avoir suivi d'une nouvelle facture.</span>
       </span>
       {onDismiss && <button onClick={onDismiss} style={{ color: colors.inkSoft }} aria-label="Fermer"><X size={15} /></button>}
     </div>
@@ -15571,7 +15661,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
         {report && (report.error
           ? <p className="mt-2 text-sm font-medium" style={{ color: colors.brick }}>{report.error}</p>
           : <p className="mt-2 text-sm font-medium">Import terminé : {report.imported} opération{report.imported > 1 ? "s" : ""} ajoutée{report.imported > 1 ? "s" : ""}{report.duplicates ? `, ${report.duplicates} déjà connue${report.duplicates > 1 ? "s" : ""}` : ""}, {report.matched} paiement{report.matched > 1 ? "s" : ""} enregistré{report.matched > 1 ? "s" : ""} automatiquement, {report.toReview} à vérifier.</p>)}
-        {report?.warnings?.map((w) => <p key={w} className="mt-1 text-xs" style={{ color: colors.brassDark }}>{w}</p>)}
+        {report?.warnings?.map((w, i) => <p key={`${i}-${w}`} className="mt-1 text-xs" style={{ color: colors.brassDark }}>{w}</p>)}
       </div>
       {loadError && <p className="mb-4 text-sm" style={{ color: colors.brick }}>{loadError}</p>}
       {actionError && <p className="mb-4 text-sm" style={{ color: colors.brick }}>{actionError}</p>}
@@ -15637,7 +15727,7 @@ function useOnlinePaymentsSync(doc, onSync, setLocalDoc) {
 function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
   const payments = Array.isArray(doc.payments) ? doc.payments : [];
   const currency = doc.currency || "EUR";
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = toIsoDate(new Date());
   const [draft, setDraft] = useState({ date: todayIso, amount: "", method: doc.paymentMethod || "", note: "" });
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -15647,7 +15737,10 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
   function commit(next) {
     const sumBefore = payments.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
     const sumAfter = next.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
-    const remainingAfter = (totals.montantARegler || 0) - (sumAfter - sumBefore);
+    // Base NON plafonnée : retirer un trop-perçu doit redonner le vrai reste
+    // (net à payer d'une situation, sinon TTC moins l'acompte déjà versé).
+    const baseDue = totals.netAPayer !== undefined ? Number(totals.netAPayer) || 0 : (Number(totals.totalTTC) || 0) - (Number(totals.acompteVerse) || 0);
+    const remainingAfter = Math.round((baseDue - sumAfter) * 100) / 100;
     const patch = { payments: next };
     if (remainingAfter <= 0.005 && doc.status !== "payée") patch.status = "payée";
     // Paiement retiré ou réduit : la facture n'est plus soldée.
@@ -15783,6 +15876,21 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     : [];
 
   useEffect(() => setLocalDoc(doc), [doc.id]);
+  // Champs posés en dehors de cet éditeur (statut et date de paiement
+  // écrits à l'enregistrement, retour en « envoyée » après modification,
+  // paiement d'un autre membre, « Terminé ») : repris tant qu'aucune
+  // modification locale n'attend sur le même champ.
+  useEffect(() => {
+    setLocalDoc((prev) => {
+      if (!prev || prev.id !== doc.id) return prev;
+      const pending = pendingPatchRef.current || {};
+      let next = prev;
+      for (const key of ["status", "paidAt", "paidTotal", "payments", "workStage"]) {
+        if (!(key in pending) && prev[key] !== doc[key]) next = { ...next, [key]: doc[key] };
+      }
+      return next;
+    });
+  }, [doc.id, doc.status, doc.paidAt, doc.paidTotal, doc.payments, doc.workStage]);
 
   // Le focus automatique sur un champ nouvellement ajouté ne doit jouer
   // qu'une fois — sinon il "vole" le focus en continu à chaque frappe
@@ -15808,6 +15916,14 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       saveTimer.current = null; // plus rien en attente : ne bloque plus la fermeture de l'onglet
       if (merged) onChange(merged);
     }, 400);
+  }
+  function flushPendingPatch() {
+    if (!saveTimer.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const merged = pendingPatchRef.current;
+    pendingPatchRef.current = null;
+    if (merged) onChange(merged);
   }
   function patchDeep(key, subPatch) {
     patch({ [key]: { ...localDoc[key], ...subPatch } });
@@ -16072,8 +16188,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   const hasPro = hasAccess(account, "pro");
   const currentPlanData = plans.find((p) => p.id === (account?.plan || "gratuit"));
   const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
-  const validityDate = new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.validityDays) || 0) * 86400000);
-  const dueDate = new Date(new Date(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 0) * 86400000);
+  const validityDate = new Date(localDateOf(localDoc.issueDate).getTime() + (Number(localDoc.validityDays) || 0) * 86400000);
+  const dueDate = new Date(localDateOf(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 0) * 86400000);
 
   function getPos(e) {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -16379,7 +16495,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           )}
         </div>
         <div className="flex items-center gap-2">
-          {localDoc.type === "devis" && (
+          {localDoc.type === "devis" && onConvert && (
             <button onClick={onConvert} disabled={isLocked} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate, opacity: isLocked ? 0.5 : 1 }}>
               <ArrowRightLeft size={15} /> Convertir en facture
             </button>
@@ -16395,7 +16511,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
             <FileSpreadsheet size={15} /> Excel
           </button>
-          {(localDoc.type === "devis" || localDoc.type === "facture" || localDoc.type === "acompte") && (
+          {!isViewer && (localDoc.type === "devis" || localDoc.type === "facture" || localDoc.type === "acompte") && (
             <button onClick={generatePublicLink} disabled={publicLinkState.loading} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: publicLinkState.loading ? 0.7 : 1 }} title={localDoc.type === "devis" ? "Créer un lien pour que le client signe en ligne, sans compte" : "Créer un lien pour que le client consulte la facture en ligne, sans compte"}>
               {publicLinkState.loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />} {publicLinkState.loading ? "Génération…" : localDoc.type === "devis" ? "Lien de signature" : "Lien de la facture"}
             </button>
@@ -16504,7 +16620,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                         if (localDoc.recurrenceInterval === "annuel") next.setFullYear(next.getFullYear() + 1);
                         else if (localDoc.recurrenceInterval === "trimestriel") next.setMonth(next.getMonth() + 3);
                         else next.setMonth(next.getMonth() + 1);
-                        patch({ isRecurring: checked, nextRecurrenceDate: next.toISOString().slice(0, 10) });
+                        patch({ isRecurring: checked, nextRecurrenceDate: toIsoDate(next) });
                       } else {
                         patch({ isRecurring: checked });
                       }
@@ -16624,7 +16740,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                   )}
                 </div>
               )}
-              <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm font-medium" style={inputStyle} placeholder={localDoc.type === "commande" ? "Nom du fournisseur" : localDoc.client.type === "particulier" ? "Nom et prénom" : "Raison sociale"} value={localDoc.client.name} onChange={(e) => patchDeep("client", { name: e.target.value })} />
+              <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm font-medium" style={inputStyle} placeholder={localDoc.type === "commande" ? "Nom du fournisseur" : localDoc.client.type === "particulier" ? "Nom et prénom" : "Raison sociale"} value={localDoc.client.name} onChange={(e) => { const match = findClientByName(clients, e.target.value); patch({ client: { ...localDoc.client, name: e.target.value }, clientId: match ? match.id : null }); }} />
               <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
               {(localDoc.type === "facture" || localDoc.type === "devis") && (
                 <>
@@ -17319,7 +17435,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           </div>
         </div>
       </div>
-      <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
+      <FinalizeButton doc={localDoc} onFinalize={(...args) => { flushPendingPatch(); onFinalize(...args); }} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
       <PrintDocument ref={printRef} doc={localDoc} totals={totals} companyProfile={companyProfile} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} publicQr={publicQr} />
 
       {presentationMode && (
@@ -17345,5 +17461,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

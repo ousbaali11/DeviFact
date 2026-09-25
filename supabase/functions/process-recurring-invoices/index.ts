@@ -16,7 +16,7 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { recurringInvoiceCopy } from "../_shared/recurring.ts";
+import { recurringInvoiceCopy, advanceRecurrenceDate } from "../_shared/recurring.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 
 const dbAdmin = createClient(
@@ -39,13 +39,7 @@ function nextNumber(documents: any[], type: string) {
   return `${prefix}-${String(next).padStart(3, "0")}`;
 }
 
-function advanceDate(dateStr: string, interval: string) {
-  const d = new Date(dateStr);
-  if (interval === "annuel") d.setFullYear(d.getFullYear() + 1);
-  else if (interval === "trimestriel") d.setMonth(d.getMonth() + 3);
-  else d.setMonth(d.getMonth() + 1);
-  return d.toISOString().slice(0, 10);
-}
+const advanceDate = advanceRecurrenceDate;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -109,7 +103,10 @@ serve(async (req) => {
           // Rejoué sur la version fraîche : les nouvelles factures sont
           // ajoutées et les prochaines échéances reportées sur les modèles,
           // sans écraser ce qu'un membre a pu enregistrer entre-temps.
-          const nextDates = new Map(documents.filter((d: any) => d.type === "facture" && d.isRecurring !== undefined).map((d: any) => [d.id, { nextRecurrenceDate: d.nextRecurrenceDate, isRecurring: d.isRecurring }]));
+          const nextDates = new Map(documents.filter((d: any) => d.type === "facture" && d.isRecurring !== undefined).map((d: any) => [d.id, { nextRecurrenceDate: d.nextRecurrenceDate, isRecurring: d.isRecurring, updatedAt: Date.now() }]));
+          // updatedAt daté : sans cela, une modification locale plus ancienne
+          // du même modèle, fusionnée ensuite, l'emportait sur la nouvelle
+          // échéance et la facture était recréée le lendemain.
           const result = await updateKvValue<any[]>(dbAdmin, row.organization_id, "documents", (list) => {
             const existingIds = new Set(list.map((d: any) => d.id));
             const fresh = list.map((d: any) => (nextDates.has(d.id) ? { ...d, ...nextDates.get(d.id) } : d));

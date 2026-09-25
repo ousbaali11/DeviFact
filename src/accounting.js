@@ -137,7 +137,7 @@ export function buildStockEntries(movements, { productById = new Map(), defaults
       totalHT += ht; totalTVA += tva;
     }
     if (r2(totalHT) === 0) continue;
-    const base = { date: String(d.date).slice(0, 10), journal, piece: d.ref, label: `Entrée de stock ${d.ref}${d.lines[0]?.reason ? ` - ${d.lines[0].reason}` : ""}`, source: "stock", documentId: d.ref, activity: "" };
+    const base = { date: localIsoDate(d.date), journal, piece: d.ref, label: `Entrée de stock ${d.ref}${d.lines[0]?.reason ? ` - ${d.lines[0].reason}` : ""}`, source: "stock", documentId: d.ref, activity: "" };
     for (const { account, activity, amount } of byAccount.values()) entries.push(entry({ ...base, activity }, account, amount, 0));
     for (const { account, activity, amount } of vatByAccount.values()) if (r2(amount) !== 0) entries.push(entry({ ...base, activity }, account, amount, 0));
     entries.push(entry(base, acc.supplier, 0, r2(totalHT + totalTVA)));
@@ -152,7 +152,7 @@ export function valuedStockMovements(movements, { productById = new Map() } = {}
     .map((m) => {
       const product = productById.get(m.product_id);
       const unit = Number(product?.purchase_price_ht) || 0;
-      return { id: m.id, date: String(m.moved_at).slice(0, 10), ref: m.document_ref || "", kind: m.kind, productName: product?.name || "Produit supprimé", quantity: Number(m.quantity) || 0, unitCost: unit, value: r2(Math.abs(Number(m.quantity) || 0) * unit), account: nonEmpty(product?.account_purchases), journal: nonEmpty(product?.journal_code), activity: nonEmpty(product?.activity_code), reason: m.reason || "" };
+      return { id: m.id, date: localIsoDate(m.moved_at), ref: m.document_ref || "", kind: m.kind, productName: product?.name || "Produit supprimé", quantity: Number(m.quantity) || 0, unitCost: unit, value: r2(Math.abs(Number(m.quantity) || 0) * unit), account: nonEmpty(product?.account_purchases), journal: nonEmpty(product?.journal_code), activity: nonEmpty(product?.activity_code), reason: m.reason || "" };
     });
 }
 
@@ -187,10 +187,26 @@ export function entriesTotals(entries) {
   return (entries || []).reduce((t, e) => ({ debit: r2(t.debit + e.debit), credit: r2(t.credit + e.credit) }), { debit: 0, credit: 0 });
 }
 
+// Jour local d'une date : une date seule (« AAAA-MM-JJ ») est gardée telle
+// quelle, un horodatage complet est lu dans le fuseau de l'utilisateur.
+export function localIsoDate(value) {
+  const s = String(value ?? "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 // Export CSV (séparateur point-virgule, décimales à la virgule, BOM pour Excel).
 export function entriesToCsv(entries) {
   const fmt = (n) => (Number(n) || 0).toFixed(2).replace(".", ",");
-  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  // Une cellule qui commence par = + @ (ou - suivi d'autre chose qu'un
+  // nombre) serait exécutée comme formule par un tableur : neutralisée par
+  // une apostrophe, comme le font les tableurs eux-mêmes.
+  const esc = (v) => {
+    let s = String(v ?? "");
+    if (/^[=+@\t\r]/.test(s) || (/^-/.test(s) && !/^-?\d[\d\s.,]*$/.test(s))) s = "'" + s;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
   const rows = [["Date", "Journal", "Pièce", "Libellé", "Compte", "Débit", "Crédit", "Code activité", "Source"]];
   for (const e of entries || []) rows.push([e.date, e.journal, e.piece, e.label, e.account, fmt(e.debit), fmt(e.credit), e.activity || "", e.source]);
   return "﻿" + rows.map((r) => r.map(esc).join(";")).join("\r\n");

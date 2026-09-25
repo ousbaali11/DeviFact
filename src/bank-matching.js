@@ -30,7 +30,7 @@ export function normalizeText(s) {
 // « 1 234,56 », « 1.234,56 », « 1,234.56 », « -12,00 € », « (12,00) », « 12,00-».
 export function parseAmount(raw) {
   if (raw === null || raw === undefined) return null;
-  let s = String(raw).replace(/[  \s]/g, "").replace(/(EUR|€|\$|£|CHF)/gi, "").trim();
+  let s = String(raw).replace(/[  \s]/g, "").replace(/(EUR|€|\$|£|CHF)/gi, "").replace(/\u2212/g, "-").trim(); // U+2212 : signe moins typographique
   if (!s) return null;
   let negative = false;
   if (/^\(.*\)$/.test(s)) { negative = true; s = s.slice(1, -1); }
@@ -42,9 +42,12 @@ export function parseAmount(raw) {
     // Les deux présents : le dernier est le séparateur décimal.
     s = lastComma > lastDot ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
   } else if (lastComma >= 0) {
-    // Virgule seule : décimale, sauf « 1,234,567 » (plusieurs virgules = milliers).
-    s = (s.match(/,/g) || []).length > 1 ? s.replace(/,/g, "") : s.replace(",", ".");
-  } else if (lastDot >= 0 && (s.match(/\./g) || []).length > 1) {
+    // Virgule seule : décimale, sauf « 1,234,567 » (plusieurs virgules) ou
+    // « 1,500 » (exactement trois chiffres après : milliers — un relevé a
+    // toujours deux décimales).
+    const commas = (s.match(/,/g) || []).length;
+    s = commas > 1 || /^\d{1,3},\d{3}$/.test(s) ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else if (lastDot >= 0 && ((s.match(/\./g) || []).length > 1 || /^\d{1,3}\.\d{3}$/.test(s))) {
     s = s.replace(/\./g, "");
   }
   if (!/^\d+(\.\d+)?$/.test(s)) return null;
@@ -263,22 +266,24 @@ const STOP_WORDS = new Set(["sarl", "sas", "sasu", "eurl", "sci", "sa", "snc", "
 // « payée ». amountDueOf(doc) est fourni par l'application (totaux).
 export function openInvoiceCandidates(documents, amountDueOf) {
   return (documents || [])
-    .filter((d) => isPayable(d) && d.status !== "payée" && d.status !== "annulée")
+    .filter((d) => isPayable(d) && d.status !== "brouillon" && d.status !== "payée" && d.status !== "annulée")
     .map((doc) => ({ doc, due: round2(amountDueOf(doc)), docNumber: String(doc.docNumber || ""), clientName: String(doc.client?.name || ""), issueDate: doc.issueDate || null }))
     .filter((c) => c.due > 0.005);
 }
 
+// "full" : numéro complet (FAC-021, FAC021) dans le libellé ; "digits" : les
+// seuls chiffres (021), qui désignent aussi bien FAC-021 que SIT-021.
 function numberMatches(docNumber, haystack, haystackCompact) {
   const n = normalizeText(docNumber);
   if (!n) return false;
   const compact = n.replace(/\s+/g, "");
-  if (compact.length >= 4 && haystackCompact.includes(compact)) return true;
-  if (haystack.includes(n)) return true;
+  if (compact.length >= 4 && haystackCompact.includes(compact)) return "full";
+  if (haystack.includes(n)) return "full";
   const digits = docNumber.replace(/\D+/g, "");
   if (digits.length >= 3) {
     const tokens = haystack.split(" ");
     const stripped = digits.replace(/^0+/, "");
-    if (tokens.includes(digits) || (stripped.length >= 3 && tokens.includes(stripped))) return true;
+    if (tokens.includes(digits) || (stripped.length >= 3 && tokens.includes(stripped))) return "digits";
   }
   return false;
 }
@@ -319,9 +324,10 @@ export function suggestMatches(tx, candidates) {
     return { id: c.doc.id, docNumber: c.docNumber, clientName: c.clientName, due: c.due, score, reasons, number, amountExact, amountOver, fraction, dateBefore };
   });
   const exactCount = scored.filter((s) => s.amountExact).length;
+  const numberCount = scored.filter((s) => s.number).length;
   const out = scored.map((s) => {
     let level = null;
-    if (s.number && !s.amountOver && !s.dateBefore) level = "sur";
+    if (s.number && !s.amountOver && !s.dateBefore && (s.number === "full" || numberCount === 1 || s.amountExact)) level = "sur";
     else if (s.amountExact && s.fraction >= 0.5 && exactCount === 1 && !s.dateBefore) level = "sur";
     else if (s.score >= 40 && !s.dateBefore) level = "probable";
     return { id: s.id, docNumber: s.docNumber, clientName: s.clientName, due: s.due, score: s.score, level, reasons: s.reasons };
