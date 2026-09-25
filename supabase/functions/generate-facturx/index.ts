@@ -11,12 +11,13 @@
 // Réponse : JSON { fileName, pdfBase64, warnings } — ou 400 avec
 // { error, missing: [...] } si des données obligatoires manquent.
 //
-// Déploiement : les polices et le profil couleur du dossier assets/ sont
-// déclarés dans supabase/config.toml (static_files).
+// Déploiement : aucun fichier annexe — polices et profil couleur sont
+// embarqués dans assets-embarques.ts (voir assets/embarquer.cjs).
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildInvoiceModel, buildCiiXml, buildFacturXPdf, facturXFileName, type PdfAssets } from "./facturx.ts";
+import { FONT_REGULAR_B64, FONT_BOLD_B64, ICC_PROFILE_B64, decodeBase64 } from "./assets-embarques.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,15 +27,20 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024; // une facture avec logo en base64 reste bien en dessous
 
-// Chargées une seule fois par instance (démarrage à froid), puis réutilisées.
+// Polices et profil couleur EMBARQUÉS dans le code (assets-embarques.ts,
+// généré par assets/embarquer.cjs) : le déploiement ne dépend plus des
+// « static_files » du CLI, silencieusement omis quand Docker n'est pas
+// disponible sur la machine qui déploie (supabase/cli #4554, #5169) — la
+// fonction échouait alors en « path not found … DejaVuSans.ttf ».
+// Décodés une seule fois par instance (démarrage à froid), puis réutilisés.
 let assetsPromise: Promise<PdfAssets> | null = null;
 function loadAssets(): Promise<PdfAssets> {
   if (!assetsPromise) {
-    assetsPromise = (async () => ({
-      regularFont: await Deno.readFile(new URL("./assets/DejaVuSans.ttf", import.meta.url)),
-      boldFont: await Deno.readFile(new URL("./assets/DejaVuSans-Bold.ttf", import.meta.url)),
-      iccProfile: await Deno.readFile(new URL("./assets/sRGB-v2-micro.icc", import.meta.url)),
-    }))();
+    assetsPromise = Promise.resolve({
+      regularFont: decodeBase64(FONT_REGULAR_B64),
+      boldFont: decodeBase64(FONT_BOLD_B64),
+      iccProfile: decodeBase64(ICC_PROFILE_B64),
+    });
   }
   return assetsPromise;
 }

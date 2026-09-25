@@ -6,6 +6,7 @@
 // Résultat dans le sous-dossier out/ (PDF + XML), à faire vérifier par un
 // validateur (Mustang, FNFE-MPE...) ou un expert-comptable.
 import { buildInvoiceModel, buildCiiXml, buildFacturXPdf } from "../facturx.ts";
+import { FONT_REGULAR_B64, FONT_BOLD_B64, ICC_PROFILE_B64, decodeBase64 } from "../assets-embarques.ts";
 
 const outDir = new URL("./out/", import.meta.url);
 await Deno.mkdir(outDir, { recursive: true });
@@ -44,10 +45,12 @@ console.log("totals:", model.totals);
 
 const xml = buildCiiXml(model);
 await Deno.writeTextFile(new URL("factur-x.xml", outDir), xml);
+// Mêmes polices et profil que la fonction déployée : embarqués dans le code
+// (assets-embarques.ts), aucun fichier lu sur le disque.
 const pdf = await buildFacturXPdf(model, xml, {
-  regularFont: await Deno.readFile(new URL("../assets/DejaVuSans.ttf", import.meta.url)),
-  boldFont: await Deno.readFile(new URL("../assets/DejaVuSans-Bold.ttf", import.meta.url)),
-  iccProfile: await Deno.readFile(new URL("../assets/sRGB-v2-micro.icc", import.meta.url)),
+  regularFont: decodeBase64(FONT_REGULAR_B64),
+  boldFont: decodeBase64(FONT_BOLD_B64),
+  iccProfile: decodeBase64(ICC_PROFILE_B64),
 }, new Date("2026-09-10T18:00:00Z"));
 await Deno.writeFile(new URL("Facture-FAC-2026-014-facturx.pdf", outDir), pdf);
 console.log("PDF écrit :", pdf.length, "octets");

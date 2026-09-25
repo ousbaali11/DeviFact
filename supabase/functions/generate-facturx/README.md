@@ -21,8 +21,11 @@ elle produit uniquement le fichier, que la personne télécharge depuis le bouto
     embarquées, profil sRGB, métadonnées XMP Factur-X, pièce jointe
     `factur-x.xml` en relation `Alternative`, identifiant de fichier).
 - `assets/` — polices DejaVu Sans (licence libre, voir `LICENSE-DejaVu.txt`)
-  et profil couleur sRGB, déployés avec la fonction (`static_files` dans
-  `supabase/config.toml`).
+  et profil couleur sRGB, sources des données embarquées.
+- `assets-embarques.ts` — ces mêmes fichiers en base64, générés par
+  `assets/embarquer.cjs` : la fonction ne dépend d'aucun fichier annexe au
+  déploiement (les `static_files` du CLI sont omis sans Docker, voir
+  supabase/cli #4554 et #5169). À régénérer si un fichier d'`assets/` change.
 
 ## Déployer
 
