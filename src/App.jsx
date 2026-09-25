@@ -9,6 +9,7 @@ import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
 import { parseStatement, transactionFingerprint, openInvoiceCandidates, suggestMatches, applyBankPayment, revertBankPayment } from "./bank-matching.js";
+import { ATTESTATION_KINDS, attestationsWithState, validAttestations, attestationAlerts, attachedAttestationsLine, attestationStateLabel, attestationFileProblem, appendAttachmentsToPdf } from "./attestations.js";
 import * as XLSX from "xlsx";
 import {
   Plus, Trash2, Printer, FileSpreadsheet, PenTool, Type as TypeIcon, Upload,
@@ -828,7 +829,7 @@ function withGeoCountry(profile) {
 // tout ce que les PDF et Factur-X lisent (identité, coordonnées, IBAN, BIC,
 // option débits, mentions légales), sans les réglages propres à
 // l'application qui n'ont rien à faire dans un document.
-const COMPANY_SNAPSHOT_EXCLUDED = ["googleReviewUrl", "fiscalStartMonth", "accounting", "accountingExport"];
+const COMPANY_SNAPSHOT_EXCLUDED = ["googleReviewUrl", "fiscalStartMonth", "accounting", "accountingExport", "attestations"];
 function companySnapshotOf(profile) {
   const out = { ...(profile || {}) };
   for (const k of COMPANY_SNAPSHOT_EXCLUDED) delete out[k];
@@ -1686,6 +1687,7 @@ function newContratChantierDocument(documents) {
     horsEtablissement: false,
     clauseRetractation: CONTRAT_CLAUSE_RETRACTATION,
     lieuSignature: "",
+    attachAttestations: true, // attestations de l'entreprise jointes au PDF
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
     client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "" },
     clientId: null,
@@ -2238,6 +2240,9 @@ function newDocument(type, documents) {
     currency: geoDefaults().currency,
     validityDays: 30,
     showValidity: true,
+    // Attestations de l'entreprise jointes au PDF et au lien public (devis) :
+    // cochée d'office, décochable par document.
+    attachAttestations: type === "devis",
     dueDays: 30,
     company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null, postalCode: "", city: "", iban: "", bic: "", vatOnDebits: false },
     client: { type: "entreprise", name: "", address: "", country: geoDefaults().country, email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" },
@@ -2696,6 +2701,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
     (legalCo.tva || "").trim() ? `TVA : ${legalCo.tva.trim()}` : "",
   ].filter(Boolean) : [];
   const legalLines = legalMentionLines(doc, companyProfile, { identity: footerParts.length === 0, payment: !showPayment });
+  // Devis avec attestations jointes : ligne « Pièces jointes » sous les mentions.
+  if (doc.type === "devis" && doc.attachAttestations === true) { const att = attachedAttestationsLine(companyProfile); if (att) legalLines.push(att); }
   const watermarkText = (siteSettings?.name || "Chantiflow").toUpperCase();
   const watermarkSize = Math.max(24, Math.min(48, Math.round(760 / Math.max(watermarkText.length, 1))));
   const pStyle = {
@@ -5374,6 +5381,8 @@ function DeviFactAppInner() {
         onOpenCreate={() => setAtelierCreateOpen(true)}
         onOpenDoc={openDoc}
         onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }}
+        attestationAlerts={attestationAlerts(companyProfile)}
+        onOpenCompany={() => setView("company")}
         onGoToDocuments={(preset) => { setAtelierDocsPreset(preset || null); setView("atelier-documents"); }}
         onGoToPricing={goPricing}
         autoFactureNotice={autoFactureNotice}
@@ -5612,7 +5621,7 @@ function PublicDocumentView({ token }) {
         if (data?.error) throw new Error(data.error);
         // Paiement en ligne : uniquement si le serveur l'annonce (compte
         // Stripe connecté et actif pour cet artisan) — jamais par défaut.
-        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true , paymentInfo: data.paymentInfo || null, creditTotal: Math.max(0, Number(data.creditTotal) || 0) });
+        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true , paymentInfo: data.paymentInfo || null, creditTotal: Math.max(0, Number(data.creditTotal) || 0), attachments: Array.isArray(data.attachments) ? data.attachments : [] });
         if (paymentReturn) setPaidBaseline((b) => (b === null ? documentPaidTotal(data.document) : b));
       } catch (err) {
         setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
@@ -5727,6 +5736,19 @@ function PublicDocumentView({ token }) {
               </div>
             </div>
 
+            {Array.isArray(state.attachments) && state.attachments.length > 0 && (
+              <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }} data-testid="public-attachments">
+                <p className="mb-2 text-sm font-medium">Attestations de l'entreprise</p>
+                <ul className="space-y-1.5">
+                  {state.attachments.map((a, i) => (
+                    <li key={i} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span>{a.label}{a.organism ? ` (${a.organism})` : ""} · valide jusqu'au {fr(a.expiresAt)}</span>
+                      <a href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 font-medium" style={{ color: colors.brassDark }}><Download size={14} /> Télécharger</a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {/* Signature — uniquement pour un devis pas encore signé */}
             {state.document.type === "devis" && state.document.status !== "signé" && !state.signedAt && !signed && (
               <div className="mt-6 rounded-xl p-4" style={{ background: colors.paper }}>
@@ -9182,7 +9204,7 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
       </div>
 
       {clause("Article 4 — Pénalités de retard", doc.penalitesRetard)}
-      {clause("Article 5 — Assurances", [doc.assurances, insurance ? `Assurance décennale et responsabilité civile professionnelle : ${insurance}.` : ""].filter(Boolean).join("\n"))}
+      {clause("Article 5 — Assurances", [doc.assurances, insurance ? `Assurance décennale et responsabilité civile professionnelle : ${insurance}.` : "", doc.attachAttestations === true ? attachedAttestationsLine(companyProfile) : ""].filter(Boolean).join("\n"))}
       {clause("Article 6 — Résiliation", doc.clauseResiliation)}
       {clause("Article 7 — Litiges", [doc.clauseLitiges, clientIsParticulier && (co.mediatorName || "").trim() ? `Médiateur de la consommation : ${co.mediatorName.trim()}${(co.mediatorContact || "").trim() ? ` — ${co.mediatorContact.trim()}` : ""} (art. L616-1 du Code de la consommation).` : ""].filter(Boolean).join("\n"))}
       {clause("Article 8 — Réception et garanties", doc.clauseReception)}
@@ -9281,7 +9303,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
       pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
       heightLeft -= pageHeight;
       while (heightLeft > 3) { position -= pageHeight; pdf.addPage(); pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight); heightLeft -= pageHeight; }
-      pdf.save(`${(localDoc.docNumber || "contrat").replace(/[\\/:*?"<>|]/g, "-")}.pdf`);
+      await savePdfWithAttachments(`${(localDoc.docNumber || "contrat").replace(/[\\/:*?"<>|]/g, "-")}.pdf`, localDoc.attachAttestations === true ? validAttestations(companyProfile) : []);
     } catch (err) {
       console.error("Erreur de génération du PDF", err);
       alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
@@ -9425,6 +9447,8 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
               <input type="number" step="0.5" min="0" max="5" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="5 au maximum (loi 71-584)" value={localDoc.retenueGarantiePct ?? ""} onChange={(e) => patch({ retenueGarantiePct: e.target.value })} />
             </div>
           </div>
+
+          <div className="mb-4"><AttachAttestationsToggle doc={localDoc} companyProfile={companyProfile} onChange={(v) => patch({ attachAttestations: v })} disabled={isLocked || isViewer} /></div>
 
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Article 3 — Modalités de paiement</label>
           <textarea className="df-textarea mb-4 w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}`, minHeight: "3rem" }} value={localDoc.modalitesPaiement} onChange={(e) => patch({ modalitesPaiement: e.target.value })} />
@@ -10920,7 +10944,7 @@ function atelierDocDate(d) {
 // Accueil Atelier : ce qu'il y a à faire, créer, reprendre, puis le
 // chiffre d'affaires. Chaque carte « À faire » ouvre la page Documents
 // déjà filtrée.
-function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, reminders, reminderMailto, fiscalStartMonth = 1, onCreate, onOpenCreate, onOpenDoc, onOpenChantier = null, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
+function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, reminders, reminderMailto, fiscalStartMonth = 1, onCreate, onOpenCreate, onOpenDoc, onOpenChantier = null, attestationAlerts = [], onOpenCompany = null, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
   const tone = atelierTone(darkMode);
   const firstName = account?.firstName || "";
   const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -11065,10 +11089,20 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
 
       <section className="mb-8">
         <h2 className="df-display mb-3 text-base font-semibold">Relances à faire</h2>
-        {garantieAlerts.length > 0 && (
+        {(garantieAlerts.length > 0 || attestationAlerts.length > 0) && (
           <div className="mb-3 overflow-hidden rounded-xl" style={card} data-testid="warranty-alerts">
+            {attestationAlerts.map((a, i) => (
+              <button key={`att-${a.id}`} onClick={() => onOpenCompany && onOpenCompany()} className="df-at-tap flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }} data-testid="attestation-alert">
+                <Shield size={16} className="shrink-0" style={{ color: a.state === "expiree" ? tone.danger : tone.warning }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-semibold">{a.label} · Mon entreprise</span>
+                  <span className="block text-sm" style={{ color: a.state === "expiree" ? tone.danger : tone.warning }}>{attestationStateLabel(a)} ({fr(a.expiresAt)})</span>
+                </span>
+                <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+              </button>
+            ))}
             {garantieAlerts.slice(0, 6).map((a, i) => (
-              <button key={`${a.docId}-${a.key}`} onClick={() => (a.chantier && onOpenChantier ? onOpenChantier(a.chantier) : onOpenDoc(a.docId))} className="df-at-tap flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
+              <button key={`${a.docId}-${a.key}`} onClick={() => (a.chantier && onOpenChantier ? onOpenChantier(a.chantier) : onOpenDoc(a.docId))} className="df-at-tap flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i || attestationAlerts.length ? `1px solid ${tone.line}` : "none" }}>
                 <Shield size={16} className="shrink-0" style={{ color: tone.warning }} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15px] font-semibold">{a.label} · {a.chantier || `PV ${a.docNumber} (chantier non renseigné)`}</span>
@@ -12242,6 +12276,54 @@ async function signProductFile(path) {
   const { data, error } = await db.storage.from(PRODUCT_FILES_BUCKET).createSignedUrl(path, 3600);
   if (error) throw error;
   return data.signedUrl;
+}
+// Attestations et assurances de l'entreprise : bucket privé « company-files »
+// (PDF, JPG, PNG, 10 Mo), un dossier par organisation ; ajout et
+// suppression réservés au propriétaire (politiques du bucket), lecture par
+// les membres via des liens signés.
+const COMPANY_FILES_BUCKET = "company-files";
+async function uploadCompanyFile(organizationId, file) {
+  const problem = attestationFileProblem(file);
+  if (problem) throw new Error(problem);
+  const path = `${organizationId}/attestations/${Date.now()}-${sanitizeFileName(file.name)}`;
+  const { error } = await db.storage.from(COMPANY_FILES_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+  if (error) {
+    const msg = error.message || "";
+    if (/mime|type/i.test(msg)) throw new Error("Ce type de fichier n'est pas accepté (PDF, JPG ou PNG, 10 Mo max).");
+    if (/policy|row-level|permission|unauthorized|violates/i.test(msg)) throw new Error("Seul le propriétaire de l'organisation peut ajouter une attestation.");
+    throw new Error("Impossible d'envoyer ce fichier pour l'instant.");
+  }
+  return { path, name: file.name, size: Number(file.size) || 0, mime: file.type || "" };
+}
+async function signCompanyFile(path) {
+  const { data, error } = await db.storage.from(COMPANY_FILES_BUCKET).createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+async function removeCompanyFile(path) {
+  if (!path) return;
+  const { error } = await db.storage.from(COMPANY_FILES_BUCKET).remove([path]);
+  if (error) console.error("Fichier d'attestation non supprimé", path, error);
+}
+async function downloadCompanyFile(path) {
+  const { data, error } = await db.storage.from(COMPANY_FILES_BUCKET).download(path);
+  if (error) throw error;
+  return data;
+}
+// PDF du document, puis les attestations valides jointes (voir
+// attestations.js) ; sans attestation, téléchargement direct comme avant.
+async function savePdfWithAttachments(pdf, fileName, attestations) {
+  if (!attestations?.length) { pdf.save(fileName); return; }
+  const files = [];
+  for (const a of attestations) {
+    try {
+      const blob = await downloadCompanyFile(a.path);
+      files.push({ bytes: await blob.arrayBuffer(), mime: a.mime || blob.type, name: a.fileName || a.label });
+    } catch (err) { console.error("Attestation introuvable, non jointe", a.fileName, err); }
+  }
+  const { bytes, skipped } = await appendAttachmentsToPdf(pdf.output("arraybuffer"), files);
+  downloadBlob(new Blob([bytes], { type: "application/pdf" }), fileName);
+  if (skipped.length) alert(`Pièce(s) jointe(s) illisible(s), non jointe(s) au PDF : ${skipped.join(", ")}.`);
 }
 // Disponibilité affichée : « sans limite » si la restriction de quantité
 // n'est pas activée, sinon la quantité en stock.
@@ -13926,6 +14008,109 @@ function accountingExportPeriodLabel(id) {
   if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1)).toLocaleDateString("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" });
   return String(id);
 }
+// Attestations et assurances (priorité 5) : liste avec état, ajout /
+// modification / remplacement du fichier / suppression, propriétaire
+// seulement (comme l'IBAN — les politiques du bucket l'imposent aussi).
+function AttestationsCard({ profile, account, isLocked, isViewer, saving, onSave }) {
+  const isOwner = account?.role === "owner";
+  const canEdit = !isLocked && !isViewer && isOwner;
+  const orgId = account?.organizationId || null;
+  const list = useMemo(() => attestationsWithState(profile), [profile]);
+  const emptyDraft = { kind: "decennale", label: "", organism: "", number: "", issuedAt: "", expiresAt: "" };
+  const [draft, setDraft] = useState(null); // null : formulaire fermé ; { id } : modification
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const inputStyle = { border: `1px solid ${colors.line}` };
+  const stateStyle = (s) => (s.state === "expiree" ? { background: `${colors.brick}18`, color: colors.brick } : s.state === "expire_bientot" ? { background: `${colors.brassDark}18`, color: colors.brassDark } : { background: `${colors.moss}18`, color: colors.moss });
+  function startAdd() { setDraft({ ...emptyDraft }); setFile(null); setError(""); }
+  function startEdit(a) { setDraft({ id: a.id, kind: a.kind || "autre", label: a.kind === "autre" ? a.label : "", organism: a.organism || "", number: a.number || "", issuedAt: a.issuedAt || "", expiresAt: a.expiresAt || "" }); setFile(null); setError(""); }
+  async function saveDraft() {
+    if (!draft.expiresAt) { setError("Indique la date d'expiration."); return; }
+    if (draft.kind === "autre" && !draft.label.trim()) { setError("Indique le nom de cette attestation."); return; }
+    const current = Array.isArray(profile?.attestations) ? profile.attestations : [];
+    const existing = draft.id ? current.find((a) => a.id === draft.id) : null;
+    if (!existing && !file) { setError("Choisis le fichier de l'attestation (PDF, JPG ou PNG)."); return; }
+    if (file) { const problem = attestationFileProblem(file); if (problem) { setError(problem); return; } }
+    setBusy(true); setError("");
+    try {
+      let stored = existing ? { path: existing.path, fileName: existing.fileName, size: existing.size, mime: existing.mime } : null;
+      if (file) { const up = await uploadCompanyFile(orgId, file); stored = { path: up.path, fileName: up.name, size: up.size, mime: up.mime }; }
+      const entry = { id: existing?.id || nextId("att"), kind: draft.kind, label: draft.kind === "autre" ? draft.label.trim() : "", organism: draft.organism.trim(), number: draft.number.trim(), issuedAt: draft.issuedAt || "", expiresAt: draft.expiresAt, ...stored, addedAt: existing?.addedAt || Date.now(), updatedAt: Date.now() };
+      await onSave(existing ? current.map((a) => (a.id === existing.id ? entry : a)) : [...current, entry]);
+      if (file && existing?.path && existing.path !== stored.path) await removeCompanyFile(existing.path);
+      setDraft(null); setFile(null);
+    } catch (err) {
+      setError(err?.message || "Enregistrement impossible.");
+    } finally { setBusy(false); }
+  }
+  async function remove(a) {
+    if (!window.confirm(`Supprimer « ${a.label} » ? Le fichier sera effacé.`)) return;
+    setBusy(true); setError("");
+    try {
+      await onSave((Array.isArray(profile?.attestations) ? profile.attestations : []).filter((x) => x.id !== a.id));
+      await removeCompanyFile(a.path);
+    } catch (err) { setError(err?.message || "Suppression impossible."); }
+    finally { setBusy(false); }
+  }
+  async function open(a) {
+    try { window.open(await signCompanyFile(a.path), "_blank", "noopener"); }
+    catch (err) { console.error("Attestation indisponible", err); alert("Fichier indisponible pour le moment."); }
+  }
+  return (
+    <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }} data-testid="attestations-card">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold"><Shield size={15} style={{ color: colors.brassDark }} /> Attestations et assurances</div>
+        {canEdit && !draft && <button onClick={startAdd} disabled={busy || saving} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.ink }}><Plus size={13} /> Ajouter une attestation</button>}
+      </div>
+      <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Décennale, RC pro, vigilance URSSAF, Kbis… avec leur date d'expiration. Les attestations valides sont jointes aux devis (PDF et lien public) et aux contrats (PDF) ; alerte 30 jours avant l'expiration, puis tant qu'une attestation expirée n'est pas remplacée.{!isOwner && <span className="block" style={{ color: colors.brassDark }}>Gestion réservée au propriétaire de l'organisation.</span>}</p>
+      {list.length === 0 && !draft && <p className="text-sm" style={{ color: colors.inkSoft }}>Aucune attestation enregistrée.</p>}
+      {list.length > 0 && (
+        <div className="overflow-hidden rounded-xl" style={{ border: `1px solid ${colors.line}` }}>
+          {list.map((a, i) => (
+            <div key={a.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5 text-sm" style={{ borderTop: i ? `1px solid ${colors.line}` : "none" }} data-testid="attestation-row">
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">{a.label}{a.organism ? <span className="font-normal" style={{ color: colors.inkSoft }}> · {a.organism}</span> : null}{a.number ? <span className="df-mono font-normal" style={{ color: colors.inkSoft }}> · n° {a.number}</span> : null}</span>
+                <span className="block text-xs" style={{ color: colors.inkSoft }}>Valide jusqu'au {fr(a.expiresAt)}{a.fileName ? ` · ${a.fileName}` : ""}</span>
+              </span>
+              <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold" style={stateStyle(a)}>{attestationStateLabel(a)}</span>
+              <span className="flex shrink-0 items-center gap-1">
+                {a.path && <button onClick={() => open(a)} title="Ouvrir le fichier" aria-label={`Ouvrir ${a.label}`} style={{ color: colors.slate }}><Eye size={15} /></button>}
+                {canEdit && <button onClick={() => startEdit(a)} disabled={busy} title="Modifier ou remplacer le fichier" aria-label={`Modifier ${a.label}`} style={{ color: colors.slate }}><Pencil size={15} /></button>}
+                {canEdit && <button onClick={() => remove(a)} disabled={busy} title="Supprimer" aria-label={`Supprimer ${a.label}`} style={{ color: colors.brick }}><Trash2 size={15} /></button>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {draft && canEdit && (
+        <div className="mt-3 rounded-xl p-3" style={{ background: colors.paper }} data-testid="attestation-form">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="text-xs" style={{ color: colors.inkSoft }}>Type
+              <select className="df-select mt-1 block w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={draft.kind} onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value }))}>
+                {ATTESTATION_KINDS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select>
+            </label>
+            {draft.kind === "autre" && <label className="text-xs" style={{ color: colors.inkSoft }}>Nom de l'attestation *<input className="df-input mt-1 block w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} /></label>}
+            <label className="text-xs" style={{ color: colors.inkSoft }}>Assureur ou organisme<input className="df-input mt-1 block w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="ex : AXA, URSSAF Île-de-France" value={draft.organism} onChange={(e) => setDraft((d) => ({ ...d, organism: e.target.value }))} /></label>
+            <label className="text-xs" style={{ color: colors.inkSoft }}>N° de contrat ou de référence<input className="df-input df-mono mt-1 block w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={draft.number} onChange={(e) => setDraft((d) => ({ ...d, number: e.target.value }))} /></label>
+            <label className="text-xs" style={{ color: colors.inkSoft }}>Date d'émission (optionnel)<input type="date" className="df-input df-mono mt-1 block w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={draft.issuedAt} onChange={(e) => setDraft((d) => ({ ...d, issuedAt: e.target.value }))} /></label>
+            <label className="text-xs" style={{ color: colors.inkSoft }}>Valide jusqu'au *<input type="date" className="df-input df-mono mt-1 block w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={draft.expiresAt} onChange={(e) => setDraft((d) => ({ ...d, expiresAt: e.target.value }))} /></label>
+            <label className="text-xs sm:col-span-2" style={{ color: colors.inkSoft }}>Fichier {draft.id ? "(laisser vide pour garder le fichier actuel)" : "*"} — PDF, JPG ou PNG, 10 Mo max
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="mt-1 block w-full text-sm" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </label>
+          </div>
+          {error && <p className="mt-2 text-xs font-medium" style={{ color: colors.brick }}>{error}</p>}
+          <div className="mt-3 flex gap-2">
+            <button onClick={saveDraft} disabled={busy || saving} className="rounded-lg px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brassDark, opacity: busy ? 0.6 : 1 }}>{busy ? "Enregistrement…" : draft.id ? "Enregistrer les modifications" : "Ajouter"}</button>
+            <button onClick={() => { setDraft(null); setFile(null); setError(""); }} disabled={busy} className="rounded-lg px-3 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Annuler</button>
+          </div>
+        </div>
+      )}
+      {error && !draft && <p className="mt-2 text-xs font-medium" style={{ color: colors.brick }}>{error}</p>}
+    </div>
+  );
+}
 function AccountingExportCard({ profile, account, isLocked, isViewer, saving, onSave }) {
   const cfg = profile?.accountingExport || {};
   const savedFrequency = cfg.frequency === "trimestriel" ? "trimestriel" : "mensuel";
@@ -14287,6 +14472,8 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
       )}
 
       {ONLINE_PAYMENTS_ENABLED && <StripeConnectCard account={account} siteSettings={siteSettings} profile={profile} />}
+
+      <AttestationsCard profile={profile} account={account} isLocked={isLocked} isViewer={isViewer} saving={saving} onSave={(list) => { patch({ attestations: list }); return onSave({ ...profile, attestations: list }); }} />
 
       <AccountingExportCard profile={profile} account={account} isLocked={isLocked} isViewer={isViewer} saving={saving} onSave={(cfg) => { patch({ accountingExport: cfg }); onSave({ ...profile, accountingExport: cfg }); }} />
 
@@ -15661,6 +15848,24 @@ function AcompteSuggestionNotice({ suggestion, currency, onApply, onDismiss }) {
     </div>
   );
 }
+// Case « Joindre les attestations » des devis et contrats : compte des
+// attestations valides, avertissement sur celles qui ont expiré.
+function AttachAttestationsToggle({ doc, companyProfile, onChange, disabled = false, grid = false }) {
+  const all = attestationsWithState(companyProfile);
+  const valid = all.filter((a) => a.state !== "expiree" && a.path);
+  const expired = all.filter((a) => a.state === "expiree");
+  const label = (
+    <label className="flex items-start gap-1.5 text-xs" style={{ color: colors.inkSoft }} data-testid="attach-attestations">
+      <input type="checkbox" className="mt-0.5" checked={doc.attachAttestations === true} disabled={disabled} onChange={(e) => onChange(e.target.checked)} style={{ accentColor: colors.brass }} />
+      <span>
+        Joindre les attestations de l'entreprise en cours de validité au PDF{doc.type === "devis" ? " et au lien public" : ""} ({valid.length})
+        {valid.length === 0 && expired.length === 0 && <span className="block" style={{ color: colors.inkSoft }}>Aucune attestation dans Mon entreprise.</span>}
+        {expired.length > 0 && <span className="block" style={{ color: colors.brick }}>{expired.length > 1 ? `${expired.length} attestations expirées` : "1 attestation expirée"}, jamais jointe{expired.length > 1 ? "s" : ""} : à remplacer dans Mon entreprise ({expired.map((a) => a.label).join(", ")}).</span>}
+      </span>
+    </label>
+  );
+  return grid ? <><span></span>{label}</> : label;
+}
 function PaymentRevertNotice({ notice, onDismiss }) {
   if (!notice) return null;
   return (
@@ -16593,7 +16798,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       }
 
       const safeName = `${docTypeLabel(localDoc.type)}-${(localDoc.docNumber || "document").replace(/[\\/:*?"<>|]/g, "-")}.pdf`;
-      pdf.save(safeName);
+      await savePdfWithAttachments(pdf, safeName, localDoc.type === "devis" && localDoc.attachAttestations === true ? validAttestations(companyProfile) : []);
     } catch (err) {
       console.error("Erreur de génération du PDF", err);
       alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
@@ -16841,6 +17046,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     <input type="checkbox" checked={localDoc.showValidity !== false} onChange={(e) => patch({ showValidity: e.target.checked })} style={{ accentColor: colors.brass }} />
                     Afficher "Valable jusqu'au..." sur le document
                   </label>
+                  {localDoc.type === "devis" && <AttachAttestationsToggle doc={localDoc} companyProfile={companyProfile} onChange={(v) => patch({ attachAttestations: v })} disabled={isLocked || isViewer} grid />}
                 </>
               ) : (
                 <>
@@ -17734,5 +17940,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

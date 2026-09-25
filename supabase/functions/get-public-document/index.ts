@@ -10,6 +10,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { isPayableDoc, creditNotesTotalFor } from "../_shared/totals.ts";
+import { validAttestations } from "../_shared/attestations.ts";
 import { syncOnlinePayments } from "../_shared/online-payments.ts";
 import { INVOICE_ONLINE_PAYMENTS_ENABLED } from "../_shared/payments-flags.ts";
 
@@ -101,7 +102,7 @@ serve(async (req) => {
     // Réglages internes copiés dans la fiche entreprise d'anciens documents
     // (adresse de l'expert-comptable…) : jamais transmis au client.
     if (publicDoc.company && typeof publicDoc.company === "object") {
-      const { accountingExport: _ax, accounting: _ac, googleReviewUrl: _gr, fiscalStartMonth: _fm, ...company } = publicDoc.company;
+      const { accountingExport: _ax, accounting: _ac, googleReviewUrl: _gr, fiscalStartMonth: _fm, attestations: _at, ...company } = publicDoc.company;
       publicDoc.company = company;
     }
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name, logo_url").limit(1).maybeSingle();
@@ -124,8 +125,23 @@ serve(async (req) => {
       };
     }
 
+    // Devis avec attestations jointes : fichiers valides de la fiche
+    // entreprise (bucket privé company-files), liens signés d'une heure.
+    let attachments: Array<{ label: string; organism: string; expiresAt: string; fileName: string; url: string }> = [];
+    if (doc.type === "devis" && doc.attachAttestations === true) {
+      const { data: profileRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", link.organization_id).eq("key", "company-profile").eq("shared", false).maybeSingle();
+      const valid = validAttestations(profileRow?.value);
+      if (valid.length) {
+        const { data: signed, error: signError } = await dbAdmin.storage.from("company-files").createSignedUrls(valid.map((a) => String(a.path)), 3600);
+        if (signError) console.error("Liens des attestations non générés :", signError.message);
+        attachments = valid
+          .map((a, i) => ({ label: a.label, organism: String(a.organism || ""), expiresAt: String(a.expiresAt || ""), fileName: String(a.fileName || ""), url: signed?.[i]?.signedUrl || "" }))
+          .filter((a) => a.url);
+      }
+    }
+
     return new Response(
-      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled, paymentInfo, creditTotal: creditNotesTotalFor(doc, documents) }),
+      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled, paymentInfo, creditTotal: creditNotesTotalFor(doc, documents), attachments }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {
