@@ -35,9 +35,9 @@ describe("encaissement fr:212", () => {
     expect(site.shouldSendPaidEvent(base)).toBe(true);
     expect(site.shouldSendPaidEvent({ ...base, pdp: { ...base.pdp, paidEventAt: "2026-09-26T10:00:00Z" } })).toBe(false);
   });
-  it("jamais : envoyée non payée, acompte, non transmise, facture rejetée ou refusée", () => {
+  it("jamais : envoyée non payée, avoir, non transmise, facture rejetée ou refusée", () => {
     expect(site.shouldSendPaidEvent({ ...base, status: "envoyée" })).toBe(false);
-    expect(site.shouldSendPaidEvent({ ...base, type: "acompte" })).toBe(false);
+    expect(site.shouldSendPaidEvent({ ...base, type: "avoir" })).toBe(false);
     expect(site.shouldSendPaidEvent({ ...base, pdp: null })).toBe(false);
     expect(site.shouldSendPaidEvent({ ...base, pdp: { invoiceId: null, status: "error" } })).toBe(false);
     for (const status of ["fr:210", "fr:213", "api:invalid", "api:rejected", "fr:501"]) expect(site.shouldSendPaidEvent({ ...base, pdp: { invoiceId: 501, status } })).toBe(false);

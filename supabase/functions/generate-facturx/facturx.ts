@@ -18,7 +18,7 @@
 
 import { PDFDocument, PDFName, PDFArray, PDFString, PDFHexString, AFRelationship, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 import * as fontkitModule from "https://esm.sh/@pdf-lib/fontkit@1.1.1";
-import { computeDocTotals, isCountedLine, round2 } from "../_shared/totals.ts";
+import { computeDocTotals, computeSituationTotals, isCountedLine, round2 } from "../_shared/totals.ts";
 // Le module expose l'objet fontkit en export par défaut à l'exécution,
 // mais ses types ne le déclarent pas — d'où ce petit détour.
 const fontkit = ((fontkitModule as unknown as { default?: unknown }).default ?? fontkitModule) as Parameters<PDFDocument["registerFontkit"]>[0];
@@ -95,6 +95,8 @@ export interface FxInvoiceModel {
   payment: { iban: string | null; bic: string | null; termsText: string };
   notes: string[];
   siteName: string;
+  // Avoir (381) : facture d'origine (BT-25), obligatoire en France.
+  originalInvoice: { number: string; date: string | null } | null;
 }
 
 export interface BuildResult {
@@ -205,8 +207,14 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   const missing: string[] = [];
   const warnings: string[] = [];
 
-  if (!doc || doc.type !== "facture") {
-    return { model: null, missing: ["Seules les factures (type « facture ») peuvent être exportées en Factur-X pour l'instant."], warnings };
+  // Pièces exportables : facture (380), facture d'acompte (386), avoir (381),
+  // situation de travaux valant facture (380).
+  const kind = String(doc?.type || "");
+  if (!doc || !["facture", "acompte", "avoir", "situation"].includes(kind)) {
+    return { model: null, missing: ["Seules les factures, factures d'acompte, avoirs et situations valant facture peuvent être exportées en Factur-X."], warnings };
+  }
+  if (kind === "situation" && doc.vautFacture !== true) {
+    return { model: null, missing: ["Cette situation ne vaut pas facture : cochez « Vaut facture » pour l'exporter en Factur-X."], warnings };
   }
   const number = clean(doc.docNumber);
   if (!number) missing.push("Numéro de facture");
@@ -215,10 +223,33 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   const currency = clean(doc.currency || "EUR").toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) missing.push(`Devise invalide (${currency})`);
 
-  const operationCategory = String(doc.operationCategory || "") as FxInvoiceModel["operationCategory"];
+  // Catégorie d'opération : saisie dans le bloc « Facturation électronique »
+  // (facture, acompte, avoir) ; une situation de travaux sans catégorie est
+  // traitée en prestation de services (travaux), avec un avertissement.
+  let operationCategory = String(doc.operationCategory || "") as FxInvoiceModel["operationCategory"];
+  if (!CATEGORY_TO_PROCESS[operationCategory] && kind === "situation") { operationCategory = "services"; warnings.push("Catégorie d'opération non renseignée : prestation de services (travaux) retenue"); }
   if (!CATEGORY_TO_PROCESS[operationCategory]) {
     missing.push("Catégorie d'opération (livraison de biens / prestation de services / mixte) — bloc « Facturation électronique » de la facture");
   }
+  // Avoir : facture d'origine et motif obligatoires (règles françaises).
+  const originalNumber = kind === "avoir" ? clean(doc.factureOrigineRef) : "";
+  const originalDate = kind === "avoir" && /^\d{4}-\d{2}-\d{2}$/.test(clean(doc.factureOrigineDate)) ? clean(doc.factureOrigineDate) : null;
+  if (kind === "avoir" && !originalNumber) missing.push("Avoir : numéro de la facture d'origine");
+  if (kind === "avoir" && !clean(doc.motifAvoir)) missing.push("Avoir : motif de l'avoir");
+  if (kind === "avoir" && !originalDate) warnings.push("Avoir : date de la facture d'origine absente");
+  // Situation de travaux : une ligne par poste avec le montant de CETTE
+  // situation (cumul atteint − déjà facturé), comme le PDF ; retenue de
+  // garantie et acompte versé relèvent du règlement (conditions de paiement,
+  // montant prépayé), jamais d'une remise qui fausserait la TVA.
+  const situation = kind === "situation" ? computeSituationTotals(doc) : null;
+  const situationItems: any[] = kind === "situation"
+    ? (Array.isArray(doc.items) ? doc.items : []).filter((l: any) => l && l.type === "line").map((l: any) => {
+        const montantMarche = round2((Number(l.qty) || 0) * (Number(l.unitPrice) || 0));
+        const cumul = round2((montantMarche * (Number(l.avancementPct) || 0)) / 100);
+        const montant = round2(cumul - round2(Number(l.montantCumulePrecedent) || 0));
+        return { id: l.id, type: "line", designation: l.designation, details: [], qty: 1, unit: "forfait", unitPrice: montant, tva: l.tva, discount: 0 };
+      }).filter((l: any) => l.unitPrice !== 0)
+    : [];
 
   const seller = buildParty(doc.company, companyProfile, "Émetteur", missing, warnings, true);
   const buyerIsBusiness = (doc.client?.type || "entreprise") !== "particulier";
@@ -241,7 +272,7 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   // Lignes — mêmes formules que computeTotals() côté site, mais chaque
   // ligne est arrondie au centime avant d'être additionnée (règle
   // BR-CO-10 de la norme : le total est la somme des lignes affichées).
-  const items: any[] = Array.isArray(doc.items) ? doc.items : [];
+  const items: any[] = kind === "situation" ? situationItems : Array.isArray(doc.items) ? doc.items : [];
   // Remise globale : en % (défaut) ou en montant HT (globalDiscountMode =
   // "amount"), répartie au prorata des lignes — même règle que
   // globalDiscountRate() côté site.
@@ -328,7 +359,7 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   // « Montant TTC à régler » sur le PDF ; l'acompte demandé en % (doc.acompte)
   // est une notion de devis, jamais un paiement reçu.
   // Déjà payé = acompte versé + paiements reçus (règlement en plusieurs fois).
-  const prepaid = Math.min(grandTotal, round2(Math.max(0, computeDocTotals(doc).totalPaid)));
+  const prepaid = Math.min(grandTotal, round2(Math.max(0, situation ? situation.totalPaid : computeDocTotals(doc).totalPaid)));
   const duePayable = round2(grandTotal - prepaid);
   if (grandTotal <= 0) warnings.push("Montant total nul ou négatif");
 
@@ -352,6 +383,19 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   if ((shipStreet || shipCity) && !shipCity) warnings.push("Adresse de livraison : ville absente, ville du client reprise");
 
   const notes: string[] = [];
+  if (kind === "avoir") {
+    notes.push(`Avoir sur la facture n° ${originalNumber}${originalDate ? ` du ${frDate(originalDate)}` : ""}`);
+    if (clean(doc.motifAvoir)) notes.push(`Motif de l'avoir : ${stripMarkup(clean(doc.motifAvoir))}`);
+  }
+  if (situation) {
+    const periode = [clean(doc.periodeDebut) ? `du ${frDate(clean(doc.periodeDebut))}` : "", clean(doc.periodeFin) ? `au ${frDate(clean(doc.periodeFin))}` : ""].filter(Boolean).join(" ");
+    notes.push(`Situation de travaux n° ${Number(doc.numeroSituation) || 1}${periode ? ` (${periode})` : ""}${clean(doc.marcheNumero) ? ` — marché n° ${clean(doc.marcheNumero)}` : ""}`);
+    const situationLines = (Array.isArray(doc.items) ? doc.items : []).filter((l: any) => l && l.type === "line");
+    const marcheHT = round2(situationLines.reduce((sum: number, l: any) => sum + round2((Number(l.qty) || 0) * (Number(l.unitPrice) || 0)), 0));
+    const cumulPrecedent = round2(situationLines.reduce((sum: number, l: any) => sum + round2(Number(l.montantCumulePrecedent) || 0), 0));
+    notes.push(`Montant du marché HT : ${money(marcheHT)} ${currency} — déjà facturé avant cette situation : ${money(cumulPrecedent)} ${currency} HT`);
+    if (situation.acompteVerse > 0) notes.push(`Acompte versé déduit : ${money(situation.acompteVerse)} ${currency}`);
+  }
   const noteText = stripMarkup(clean(doc.notes));
   if (noteText && noteText.toLowerCase() !== "merci de votre confiance.") notes.push(noteText);
   if (clean(doc.chantier)) notes.push(`Chantier : ${clean(doc.chantier)}`);
@@ -363,13 +407,16 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
 
   return {
     model: {
-      number, typeCode: doc.type === "avoir" ? "381" : doc.type === "acompte" ? "386" : "380", issueDate, dueDate, currency,
+      number, typeCode: kind === "avoir" ? "381" : kind === "acompte" ? "386" : "380", issueDate, dueDate, currency,
       businessProcess: CATEGORY_TO_PROCESS[operationCategory],
       operationCategory, vatOnDebits,
       seller, buyer, buyerIsBusiness, treatment, shipTo, deliveryDate, lines, vat,
       totals: { lineTotal, taxBasis: lineTotal, taxTotal, grandTotal, prepaid, duePayable },
-      payment: { iban, bic, termsText: dueDays > 0 ? `Paiement à ${dueDays} jours, soit au plus tard le ${frDate(dueDate)}` : "Paiement à réception" },
+      payment: { iban, bic, termsText: kind === "avoir"
+        ? `Avoir : ${clean(doc.modeRemboursement) ? stripMarkup(clean(doc.modeRemboursement)) : "à déduire d'une prochaine facture ou à rembourser"}`
+        : `${dueDays > 0 ? `Paiement à ${dueDays} jours, soit au plus tard le ${frDate(dueDate)}` : "Paiement à réception"}${situation && situation.retenueGarantie > 0 ? ` — dont retenue de garantie ${Number(doc.retenueGarantiePct) || 0} % (${money(situation.retenueGarantie)} ${currency}) payable à la levée des réserves ; net à payer sur cette situation : ${money(situation.netAPayer)} ${currency}` : ""}` },
       notes,
+      originalInvoice: kind === "avoir" ? { number: originalNumber, date: originalDate } : null,
       siteName,
     },
     missing, warnings,
@@ -502,7 +549,10 @@ export function buildCiiXml(m: FxInvoiceModel): string {
           el("ram:TaxTotalAmount", money(m.totals.taxTotal), ` currencyID="${m.currency}"`) +
           el("ram:GrandTotalAmount", money(m.totals.grandTotal)) +
           opt(m.totals.prepaid > 0, el("ram:TotalPrepaidAmount", money(m.totals.prepaid))) +
-          el("ram:DuePayableAmount", money(m.totals.duePayable))))) +
+          el("ram:DuePayableAmount", money(m.totals.duePayable))) +
+        opt(!!m.originalInvoice, el("ram:InvoiceReferencedDocument",
+          el("ram:IssuerAssignedID", esc(m.originalInvoice?.number || "")) +
+          opt(!!m.originalInvoice?.date, el("ram:FormattedIssueDateTime", el("qdt:DateTimeString", m.originalInvoice?.date ? yyyymmdd(m.originalInvoice.date) : "", ' format="102"'))))))) +
     `</rsm:CrossIndustryInvoice>`;
 }
 
@@ -653,7 +703,8 @@ export async function buildFacturXPdf(m: FxInvoiceModel, xml: string, assets: Pd
   y -= 16;
   text(`Date d'émission : ${frDate(m.issueDate)}`, MARGIN, 9, font, SOFT);
   y -= 12;
-  text(`Échéance : ${frDate(m.dueDate)}`, MARGIN, 9, font, SOFT);
+  if (m.originalInvoice) text(`Facture d'origine : n° ${m.originalInvoice.number}${m.originalInvoice.date ? ` du ${frDate(m.originalInvoice.date)}` : ""}`, MARGIN, 9, font, SOFT);
+  else text(`Échéance : ${frDate(m.dueDate)}`, MARGIN, 9, font, SOFT);
   y -= 12;
   text(`Catégorie d'opération : ${CATEGORY_LABEL[m.operationCategory]}`, MARGIN, 9, font, SOFT);
   y -= 18;
@@ -761,7 +812,7 @@ export async function buildFacturXPdf(m: FxInvoiceModel, xml: string, assets: Pd
   });
 
   const producer = `${m.siteName} — générateur Factur-X`;
-  const title = `${m.typeCode === "381" ? "Avoir" : "Facture"} ${m.number}`;
+  const title = `${m.typeCode === "381" ? "Avoir" : m.typeCode === "386" ? "Facture d'acompte" : "Facture"} ${m.number}`;
   pdf.setTitle(title);
   pdf.setAuthor(m.seller.name);
   pdf.setSubject("Facture électronique Factur-X (EN 16931)");

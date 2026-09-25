@@ -5348,6 +5348,9 @@ function DeviFactAppInner() {
         onFinalize={() => finalizeDoc(activeDoc.id)}
         onBack={backToDashboard}
         onCreateNext={createNextSituationDoc}
+        pdpStatus={pdpStatus}
+        onSendPdp={sendInvoiceToPdp}
+        onRefreshPdp={refreshPdpStatus}
         onSyncOnlinePayments={syncOnlinePayments}
         paymentNotice={paymentRevertNotice?.docId === activeDoc.id ? paymentRevertNotice : null}
         onDismissPaymentNotice={() => setPaymentRevertNotice(null)}
@@ -8108,7 +8111,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   );
 });
 
-function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null, clients = [], onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null }) {
+function SituationEditor({ doc, documents, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onCreateNext, onGoToPricing, companyProfile = null, clients = [], onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, pdpStatus = null, onSendPdp = null, onRefreshPdp = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const saveTimer = useRef(null);
@@ -8149,6 +8152,8 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   }, [doc]);
 
   function patch(p) {
+    // Situation transmise via Super PDP : le contenu ne bouge plus (bandeau).
+    if (pdpLocked && pdpBlockedKeys(p).length) { setPdpLockNotice(true); return; }
     setLocalDoc((prev) => ({ ...prev, ...p }));
     // Toutes les modifications faites pendant le délai de 400ms sont
     // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
@@ -8184,6 +8189,78 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const hasNextSituation = (documents || []).some((d) => d.type === "situation" && d.previousSituationId === localDoc.id);
   const nextSituation = (documents || []).find((d) => d.type === "situation" && d.previousSituationId === localDoc.id) || null;
+  // Factur-X et Super PDP : situation valant facture d'une entreprise française
+  // (mêmes règles que l'éditeur de facture ; la retenue de garantie et
+  // l'acompte versé passent en conditions de paiement et montant prépayé).
+  const facturxAvailable = isFranceCompany(companyProfile) && localDoc.vautFacture === true;
+  const [facturxGenerating, setFacturxGenerating] = useState(false);
+  const pdpCtx = { connected: !!pdpStatus?.connected, env: pdpStatus?.env || null, verificationStatus: pdpStatus?.verificationStatus || null, companyCountryCode: (countryCodeOf(companyProfile?.country) || "").toUpperCase() || null };
+  const pdpEligible = SUPERPDP_ENABLED && !!onSendPdp && !isViewer && !isLocked && pdpEligibility(localDoc, pdpCtx).ok;
+  const pdpLocked = pdpLocksContent(localDoc.pdp);
+  const [pdpSending, setPdpSending] = useState(false);
+  const [pdpLockNotice, setPdpLockNotice] = useState(false);
+  const [pdpRefreshing, setPdpRefreshing] = useState(false);
+  function flushPendingPatch() {
+    if (!saveTimer.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const merged = pendingPatchRef.current;
+    pendingPatchRef.current = null;
+    if (merged) onChange(merged);
+  }
+  async function refreshPdp() {
+    if (pdpRefreshing || !onRefreshPdp) return;
+    setPdpRefreshing(true);
+    try {
+      const res = await onRefreshPdp();
+      const mine = (res?.updated || []).find((u) => u.documentId === localDoc.id);
+      if (mine?.pdp) setLocalDoc((prev) => ({ ...prev, pdp: { ...(prev.pdp || {}), ...mine.pdp } }));
+    } catch (err) {
+      console.error("Actualisation Super PDP impossible", err);
+      alert(err?.message || "Actualisation impossible pour l'instant.");
+    } finally { setPdpRefreshing(false); }
+  }
+  async function sendToPdp() {
+    if (pdpSending) return;
+    const env = pdpStatus?.env === "production" ? "production" : "bac à sable";
+    if (!window.confirm(`Envoyer la situation ${localDoc.docNumber || ""} (valant facture) à ${localDoc.client?.name || "ce client"} via Super PDP (${env}) ?\n\nLe fichier Factur-X sera validé puis transmis. Cet envoi ne s'annule pas et le contenu de la situation sera figé.`)) return;
+    flushPendingPatch();
+    setPdpSending(true);
+    try {
+      const res = await onSendPdp(localDoc.id);
+      if (res?.pdp) setLocalDoc((prev) => ({ ...prev, pdp: res.pdp }));
+      alert(`Situation ${localDoc.docNumber || ""} déposée chez Super PDP (${env}).${Array.isArray(res?.warnings) && res.warnings.length ? `\n\nPoints d'attention :\n- ${res.warnings.join("\n- ")}` : ""}`);
+    } catch (err) {
+      console.error("Envoi Super PDP impossible", err);
+      alert(err?.message || "Envoi impossible pour l'instant.");
+    } finally { setPdpSending(false); }
+  }
+  async function downloadFacturX() {
+    if (facturxGenerating) return;
+    setFacturxGenerating(true);
+    try {
+      const { data: { session } } = await db.auth.getSession();
+      const { data, error } = await db.functions.invoke("generate-facturx", {
+        body: { document: localDoc, companyProfile: companyProfile || null, siteName: siteSettings?.name || "" },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      if (error || data?.error) {
+        let detail = data;
+        if (!detail && error?.context) { try { detail = await error.context.json(); } catch { /* corps illisible */ } }
+        const missing = Array.isArray(detail?.missing) ? detail.missing : [];
+        alert(`${detail?.error || error?.message || "Impossible de générer le fichier Factur-X."}${missing.length ? "\n\nÀ compléter :\n- " + missing.join("\n- ") : ""}`);
+        return;
+      }
+      const bytes = Uint8Array.from(atob(data.pdfBase64), (c) => c.charCodeAt(0));
+      downloadBlob(new Blob([bytes], { type: "application/pdf" }), data.fileName || `Situation-${localDoc.docNumber || "document"}-facturx.pdf`);
+      if (Array.isArray(data.warnings) && data.warnings.length) alert(`Fichier Factur-X généré. Points d'attention :\n- ${data.warnings.join("\n- ")}`);
+    } catch (err) {
+      console.error("Erreur de génération Factur-X", err);
+      alert("Impossible de générer le fichier Factur-X. Réessaie dans un instant.");
+    } finally {
+      setFacturxGenerating(false);
+    }
+  }
   const previousSituation = localDoc.previousSituationId ? (documents || []).find((d) => d.id === localDoc.previousSituationId) || null : null;
   const situationResync = previousSituation ? resyncSituationFromPrevious(localDoc, previousSituation) : null;
 
@@ -8305,12 +8382,19 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
+          {localDoc.pdp?.status && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</span>}
+          {localDoc.pdp?.invoiceId && onRefreshPdp && <button onClick={refreshPdp} disabled={pdpRefreshing} className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white" style={{ border: "1px solid rgba(255,255,255,0.35)", opacity: pdpRefreshing ? 0.6 : 1 }} title="Relire les événements Super PDP" data-testid="pdp-refresh">{pdpRefreshing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Actualiser</button>}
           {!hasNextSituation && !isLocked && (
             <button onClick={() => onCreateNext(localDoc)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }} title="Crée la situation suivante, en reprenant automatiquement le cumul de celle-ci">
               <ArrowRight size={15} /> Situation suivante
             </button>
           )}
-          <ExportMenu items={[{ id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating }, { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel }]} />
+          <ExportMenu items={[
+            { id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating },
+            { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel },
+            facturxAvailable ? { id: "facturx", label: "Factur-X (facture électronique)", icon: FileText, onClick: downloadFacturX, busy: facturxGenerating } : null,
+            pdpEligible ? { id: "pdp", label: "Envoyer via Super PDP", icon: Upload, onClick: sendToPdp, busy: pdpSending } : null,
+          ].filter(Boolean)} />
         </div>
       </div>
 
@@ -8405,6 +8489,12 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
             {nextSituation && (
               <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="situation-has-next">
                 <AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>La situation N° {nextSituation.numeroSituation || 1} ({nextSituation.docNumber}) fait suite à celle-ci : toute modification ici change son « déjà facturé », à mettre à jour depuis cette situation suivante.</span>
+              </div>
+            )}
+            {pdpLocked && (
+              <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="pdp-lock-banner">
+                <Lock size={15} className="mt-0.5 shrink-0" />
+                <span>Situation transmise via Super PDP{localDoc.pdp?.sentAt ? ` le ${fr(new Date(localDoc.pdp.sentAt))}` : ""} ({pdpStatusLabel(localDoc.pdp)}) : son contenu est figé. Statut et paiements restent modifiables ; pour corriger, établis un avoir puis une nouvelle situation.{pdpLockNotice ? " La dernière modification a été ignorée." : ""}</span>
               </div>
             )}
             {localDoc.vautFacture === true && <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />}
@@ -18063,6 +18153,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   const pdpCtx = { connected: !!pdpStatus?.connected, env: pdpStatus?.env || null, verificationStatus: pdpStatus?.verificationStatus || null, companyCountryCode: (countryCodeOf(companyProfile?.country) || "").toUpperCase() || null };
   const pdpEligible = SUPERPDP_ENABLED && !!onSendPdp && !isViewer && !isLocked && pdpEligibility(localDoc, pdpCtx).ok;
   const pdpLocked = pdpLocksContent(localDoc.pdp);
+  const pdpDocTitle = localDoc.type === "avoir" ? "Avoir" : localDoc.type === "acompte" ? "Facture d'acompte" : "Facture";
+  const pdpDocLabel = localDoc.type === "avoir" ? "l'avoir" : localDoc.type === "acompte" ? "la facture d'acompte" : "la facture";
   const [pdpSending, setPdpSending] = useState(false);
   const [pdpLockNotice, setPdpLockNotice] = useState(false);
   const [pdpRefreshing, setPdpRefreshing] = useState(false);
@@ -18081,13 +18173,13 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   async function sendToPdp() {
     if (pdpSending) return;
     const env = pdpStatus?.env === "production" ? "production" : "bac à sable";
-    if (!window.confirm(`Envoyer la facture ${localDoc.docNumber || ""} à ${localDoc.client?.name || "ce client"} via Super PDP (${env}) ?\n\nLe fichier Factur-X sera validé puis transmis. Cet envoi ne s'annule pas et le contenu de la facture sera figé.`)) return;
+    if (!window.confirm(`Envoyer ${pdpDocLabel} ${localDoc.docNumber || ""} à ${localDoc.client?.name || "ce client"} via Super PDP (${env}) ?\n\nLe fichier Factur-X sera validé puis transmis. Cet envoi ne s'annule pas et le contenu de ${pdpDocLabel} sera figé.`)) return;
     flushPendingPatch();
     setPdpSending(true);
     try {
       const res = await onSendPdp(localDoc.id);
       if (res?.pdp) setLocalDoc((prev) => ({ ...prev, pdp: res.pdp }));
-      alert(`Facture ${localDoc.docNumber || ""} déposée chez Super PDP (${env}).${Array.isArray(res?.warnings) && res.warnings.length ? `\n\nPoints d'attention :\n- ${res.warnings.join("\n- ")}` : ""}`);
+      alert(`${pdpDocTitle} ${localDoc.docNumber || ""} ${localDoc.type === "avoir" ? "déposé" : "déposée"} chez Super PDP (${env}).${Array.isArray(res?.warnings) && res.warnings.length ? `\n\nPoints d'attention :\n- ${res.warnings.join("\n- ")}` : ""}`);
     } catch (err) {
       console.error("Envoi Super PDP impossible", err);
       alert(err?.message || "Envoi impossible pour l'instant.");
@@ -18161,7 +18253,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           <ExportMenu items={[
             { id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating },
             { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel },
-            localDoc.type === "facture" && facturxAvailable ? { id: "facturx", label: "Factur-X (facture électronique)", icon: FileText, onClick: downloadFacturX, busy: facturxGenerating } : null,
+            ["facture", "acompte", "avoir"].includes(localDoc.type) && facturxAvailable ? { id: "facturx", label: "Factur-X (facture électronique)", icon: FileText, onClick: downloadFacturX, busy: facturxGenerating } : null,
             pdpEligible ? { id: "pdp", label: "Envoyer via Super PDP", icon: Upload, onClick: sendToPdp, busy: pdpSending } : null,
             !isViewer && hasPublicLinkType ? { id: "link", label: localDoc.type === "devis" ? "Lien de signature" : "Lien de paiement", icon: Link2, onClick: generatePublicLink, busy: publicLinkState.loading } : null,
             !isViewer && hasPublicLinkType ? { id: "qr", label: "QR code du lien", icon: QrCode, onClick: showQrCode, busy: qrLoading } : null,
@@ -18200,7 +18292,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         {pdpLocked && (
           <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="pdp-lock-banner">
             <Lock size={15} className="mt-0.5 shrink-0" />
-            <span>Facture transmise via Super PDP{localDoc.pdp?.sentAt ? ` le ${fr(new Date(localDoc.pdp.sentAt))}` : ""} ({pdpStatusLabel(localDoc.pdp)}) : son contenu est figé. Statut, paiements et relances restent modifiables ; pour corriger, établis un avoir puis une nouvelle facture.{pdpLockNotice ? " La dernière modification a été ignorée." : ""}</span>
+            <span>{pdpDocTitle} {localDoc.type === "avoir" ? "transmis" : "transmise"} via Super PDP{localDoc.pdp?.sentAt ? ` le ${fr(new Date(localDoc.pdp.sentAt))}` : ""} ({pdpStatusLabel(localDoc.pdp)}) : son contenu est figé. Statut, paiements et relances restent modifiables ; {localDoc.type === "avoir" ? "pour corriger, établis un nouvel avoir." : "pour corriger, établis un avoir puis une nouvelle facture."}{pdpLockNotice ? " La dernière modification a été ignorée." : ""}</span>
           </div>
         )}
         {localDoc.type === "devis" && localDoc.status === "signé" && Number.isFinite(Number(localDoc.signature?.acceptedTotalTTC)) && localDoc.signature?.acceptedTotalTTC !== null && Math.abs(totals.totalTTC - Number(localDoc.signature.acceptedTotalTTC)) > 0.005 && (
@@ -18375,7 +18467,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                 <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="SIRET" value={localDoc.company.siret} onChange={(e) => patchDeep("company", { siret: e.target.value })} />
               )}
               <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Adresse" value={localDoc.company.address} onChange={(e) => patchDeep("company", { address: e.target.value })} />
-              {(localDoc.type === "facture" || localDoc.type === "devis") && (
+              {["facture", "devis", "acompte", "avoir"].includes(localDoc.type) && (
                 <div className="mb-2 flex gap-2">
                   <input className="df-input w-1/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Code postal" title="Code postal (facturation électronique)" value={localDoc.company.postalCode || ""} onChange={(e) => patchDeep("company", { postalCode: e.target.value })} />
                   <input className="df-input w-2/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Ville" title="Ville (facturation électronique)" value={localDoc.company.city || ""} onChange={(e) => patchDeep("company", { city: e.target.value })} />
@@ -18422,14 +18514,14 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               )}
               <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm font-medium" style={inputStyle} placeholder={localDoc.type === "commande" ? "Nom du fournisseur" : localDoc.client.type === "particulier" ? "Nom et prénom" : "Raison sociale"} value={localDoc.client.name} onChange={(e) => { const match = findClientByName(clients, e.target.value); patch({ client: { ...localDoc.client, name: e.target.value }, clientId: match ? match.id : null }); }} />
               <input className="df-input mb-2 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Adresse" value={localDoc.client.address} onChange={(e) => patchDeep("client", { address: e.target.value })} />
-              {(localDoc.type === "facture" || localDoc.type === "devis") && (
+              {["facture", "devis", "acompte", "avoir"].includes(localDoc.type) && (
                 <>
                   <div className="mb-2 flex gap-2">
                     <input className="df-input w-1/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Code postal" title="Code postal (facturation électronique)" value={localDoc.client.postalCode || ""} onChange={(e) => patchDeep("client", { postalCode: e.target.value })} />
                     <input className="df-input w-2/3 rounded-md px-2 py-1.5 text-sm" style={inputStyle} placeholder="Ville" title="Ville (facturation électronique)" value={localDoc.client.city || ""} onChange={(e) => patchDeep("client", { city: e.target.value })} />
                   </div>
                   <div className="mb-2" title="Pays du client (obligatoire sur la facture et pour Factur-X)">
-                    <CountrySelect value={localDoc.client.country || ""} onChange={(v) => patchDeep("client", { country: v })} placeholder={localDoc.type === "facture" ? "Pays du client *" : "Pays du client"} />
+                    <CountrySelect value={localDoc.client.country || ""} onChange={(v) => patchDeep("client", { country: v })} placeholder={localDoc.type === "devis" ? "Pays du client" : "Pays du client *"} />
                   </div>
                   {(localDoc.client.type || "entreprise") !== "particulier" && (
                     <div className="mb-2 flex gap-2">
@@ -18451,7 +18543,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="Ex : Rénovation cuisine Dupont" value={localDoc.chantier || ""} onChange={(e) => patch({ chantier: e.target.value })} />
           </div>
 
-          {facturxAvailable && (localDoc.type === "facture" || localDoc.type === "devis") && (
+          {facturxAvailable && ["facture", "devis", "acompte", "avoir"].includes(localDoc.type) && (
             <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }} data-testid="facturx-block">
               <div className="df-display mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
                 <FileText size={13} /> Facturation électronique (Factur-X)

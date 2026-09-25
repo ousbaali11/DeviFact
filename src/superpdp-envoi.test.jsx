@@ -20,8 +20,8 @@ describe("règles d'éligibilité", () => {
   });
   it("chaque refus, dans l'ordre des contrôles", () => {
     const codeOf = (doc, c = ctx()) => site.pdpEligibility(doc, c).code;
-    expect(codeOf(facture({ type: "acompte" }))).toBe("type");
-    expect(codeOf({ ...newDocument("situation", []), type: "situation", status: "envoyée" })).toBe("type");
+    expect(codeOf(facture({ type: "devis" }))).toBe("type");
+    expect(codeOf({ ...newDocument("situation", []), type: "situation", status: "envoyée" })).toBe("type"); // ne vaut pas facture
     expect(codeOf(facture({ status: "brouillon" }))).toBe("brouillon");
     expect(codeOf(facture({ client: client({ type: "particulier" }) }))).toBe("particulier");
     expect(codeOf(facture({ client: client({ country: "🇧🇪 BE" }) }))).toBe("etranger");

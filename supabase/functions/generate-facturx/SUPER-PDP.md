@@ -178,3 +178,36 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
   paiement partiel). En cas d'échec, `pdp.paidEventError` et la tâche
   quotidienne réessaie.
 - Bac à sable seulement tant que `SUPERPDP_ALLOW_PRODUCTION` ≠ `true`.
+
+## 9. Réalisé — points 5 et 6 (26/09/2026) : avoirs, factures d'acompte, situations valant facture
+
+- Factur-X (`facturx.ts`) accepte quatre pièces : facture (380), facture
+  d'acompte (386, ligne d'acompte générée par le site reprise telle quelle),
+  avoir (381) et situation de travaux valant facture (380). Devis, proforma
+  et situation simple restent refusés (« Vaut facture » à cocher).
+- Avoir : numéro de la facture d'origine et motif obligatoires (liste des
+  manquants), date d'origine en avertissement si absente ;
+  `ram:InvoiceReferencedDocument` (numéro + date au format 102) placé après
+  la récapitulation monétaire, note « Motif de l'avoir : … », conditions de
+  paiement = mode de règlement de l'avoir, en-tête PDF « AVOIR » avec la
+  ligne « Facture d'origine » à la place de l'échéance.
+- Situation valant facture : une ligne « forfait » par poste au montant de
+  CETTE situation (cumul atteint − déjà facturé, postes à 0 ignorés), pas
+  de remise globale ; retenue de garantie exprimée dans les conditions de
+  paiement (« dont retenue de garantie X % (…) payable à la levée des
+  réserves ; net à payer sur cette situation : … ») et acompte versé +
+  paiements reçus en `TotalPrepaidAmount` (BR-CO-16 respectée) ; notes
+  « Situation de travaux n° N (période) — marché n° … », montant du marché
+  et cumul déjà facturé ; catégorie d'opération absente → prestation de
+  services avec avertissement.
+- Règles partagées (`pdpTransmissibleType`) : envoi via Super PDP ouvert
+  aux quatre pièces (un avoir B2B se transmet comme une facture) ;
+  encaissement `fr:212` pour facture, facture d'acompte et situation valant
+  facture payées en totalité, jamais pour un avoir.
+- Site : entrées « Factur-X » et « Envoyer via Super PDP » sur avoirs et
+  factures d'acompte (bloc « Facturation électronique » affiché), et dans
+  l'éditeur de situation (menu Exporter, badge, bouton Actualiser, bandeau
+  de contenu figé, verrou des modifications) ; libellés adaptés à la pièce.
+- Tests : Deno `exemple/types-de-pieces.test.ts` (XML et PDF des trois
+  pièces, refus), Vitest `src/superpdp-types.test.jsx`.
+- Aucun script SQL : `pdp_invoices` et le champ `pdp` servent tels quels.

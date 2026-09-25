@@ -9,9 +9,10 @@
 //     écriture conditionnelle par organisation), puis rattrapage des
 //     encaissements (fr:212) restés à envoyer.
 //   - Membre connecté : action "sync" (tout membre actif : lecture) pour une
-//     organisation, ou action "paid" (propriétaire, éditeur) quand une facture
-//     transmise passe « payée » : POST /invoice_events { fr:212 } — une seule
-//     fois (pdp.paidEventAt), jamais pour un acompte ni un paiement partiel.
+//     organisation, ou action "paid" (propriétaire, éditeur) quand une pièce
+//     transmise (facture, facture d'acompte, situation valant facture) passe
+//     « payée » : POST /invoice_events { fr:212 } — une seule fois
+//     (pdp.paidEventAt), jamais pour un avoir ni un paiement partiel.
 // Une organisation en erreur n'interrompt pas les autres.
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";

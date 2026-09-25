@@ -49,8 +49,11 @@ java -jar Mustang-CLI.jar --action validate --source facture.pdf
 
 ## Limites connues (volontaires, à ce stade de préparation)
 
-- Uniquement les documents de type `facture` (pas encore les avoirs 381 ni les
-  factures d'acompte 386).
+- Pièces exportées : factures (380), factures d'acompte (386), avoirs (381,
+  avec la facture d'origine en `InvoiceReferencedDocument`) et situations de
+  travaux valant facture (380 : une ligne par poste au montant de la
+  situation, retenue de garantie en conditions de paiement, acompte versé en
+  montant prépayé). Pas les devis, proformas ni situations simples.
 - Les lignes à 0 % de TVA sont exportées avec le motif d'exonération choisi
   sur la facture (bloc « Facturation électronique ») : franchise en base par
   défaut, ou exportation, livraison intracommunautaire, autoliquidation.

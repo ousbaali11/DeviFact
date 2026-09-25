@@ -4,8 +4,9 @@
 // verrou de contenu — fonctions pures, sans Deno, MÊMES règles que
 // src/pdp-rules.js côté site (test de parité src/superpdp-envoi.test.jsx).
 //
-// Étape 2 : factures seulement (ni acomptes, ni situations), clients
-// professionnels établis en France avec SIRET ; en bac à sable, le champ
+// Pièces transmissibles : factures, factures d'acompte, avoirs et situations
+// valant facture (points 5 et 6, 26/09/2026) ; clients professionnels établis
+// en France avec SIRET ; en bac à sable, le champ
 // SIRET de la fiche client porte l'identifiant de test Super PDP
 // (« 0225:315143296_106842 » ou « 315143296_106842 »).
 
@@ -68,17 +69,27 @@ export function applyPdpEvents(events: PdpEvent[]): { updates: PdpEventUpdate[];
   }
   return { updates: [...byInvoice.values()], lastEventId };
 }
-// Encaissement (fr:212) : une seule fois, pour une facture transmise (non en
-// échec) passée « payée » — jamais pour un acompte ni un paiement partiel.
+// Pièces transmissibles via Super PDP : facture, facture d'acompte, avoir
+// (un avoir B2B se transmet comme une facture) et situation de travaux
+// valant facture. Un devis, une proforma ou une situation « simple » : non.
+export function pdpTransmissibleType(doc: any): boolean {
+  if (!doc) return false;
+  if (doc.type === "situation") return doc.vautFacture === true;
+  return doc.type === "facture" || doc.type === "acompte" || doc.type === "avoir";
+}
+// Encaissement (fr:212) : une seule fois, pour une pièce transmise (non en
+// échec) passée « payée » en totalité — facture, facture d'acompte ou
+// situation valant facture ; jamais pour un avoir ni un paiement partiel.
 export function shouldSendPaidEvent(doc: any): boolean {
-  if (!doc || doc.type !== "facture" || doc.status !== "payée") return false;
+  if (!doc || !pdpTransmissibleType(doc) || doc.type === "avoir" || doc.status !== "payée") return false;
   const pdp = doc.pdp;
   if (!pdp || !pdp.invoiceId || pdp.paidEventAt) return false;
   return !PDP_FINAL_FAILURES.includes(String(pdp.status || ""));
 }
 export function pdpEligibility(doc: any, ctx: PdpContext): PdpEligibility {
   const no = (code: string, reason: string): PdpEligibility => ({ ok: false, code, reason });
-  if (!doc || doc.type !== "facture") return no("type", "Seules les factures sont transmises via Super PDP pour l'instant (ni acomptes, ni situations).");
+  if (doc && doc.type === "situation" && doc.vautFacture !== true) return no("type", "Cette situation ne vaut pas facture : coche « Vaut facture » pour la transmettre via Super PDP.");
+  if (!pdpTransmissibleType(doc)) return no("type", "Seuls les factures, factures d'acompte, avoirs et situations valant facture se transmettent via Super PDP.");
   if (!doc.status || doc.status === "brouillon") return no("brouillon", "Une facture en brouillon ne se transmet pas : passe-la d'abord en « envoyée ».");
   if ((doc.client?.type || "entreprise") === "particulier") return no("particulier", "Client particulier : la facture électronique B2B ne s'applique pas, le PDF classique suffit.");
   if (countryCode(doc.client?.country) !== "FR") return no("etranger", "Client établi hors de France : cette vente relève du e-reporting, pas de la transmission B2B.");
