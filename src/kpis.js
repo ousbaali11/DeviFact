@@ -54,7 +54,10 @@ export function kpiPeriods(now = new Date(), fiscalStartMonth = 1) {
 
 // Vente encaissée : facture payée, ou situation de travaux « vaut facture » payée.
 export function isSale(doc) {
-  return !!doc && (doc.type === "facture" || (doc.type === "situation" && doc.vautFacture === true)) && doc.status === "payée";
+  if (!doc) return false;
+  // Avoir émis : vente négative (amountOf renvoie un montant négatif).
+  if (doc.type === "avoir") return doc.status === "envoyée" || doc.status === "payée" || doc.status === "en retard";
+  return (doc.type === "facture" || (doc.type === "situation" && doc.vautFacture === true)) && doc.status === "payée";
 }
 
 // Date de la vente : paiement si connu, sinon émission. Renvoie null si

@@ -168,6 +168,43 @@ begin
 end;
 $$;
 
+-- 7. Fiche entreprise (kv_store, clé company-profile) : IBAN, BIC et
+--    réglage d'export comptable modifiables par le propriétaire seulement
+--    (le site grise ces champs, la base l'impose). Le serveur (sans
+--    session) et la première création restent libres.
+create or replace function public.protect_owner_only_company_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_is_owner boolean;
+begin
+  if auth.uid() is null then
+    return new;
+  end if;
+  select exists (
+    select 1 from public.organization_members
+    where organization_id = new.organization_id and user_id = auth.uid() and role = 'owner' and status = 'active'
+  ) into caller_is_owner;
+  if caller_is_owner then
+    return new;
+  end if;
+  if coalesce(old.value->>'iban', '') is distinct from coalesce(new.value->>'iban', '')
+     or coalesce(old.value->>'bic', '') is distinct from coalesce(new.value->>'bic', '')
+     or coalesce(old.value->'accountingExport', 'null'::jsonb) is distinct from coalesce(new.value->'accountingExport', 'null'::jsonb) then
+    raise exception 'IBAN, BIC et réglage d''export comptable : modifiables par le propriétaire seulement' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists kv_store_protect_owner_only_company_fields on public.kv_store;
+create trigger kv_store_protect_owner_only_company_fields
+before update of value on public.kv_store
+for each row when (new.key = 'company-profile')
+execute function public.protect_owner_only_company_fields();
+
 -- Vérification attendue : plus aucune fonction SECURITY DEFINER sans
 -- search_path, email_has_account sans droit d'exécution pour anon /
 -- authenticated, ensure_user_has_organization sans « anon= », et une seule
@@ -177,3 +214,4 @@ from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public' and p.prosecdef
 order by 1;
 select policyname, cmd, with_check from pg_policies where tablename = 'public_document_links' order by 1;
+select tgname from pg_trigger where tgrelid = 'public.kv_store'::regclass and not tgisinternal order by 1;

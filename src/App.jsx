@@ -4,7 +4,7 @@ import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
-import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults } from "./accounting.js";
+import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument } from "./accounting.js";
 import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
@@ -1344,34 +1344,70 @@ function newSituationDocument(documents) {
 }
 
 function computeSituationLine(line) {
-  const montantMarche = (Number(line.qty) || 0) * (Number(line.unitPrice) || 0);
-  const montantCumuleActuel = (montantMarche * (Number(line.avancementPct) || 0)) / 100;
-  const montantCumulePrecedent = Number(line.montantCumulePrecedent) || 0;
-  const montantCetteSituation = montantCumuleActuel - montantCumulePrecedent;
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const montantMarche = r2((Number(line.qty) || 0) * (Number(line.unitPrice) || 0));
+  const montantCumuleActuel = r2((montantMarche * (Number(line.avancementPct) || 0)) / 100);
+  const montantCumulePrecedent = r2(Number(line.montantCumulePrecedent) || 0);
+  const montantCetteSituation = r2(montantCumuleActuel - montantCumulePrecedent);
   return { montantMarche, montantCumuleActuel, montantCumulePrecedent, montantCetteSituation };
 }
 
 function computeSituation(doc) {
   const lines = (doc.items || []).filter((l) => l.type === "line").map((l) => ({ ...l, ...computeSituationLine(l) }));
-  const subtotalHT = lines.reduce((s, l) => s + l.montantCetteSituation, 0);
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const subtotalHT = r2(lines.reduce((s, l) => s + l.montantCetteSituation, 0));
   const tvaGroups = {};
   lines.forEach((l) => {
     const rate = Number(l.tva) || 0;
-    tvaGroups[rate] = (tvaGroups[rate] || 0) + (l.montantCetteSituation * rate) / 100;
+    tvaGroups[rate] = (tvaGroups[rate] || 0) + l.montantCetteSituation;
   });
-  const totalTVA = Object.values(tvaGroups).reduce((a, b) => a + b, 0);
-  const totalTTCBrut = subtotalHT + totalTVA;
-  const retenueGarantie = totalTTCBrut * ((Number(doc.retenueGarantiePct) || 0) / 100);
-  const acompteVerse = Number(doc.acompteVerse) || 0;
-  const netAPayer = totalTTCBrut - retenueGarantie - acompteVerse;
+  Object.keys(tvaGroups).forEach((rate) => { tvaGroups[rate] = r2((tvaGroups[rate] * Number(rate)) / 100); });
+  const totalTVA = r2(Object.values(tvaGroups).reduce((a, b) => a + b, 0));
+  const totalTTCBrut = r2(subtotalHT + totalTVA);
+  const retenueGarantie = r2(totalTTCBrut * ((Number(doc.retenueGarantiePct) || 0) / 100));
+  const acompteVerse = r2(Number(doc.acompteVerse) || 0);
+  const netAPayer = r2(totalTTCBrut - retenueGarantie - acompteVerse);
   // Paiements reçus (situation valant facture), déduits du net à payer.
-  const paymentsReceived = paymentsTotalOf(doc);
-  const totalPaid = acompteVerse + paymentsReceived;
-  const montantARegler = Math.max(0, netAPayer - paymentsReceived);
+  const paymentsReceived = r2(paymentsTotalOf(doc));
+  const totalPaid = r2(acompteVerse + paymentsReceived);
+  const montantARegler = Math.max(0, r2(netAPayer - paymentsReceived));
   const montantMarcheTotal = lines.reduce((s, l) => s + l.montantMarche, 0);
   const montantCumuleTotal = lines.reduce((s, l) => s + l.montantCumuleActuel, 0);
   const avancementGlobalPct = montantMarcheTotal ? (montantCumuleTotal / montantMarcheTotal) * 100 : 0;
   return { lines, subtotalHT, tvaGroups, totalTVA, totalTTCBrut, retenueGarantie, acompteVerse, netAPayer, paymentsReceived, totalPaid, montantARegler, montantMarcheTotal, montantCumuleTotal, avancementGlobalPct };
+}
+
+// Situation N+1 : « déjà facturé » recalculé depuis la situation précédente
+// telle qu'elle est AUJOURD'HUI (avancement corrigé après coup, poste
+// ajouté…). Renvoie { items } à appliquer, ou null si tout correspond déjà.
+// Lignes rapprochées par position quand la désignation est la même, sinon
+// par désignation ; un poste de la précédente absent ici est ajouté (à son
+// avancement, donc 0 pour cette situation).
+function resyncSituationFromPrevious(doc, previous) {
+  if (!doc || !previous || previous.type !== "situation") return null;
+  const prevLines = computeSituation(previous).lines;
+  const norm = (s) => String(s || "").trim().toLowerCase();
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const items = Array.isArray(doc.items) ? doc.items : [];
+  const used = new Set();
+  let changed = false;
+  const next = items.map((it, idx) => {
+    if (!it || it.type !== "line") return it;
+    let k = prevLines[idx] && !used.has(idx) && norm(prevLines[idx].designation) === norm(it.designation) ? idx : -1;
+    if (k < 0) k = prevLines.findIndex((l, j) => !used.has(j) && norm(l.designation) && norm(l.designation) === norm(it.designation));
+    if (k < 0) return it;
+    used.add(k);
+    const cumul = r2(prevLines[k].montantCumuleActuel);
+    if (Math.abs((Number(it.montantCumulePrecedent) || 0) - cumul) <= 0.005) return it;
+    changed = true;
+    return { ...it, montantCumulePrecedent: cumul };
+  });
+  prevLines.forEach((l, k) => {
+    if (used.has(k) || !norm(l.designation)) return;
+    changed = true;
+    next.push({ id: nextId("sl"), type: "line", designation: l.designation, qty: l.qty, unitPrice: l.unitPrice, tva: l.tva, avancementPct: l.avancementPct, montantCumulePrecedent: r2(l.montantCumuleActuel) });
+  });
+  return changed ? { items: next } : null;
 }
 
 // Crée la situation suivante à partir d'une situation existante : le
@@ -1435,7 +1471,10 @@ function accountingExportRow(d) {
   }
   if (d.type === "relance") return [...head, "", "", Number((Number(d.montantDu) || 0).toFixed(2))];
   const t = computeTotals(d);
-  return [...head, Number(t.subtotalHT.toFixed(2)), Number(t.totalTVA.toFixed(2)), Number(t.totalTTC.toFixed(2))];
+  // Avoir : montants en négatif, pour que la somme de la colonne soit juste.
+  const sign = d.type === "avoir" ? -1 : 1;
+  const signed = (n) => { const v = Number((sign * n).toFixed(2)); return v === 0 ? 0 : v; };
+  return [...head, signed(t.subtotalHT), signed(t.totalTVA), signed(t.totalTTC)];
 }
 // Lignes { productId, totalHT, tva } servant aux écritures comptables :
 // pour une situation, le montant de cette situation par poste.
@@ -2263,12 +2302,27 @@ function paymentsTotalOf(doc) {
 function isPayableDoc(doc) {
   return !!doc && (doc.type === "facture" || doc.type === "acompte" || (doc.type === "situation" && doc.vautFacture === true));
 }
+// Avoirs rattachés à une facture (factureOrigineId), hors brouillons : leur
+// TTC vient en déduction du reste à payer de la facture — partout où ce
+// reste est utilisé (tableau de bord, relances, banque, page publique).
+function creditNotesTotalFor(doc, documents) {
+  if (!doc || !Array.isArray(documents)) return 0;
+  const total = documents.reduce((s, d) => (d && d.type === "avoir" && d.factureOrigineId === doc.id && d.status !== "brouillon" ? s + computeTotals(d).totalTTC : s), 0);
+  return Math.round(total * 100) / 100;
+}
+// Pièce comptable émise (facture, facture d'acompte, situation valant
+// facture, avoir — hors brouillon) : la loi impose de la conserver, elle ne
+// se supprime jamais ; elle s'annule par un avoir.
+function isIssuedAccountingDocument(doc) {
+  return !!doc && (isPayableDoc(doc) || doc.type === "avoir") && !!doc.status && doc.status !== "brouillon";
+}
 // Total déjà réglé d'un document à payer (acompte versé + paiements reçus).
 // Reste à payer d'un document à encaisser (facture, acompte, situation
 // valant facture) — la même règle que le PDF et la page publique.
-function documentAmountDue(doc) {
+function documentAmountDue(doc, documents = null) {
   if (!doc) return 0;
-  return doc.type === "situation" ? computeSituation(doc).montantARegler : computeTotals(doc).montantARegler;
+  const due = doc.type === "situation" ? computeSituation(doc).montantARegler : computeTotals(doc).montantARegler;
+  return Math.max(0, Math.round((due - creditNotesTotalFor(doc, documents)) * 100) / 100);
 }
 // Total « à régler » d'un document à encaisser (facture, acompte : TTC ;
 // situation valant facture : net à payer + acompte déjà versé), la valeur
@@ -2283,23 +2337,23 @@ function documentSettledTotal(doc) {
 // considéré réglé au passage en « payée » (paidTotal, à défaut le total du
 // moment) reste acquis ; tout ce que le total dépasse depuis (lignes
 // ajoutées, remise retirée…) est dû.
-function documentOutstanding(doc) {
+function documentOutstanding(doc, documents = null) {
   if (!isPayableDoc(doc)) return 0;
-  const total = documentSettledTotal(doc);
+  const gross = documentSettledTotal(doc);
+  const credits = creditNotesTotalFor(doc, documents); // avoirs rattachés
   const received = documentPaidTotal(doc);
-  if (doc.status !== "payée") return Math.max(0, Math.round((total - received) * 100) / 100);
-  const settledRef = Number(doc.paidTotal) > 0 ? Number(doc.paidTotal) : total;
-  return Math.max(0, Math.round((total - Math.max(received, settledRef)) * 100) / 100);
+  const settledRef = doc.status === "payée" ? (Number(doc.paidTotal) > 0 ? Number(doc.paidTotal) : gross) : 0;
+  return Math.max(0, Math.round((gross - credits - Math.max(received, settledRef)) * 100) / 100);
 }
 // Document déjà « payée » que l'on modifie (sans toucher au statut) : si le
 // nouveau total dépasse ce qui a été réglé, il repasse en « envoyée »,
 // paiement et référence effacés, et l'éditeur l'annonce. Renvoie
 // { patch, notice } ou null si rien ne change.
-function paymentRevertPatch(original, patch) {
+function paymentRevertPatch(original, patch, documents = null) {
   if (!original || original.status !== "payée" || patch.status !== undefined || !isPayableDoc(original)) return null;
   const next = { ...original, ...patch };
   const settledRef = Number(original.paidTotal) > 0 ? Number(original.paidTotal) : documentSettledTotal(original);
-  const outstanding = documentOutstanding({ ...next, status: "payée", paidTotal: settledRef });
+  const outstanding = documentOutstanding({ ...next, status: "payée", paidTotal: settledRef }, documents);
   if (outstanding <= 0.005) return null;
   return { patch: { status: "envoyée", paidAt: null, paidTotal: null }, notice: { docNumber: next.docNumber || "", amount: outstanding, currency: original.currency } };
 }
@@ -2314,6 +2368,7 @@ function paymentDateLabel(d) {
   return isNaN(t.getTime()) ? String(d) : t.toLocaleDateString("fr-FR");
 }
 function computeTotals(doc) {
+  const r2 = (n) => Math.round(n * 100) / 100;
   const lineItems = (doc.items || []).filter((i) => i.type === "line");
   const globalRate = globalDiscountRate(doc);
   const globalDiscountPct = globalRate * 100;
@@ -2321,30 +2376,33 @@ function computeTotals(doc) {
     const base = lineBaseHT(l);
     const afterLine = base * (1 - (Number(l.discount) || 0) / 100);
     const afterGlobal = afterLine * (1 - globalRate);
-    return { ...l, totalHTBrut: afterLine, totalHT: afterGlobal };
+    // Règle d'arrondi unique (site, serveur, Factur-X) : chaque ligne HT au
+    // centime, la TVA par taux au centime sur la somme des lignes, le TTC =
+    // HT + TVA — ce qui est imprimé s'additionne exactement.
+    return { ...l, totalHTBrut: r2(afterLine), totalHT: r2(afterGlobal) };
   });
-  const subtotalHTBrut = computedLines.reduce((s, l) => s + l.totalHTBrut, 0);
-  const subtotalHT = computedLines.reduce((s, l) => s + l.totalHT, 0);
-  const globalDiscountAmount = subtotalHTBrut - subtotalHT;
+  const subtotalHTBrut = r2(computedLines.reduce((s, l) => s + l.totalHTBrut, 0));
+  const subtotalHT = r2(computedLines.reduce((s, l) => s + l.totalHT, 0));
+  const globalDiscountAmount = r2(subtotalHTBrut - subtotalHT);
   const tvaGroups = {};
   computedLines.forEach((l) => {
     const rate = Number(l.tva) || 0;
-    const lineTVA = (l.totalHT * rate) / 100;
-    tvaGroups[rate] = (tvaGroups[rate] || 0) + lineTVA;
+    tvaGroups[rate] = (tvaGroups[rate] || 0) + l.totalHT;
   });
-  const totalTVA = Object.values(tvaGroups).reduce((a, b) => a + b, 0);
-  const totalTTC = subtotalHT + totalTVA;
+  Object.keys(tvaGroups).forEach((rate) => { tvaGroups[rate] = r2((tvaGroups[rate] * Number(rate)) / 100); });
+  const totalTVA = r2(Object.values(tvaGroups).reduce((a, b) => a + b, 0));
+  const totalTTC = r2(subtotalHT + totalTVA);
   // Devis (et autres) : acompte DEMANDÉ en % du TTC, avec le reste à payer.
-  const acompteAmount = totalTTC * ((Number(doc.acompte) || 0) / 100);
-  const resteAPayer = totalTTC - acompteAmount;
+  const acompteAmount = r2(totalTTC * ((Number(doc.acompte) || 0) / 100));
+  const resteAPayer = r2(totalTTC - acompteAmount);
   // Factures uniquement : acompte DÉJÀ VERSÉ, en montant TTC, déduit du
   // total pour obtenir le montant TTC à régler (jamais négatif).
   const invoiceLike = doc.type === "facture" || doc.type === "acompte";
   const acompteVerse = invoiceLike ? Math.max(0, Number(doc.acompteVerse) || 0) : 0;
   // Paiements reçus sur la facture (partiels ou solde), eux aussi déduits.
   const paymentsReceived = invoiceLike ? paymentsTotalOf(doc) : 0;
-  const totalPaid = acompteVerse + paymentsReceived;
-  const montantARegler = Math.max(0, totalTTC - totalPaid);
+  const totalPaid = r2(acompteVerse + paymentsReceived);
+  const montantARegler = Math.max(0, r2(totalTTC - totalPaid));
   return { computedLines, subtotalHTBrut, globalDiscountPct, globalDiscountAmount, subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer, acompteVerse, paymentsReceived, totalPaid, montantARegler };
 }
 
@@ -4414,7 +4472,7 @@ function DeviFactAppInner() {
       if (original && patch.status === "payée" && original.status !== "payée" && isPayableDoc(original)) {
         patch = { ...patch, paidTotal: documentSettledTotal({ ...original, ...patch }), paidAt: patch.paidAt || new Date().toISOString() };
       }
-      const revert = paymentRevertPatch(original, patch);
+      const revert = paymentRevertPatch(original, patch, documents);
       if (revert) {
         patch = { ...patch, ...revert.patch };
         setPaymentRevertNotice({ docId: id, ...revert.notice });
@@ -4460,6 +4518,10 @@ function DeviFactAppInner() {
   function deleteDoc(id) {
     if (isLocked) return;
     const doc = documents.find((d) => d.id === id);
+    if (isIssuedAccountingDocument(doc)) {
+      alert(`${docTypeLabel(doc.type)} ${doc.docNumber || ""} : cette pièce a été émise. La loi impose de conserver les pièces comptables émises, elle ne peut pas être supprimée. Pour l'annuler, établis un avoir.`);
+      return;
+    }
     if (!window.confirm(`Supprimer définitivement "${doc?.docNumber || "ce document"}" ? Cette action est irréversible.`)) return;
     // Les photos de chantier du document disparaissent avec lui — une fois
     // la suppression réellement enregistrée (sinon un échec réseau laissait
@@ -4782,7 +4844,8 @@ function DeviFactAppInner() {
         const daysLeft = Math.round((validityDate - today) / 86400000);
         if (daysLeft <= 3) list.push({ doc: d, reason: daysLeft < 0 ? "Devis expiré" : daysLeft === 0 ? "Expire aujourd'hui" : `Expire dans ${daysLeft} j`, urgent: daysLeft <= 0 });
       }
-      if (d.type === "facture" && d.status === "envoyée") {
+      if (d.type === "facture" && (d.status === "envoyée" || d.status === "en retard")) {
+        if (documentOutstanding(d, documents) <= 0.005) return; // soldée par les paiements ou un avoir
         const dueDate = new Date(localDateOf(d.issueDate).getTime() + (Number(d.dueDays) || 0) * 86400000);
         const daysLate = Math.round((today - dueDate) / 86400000);
         if (daysLate >= 0) list.push({ doc: d, reason: daysLate === 0 ? "Échéance aujourd'hui" : `${daysLate} j de retard`, urgent: daysLate > 0 });
@@ -4792,7 +4855,7 @@ function DeviFactAppInner() {
   }, [documents]);
 
   function reminderMailto({ doc }) {
-    const amountDue = documentOutstanding(doc); // reste réel (acompte et paiements déduits)
+    const amountDue = documentOutstanding(doc, documents); // reste réel (acompte, paiements et avoirs déduits)
     const subject = doc.type === "devis" ? `Relance — Devis ${doc.docNumber}` : `Relance — Facture ${doc.docNumber}`;
     const body = doc.type === "devis"
       ? `Bonjour ${doc.client.name || ""},\n\nJe me permets de vous relancer au sujet du devis ${doc.docNumber}, dont la date de validité approche.\n\nN'hésitez pas à me contacter pour toute question.\n\nCordialement.`
@@ -4802,9 +4865,11 @@ function DeviFactAppInner() {
 
   async function exportAccountingCSV() {
     const rows = [["Type", "Numéro", "Date d'émission", "Client", "Statut", "Montant HT", "Montant TVA", "Montant TTC"]];
+    // Documents de vente émis seulement (facture, acompte, avoir, situation
+    // valant facture) : ni devis, ni brouillons, ni bons de commande.
     documents
-      .slice()
-      .sort((a, b) => new Date(a.issueDate) - new Date(b.issueDate))
+      .filter(isSalesDocument)
+      .sort((a, b) => localDateOf(a.issueDate) - localDateOf(b.issueDate))
       .forEach((d) => { rows.push(accountingExportRow(d)); });
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -4938,6 +5003,9 @@ function DeviFactAppInner() {
         onSendReview={sendReviewRequest}
         onDismissReview={() => setReviewNotice(null)}
         onSyncOnlinePayments={syncOnlinePayments}
+        linkableInvoices={documents.filter((d) => isPayableDoc(d) && d.status !== "brouillon" && d.id !== activeDoc.id)}
+        creditTotal={creditNotesTotalFor(activeDoc, documents)}
+        acompteSuggestion={acompteSuggestionFor(activeDoc, documents)}
       />
     );
   }
@@ -5049,6 +5117,7 @@ function DeviFactAppInner() {
     return (
       <RelanceFormelleEditor
         doc={activeDoc}
+        documents={documents}
         clients={clients}
         companyProfile={companyProfile}
         saving={saving}
@@ -5418,7 +5487,8 @@ function PublicDocumentView({ token }) {
   const isSituationDoc = state.document?.type === "situation";
   const sit = isSituationDoc ? computeSituation(state.document) : null;
   const totals = state.document && !isSituationDoc ? computeTotals(state.document) : null;
-  const amountDue = isSituationDoc ? sit.montantARegler : totals ? (payable ? totals.montantARegler : totals.totalTTC) : 0;
+  const creditTotal = Math.max(0, Number(state.creditTotal) || 0); // avoirs rattachés (serveur)
+  const amountDue = Math.max(0, Math.round(((isSituationDoc ? sit.montantARegler : totals ? (payable ? totals.montantARegler : totals.totalTTC) : 0) - creditTotal) * 100) / 100);
   const totalPaid = isSituationDoc ? sit.totalPaid : totals ? totals.totalPaid : 0;
   const totalTTC = isSituationDoc ? sit.netAPayer + sit.acompteVerse : totals ? totals.totalTTC : 0;
   const summaryLines = isSituationDoc ? sit.lines.map((l) => ({ id: l.id, designation: l.designation, totalHT: l.montantCetteSituation })) : totals ? totals.computedLines : [];
@@ -5489,7 +5559,7 @@ function PublicDocumentView({ token }) {
         if (data?.error) throw new Error(data.error);
         // Paiement en ligne : uniquement si le serveur l'annonce (compte
         // Stripe connecté et actif pour cet artisan) — jamais par défaut.
-        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true , paymentInfo: data.paymentInfo || null});
+        setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true , paymentInfo: data.paymentInfo || null, creditTotal: Math.max(0, Number(data.creditTotal) || 0) });
         if (paymentReturn) setPaidBaseline((b) => (b === null ? documentPaidTotal(data.document) : b));
       } catch (err) {
         setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
@@ -5581,7 +5651,7 @@ function PublicDocumentView({ token }) {
               <div className="text-right">
                 <div className="df-mono text-xl font-bold">{formatMoney(amountDue, state.document.currency)}</div>
                 {payable && totalPaid > 0 && (
-                  <div className="text-xs" style={{ color: colors.inkSoft }}>{isSituationDoc ? "Net à payer" : "Total TTC"} {formatMoney(totalTTC, state.document.currency)} − déjà payé {formatMoney(totalPaid, state.document.currency)}</div>
+                  <div className="text-xs" style={{ color: colors.inkSoft }}>{isSituationDoc ? "Net à payer" : "Total TTC"} {formatMoney(totalTTC, state.document.currency)} − déjà payé {formatMoney(totalPaid, state.document.currency)}{creditTotal > 0 && <> − avoir {formatMoney(creditTotal, state.document.currency)}</>}</div>
                 )}
               </div>
             </div>
@@ -7701,6 +7771,9 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   const printRef = useRef(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const hasNextSituation = (documents || []).some((d) => d.type === "situation" && d.previousSituationId === localDoc.id);
+  const nextSituation = (documents || []).find((d) => d.type === "situation" && d.previousSituationId === localDoc.id) || null;
+  const previousSituation = localDoc.previousSituationId ? (documents || []).find((d) => d.id === localDoc.previousSituationId) || null : null;
+  const situationResync = previousSituation ? resyncSituationFromPrevious(localDoc, previousSituation) : null;
 
   // Photos de chantier (voir DocumentPhotosBlock) — fichiers dans le
   // bucket privé, liens signés régénérés à l'ouverture et avant le PDF.
@@ -7916,6 +7989,17 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                 <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Nom du maître d'œuvre" value={localDoc.visaMaitreOeuvre || ""} onChange={(e) => patch({ visaMaitreOeuvre: e.target.value })} />
               </div>
             </div>
+            {situationResync && (
+              <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.brassDark}14`, border: `1px solid ${colors.brassDark}55` }} data-testid="situation-resync">
+                <span className="flex items-start gap-2 text-sm" style={{ color: colors.brassDark }}><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>La situation N° {previousSituation.numeroSituation || 1} ({previousSituation.docNumber}) a été modifiée depuis : le « déjà facturé » de cette situation ne lui correspond plus.</span></span>
+                {!isLocked && !isViewer && <button onClick={() => patch(situationResync)} className="rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brassDark }}>Mettre à jour le déjà facturé</button>}
+              </div>
+            )}
+            {nextSituation && (
+              <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="situation-has-next">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>La situation N° {nextSituation.numeroSituation || 1} ({nextSituation.docNumber}) fait suite à celle-ci : toute modification ici change son « déjà facturé », à mettre à jour depuis cette situation suivante.</span>
+              </div>
+            )}
             {localDoc.vautFacture === true && <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />}
             {localDoc.vautFacture === true && !String(companyProfile?.iban || "").trim() && (
               <p className="mb-3 flex items-start gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: `${colors.brass}1A`, color: colors.brassDark }}>
@@ -9397,7 +9481,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
         <p style={{ marginTop: "10px" }}>
           {isMiseEnDemeure ? (
             clientIsPro
-              ? <>À défaut de règlement dans ce délai, des pénalités de retard au taux de {doc.tauxInteretRetard} seront appliquées (art. L441-10 du Code de commerce), ainsi qu'une indemnité forfaitaire pour frais de recouvrement de {formatMoney(Number(doc.indemniteForfaitaire) || 40, currency)} (art. D441-5 du Code de commerce). Nous nous réservons également le droit d'engager toute action, y compris judiciaire, pour obtenir le recouvrement de cette créance.</>
+              ? <>À défaut de règlement dans ce délai, des pénalités de retard au taux de {doc.tauxInteretRetard} seront appliquées (art. L441-10 du Code de commerce), ainsi qu'une indemnité forfaitaire pour frais de recouvrement de {formatMoney((doc.indemniteForfaitaire === "" || doc.indemniteForfaitaire == null ? 40 : Number(doc.indemniteForfaitaire) || 0), currency)} (art. D441-5 du Code de commerce). Nous nous réservons également le droit d'engager toute action, y compris judiciaire, pour obtenir le recouvrement de cette créance.</>
               : <>À défaut de règlement dans ce délai, des intérêts de retard au taux de {doc.tauxInteretRetard} courront à compter de la présente mise en demeure (art. 1231-6 et 1344 du Code civil). Nous nous réservons également le droit d'engager toute action, y compris judiciaire, pour obtenir le recouvrement de cette créance.</>
           ) : (
             <>À défaut de règlement dans ce délai, nous serions contraints de vous adresser une mise en demeure{clientIsPro ? ", avec application des pénalités de retard et de l'indemnité forfaitaire pour frais de recouvrement prévues par le Code de commerce" : ", avec application des intérêts de retard prévus par le Code civil"}.</>
@@ -9421,7 +9505,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
   );
 });
 
-function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null, clients = [] }) {
+function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null, clients = [], documents = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -9465,6 +9549,23 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
   function setClientName(name) {
     const match = findClientByName(clients, name);
     patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
+  }
+  // Factures à relancer (émises, non soldées), celles du client choisi
+  // d'abord — la saisie libre reste possible pour les relances existantes.
+  const relanceInvoices = useMemo(() => {
+    const name = String(localDoc.client?.name || "").trim().toLowerCase();
+    const sameClient = (d) => (localDoc.clientId && d.clientId === localDoc.clientId) || (!!name && String(d.client?.name || "").trim().toLowerCase() === name);
+    return (documents || [])
+      .filter((d) => isPayableDoc(d) && d.status && !["brouillon", "payée", "annulée"].includes(d.status) && documentOutstanding(d, documents) > 0.005)
+      .filter((d) => (localDoc.clientId || name ? sameClient(d) : true))
+      .sort((a, b) => String(b.issueDate || "").localeCompare(String(a.issueDate || "")));
+  }, [documents, localDoc.clientId, localDoc.client?.name]);
+  function selectRelanceInvoice(id) {
+    const inv = relanceInvoices.find((d) => d.id === id);
+    if (!inv) { patch({ factureId: null }); return; }
+    const due = documentOutstanding(inv, documents);
+    const echeance = inv.issueDate ? toIsoDate(new Date(localDateOf(inv.issueDate).getTime() + (Number(inv.dueDays) || 0) * 86400000)) : "";
+    patch({ factureId: inv.id, factureRef: inv.docNumber || "", factureDate: inv.issueDate || "", dateEcheanceOrigine: echeance, montantDu: due, currency: inv.currency || localDoc.currency, ...(String(localDoc.client?.name || "").trim() ? {} : { client: { ...(localDoc.client || {}), ...(inv.client || {}) }, clientId: inv.clientId || null }) });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
 
@@ -9604,6 +9705,13 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
           </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Facture à relancer (pré-remplit référence, dates et montant dû)</label>
+              <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.factureId || ""} aria-label="Facture à relancer" onChange={(e) => selectRelanceInvoice(e.target.value)}>
+                <option value="">— Saisie libre —</option>
+                {relanceInvoices.map((d) => <option key={d.id} value={d.id}>{d.docNumber} · {d.client?.name || "sans client"} · reste {formatMoney(documentOutstanding(d, documents), d.currency)}</option>)}
+              </select>
+            </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Facture concernée (référence) *</label>
               <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.factureRef || "").trim() ? colors.line : colors.brick}` }} placeholder="ex : FAC-014" value={localDoc.factureRef || ""} onChange={(e) => patch({ factureRef: e.target.value })} />
@@ -10721,9 +10829,9 @@ function atelierStatusColor(status, tone) {
 function atelierCapitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
 // Montant affiché dans la liste : { value, note } ou null (pas de montant
 // pour un PV, un rapport, un planning, ou un document sans ligne).
-function atelierDocAmount(d) {
+function atelierDocAmount(d, documents = null) {
   if (d.type === "pv_reception" || d.type === "rapport" || d.type === "planning") return null;
-  if (d.type === "situation") { const s = computeSituation(d); const due = documentOutstanding(d); return due > 0.005 && due < s.netAPayer - 0.005 ? { value: due, note: "reste" } : { value: s.netAPayer, note: "net" }; }
+  if (d.type === "situation") { const s = computeSituation(d); const due = documentOutstanding(d, documents); return due > 0.005 && due < s.netAPayer - 0.005 ? { value: due, note: "reste" } : { value: s.netAPayer, note: "net" }; }
   if (d.type === "contrat") { const ht = Number(d.montantTotalHT) || 0; return ht ? { value: ht, note: "HT" } : null; }
   if (d.type === "relance") { const v = Number(d.montantDu) || 0; return v ? { value: v, note: "dû" } : null; }
   if (d.type === "revision") { const r = computeRevision(d); return r.valid ? { value: r.montantRevise, note: "révisé" } : null; }
@@ -10732,7 +10840,7 @@ function atelierDocAmount(d) {
   const t = computeTotals(d);
   // Facture partiellement réglée (ou modifiée après paiement) : le reste
   // réel à payer, pas le total.
-  if (d.type === "facture" || d.type === "acompte") { const due = documentOutstanding(d); if (due > 0.005 && due < t.totalTTC - 0.005) return { value: due, note: "reste" }; }
+  if (d.type === "facture" || d.type === "acompte") { const due = documentOutstanding(d, documents); if (due > 0.005 && due < t.totalTTC - 0.005) return { value: due, note: "reste" }; }
   return { value: t.totalTTC, note: "TTC" };
 }
 // Badge métier propre au type (état déjà saisi dans l'éditeur).
@@ -10767,7 +10875,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
     const enCours = documents.filter((d) => d.workStage !== "termine" && (d.status === "brouillon" || !d.status));
     const sum = (list) => list.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
     // Factures : ce qu'il reste à encaisser, paiements partiels déduits.
-    const sumDue = (list) => list.reduce((s, d) => s + computeTotals(d).montantARegler, 0);
+    const sumDue = (list) => list.reduce((s, d) => s + documentOutstanding(d, documents), 0);
     const devisTraites = documents.filter((d) => d.type === "devis" && d.status !== "brouillon");
     const devisSignes = documents.filter((d) => d.type === "devis" && d.status === "signé");
     return {
@@ -10873,7 +10981,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
         ) : (
           <div className="overflow-hidden rounded-xl" style={card}>
             {recent.map((d, i) => {
-              const amount = atelierDocAmount(d);
+              const amount = atelierDocAmount(d, documents);
               const statuses = atelierStatusesFor(d.type);
               return (
                 <button key={d.id} onClick={() => onOpenDoc(d.id)} className="df-at-tap flex w-full items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
@@ -11022,7 +11130,7 @@ function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset,
       ) : (
         <div className="overflow-hidden rounded-xl" style={card}>
           {list.map((d, i) => {
-            const amount = atelierDocAmount(d);
+            const amount = atelierDocAmount(d, documents);
             const docStatuses = atelierStatusesFor(d.type);
             const badge = atelierDocBadge(d);
             const selected = selectedIds.includes(d.id);
@@ -11059,7 +11167,7 @@ function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset,
                 {canEdit && (
                   <span className="flex shrink-0 items-center">
                     <button onClick={() => onDuplicate(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.inkSoft }} title="Dupliquer" aria-label="Dupliquer"><Copy size={16} /></button>
-                    <button onClick={() => onDelete(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.danger }} title="Supprimer" aria-label="Supprimer"><Trash2 size={16} /></button>
+                    {!isIssuedAccountingDocument(d) && <button onClick={() => onDelete(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.danger }} title="Supprimer" aria-label="Supprimer"><Trash2 size={16} /></button>}
                   </span>
                 )}
                 </span>
@@ -11140,11 +11248,17 @@ function atelierChantierStats(documents, slots) {
   for (const d of documents) {
     const nom = (d.chantier || "").trim();
     if (!nom) continue;
-    if (!map.has(nom)) map.set(nom, { nom, docs: [], devisTotal: 0, factureTotal: 0, photos: 0, clients: new Map(), lastUpdate: 0 });
-    const c = map.get(nom);
+    const key = nom.toLowerCase(); // « Dupont » et « dupont » : un seul chantier
+    if (!map.has(key)) map.set(key, { nom, docs: [], devisTotal: 0, factureTotal: 0, photos: 0, clients: new Map(), lastUpdate: 0 });
+    const c = map.get(key);
     c.docs.push(d);
-    if (d.type === "devis") c.devisTotal += computeTotals(d).totalTTC;
-    if (d.type === "facture") c.factureTotal += computeTotals(d).totalTTC;
+    const emis = !!d.status && d.status !== "brouillon";
+    // Prévu : devis vivants (ni brouillon, ni refusé, ni expiré). Facturé :
+    // factures et acomptes émis, situations valant facture, avoirs déduits.
+    if (d.type === "devis" && emis && !["refusé", "expiré", "expirée", "annulé"].includes(d.status)) c.devisTotal += computeTotals(d).totalTTC;
+    if ((d.type === "facture" || d.type === "acompte") && emis) c.factureTotal += computeTotals(d).totalTTC;
+    if (d.type === "situation" && d.vautFacture === true && emis) c.factureTotal += computeSituation(d).totalTTCBrut;
+    if (d.type === "avoir" && emis) c.factureTotal -= computeTotals(d).totalTTC;
     if (Array.isArray(d.photos)) c.photos += d.photos.length;
     const clientName = (d.client?.name || "").trim();
     if (clientName) c.clients.set(clientName, (c.clients.get(clientName) || 0) + 1);
@@ -11385,7 +11499,7 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
             <h2 className="df-display mb-2 text-sm font-semibold uppercase tracking-wide" style={{ color: tone.accent }}>{f.label}</h2>
             <div className="overflow-hidden rounded-xl" style={card}>
               {f.docs.map((d, i) => {
-                const amount = atelierDocAmount(d);
+                const amount = atelierDocAmount(d, documents);
                 const statuses = atelierStatusesFor(d.type);
                 const badge = atelierDocBadge(d);
                 return (
@@ -13705,7 +13819,8 @@ function AccountingExportCard({ profile, account, isLocked, isViewer, saving, on
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState(null); // { kind: "ok" | "error", text }
   const orgId = account?.organizationId || null;
-  const canEdit = !isLocked && !isViewer;
+  const isOwner = account?.role === "owner";
+  const canEdit = !isLocked && !isViewer && isOwner; // adresse du comptable : propriétaire seulement
   // Dernier envoi (relu après chaque envoi manuel : notice change).
   useEffect(() => {
     if (!orgId) return undefined;
@@ -13779,7 +13894,7 @@ function AccountingExportCard({ profile, account, isLocked, isViewer, saving, on
           </label>
         </div>
       ) : (
-        <p className="text-sm">{cfg.enabled ? `Activé (${savedFrequency === "trimestriel" ? "chaque trimestre" : "chaque mois"}) vers ${cfg.email || "adresse non renseignée"}.` : "Désactivé."}</p>
+        <p className="text-sm">{cfg.enabled ? `Activé (${savedFrequency === "trimestriel" ? "chaque trimestre" : "chaque mois"}) vers ${cfg.email || "adresse non renseignée"}.` : "Désactivé."}{!isOwner && !isViewer && !isLocked && <span className="block text-xs" style={{ color: colors.inkSoft }}>Réglage réservé au propriétaire de l'organisation.</span>}</p>
       )}
       {canEdit && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -13798,6 +13913,10 @@ function AccountingExportCard({ profile, account, isLocked, isViewer, saving, on
 }
 
 function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCount, account, isLocked, isViewer, onGoToPricing, siteSettings = null }) {
+  // Coordonnées bancaires (imprimées sur les factures, page publique de
+  // paiement) : modifiables par le propriétaire seulement — règle aussi
+  // appliquée en base (trigger sur kv_store, script 2026-09-25_audit-securite.sql).
+  const isOwner = account?.role === "owner";
   const [local, setLocal] = useState(() => withGeoCountry(profile));
   const [editing, setEditing] = useState(!profile.name);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -14028,12 +14147,12 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
                 <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="ex : 4332A" value={local.naf || ""} onChange={(e) => patch({ naf: e.target.value })} />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>IBAN</label>
-                <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="FR76 ..." value={local.iban || ""} onChange={(e) => patch({ iban: e.target.value })} />
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>IBAN{!isOwner && <span className="font-normal"> (propriétaire seulement)</span>}</label>
+                <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="FR76 ..." value={local.iban || ""} disabled={!isOwner} onChange={(e) => patch({ iban: e.target.value })} />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>BIC</label>
-                <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.bic || ""} onChange={(e) => patch({ bic: e.target.value })} />
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>BIC{!isOwner && <span className="font-normal"> (propriétaire seulement)</span>}</label>
+                <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={local.bic || ""} disabled={!isOwner} onChange={(e) => patch({ bic: e.target.value })} />
               </div>
             </div>
             <label className="mt-3 flex items-start gap-2 text-xs" style={{ color: colors.inkSoft }}>
@@ -15264,11 +15383,12 @@ function RevenueChart({ documents }) {
     const byPrevKey = new Map(months.map((m) => [m.prevKey, m]));
     let hasPrevious = false;
     for (const doc of documents) {
-      if (doc.type !== "facture" || doc.status === "brouillon" || !doc.issueDate) continue;
-      const issued = new Date(doc.issueDate);
+      // Chiffre d'affaires : factures émises, avoirs en déduction.
+      if ((doc.type !== "facture" && doc.type !== "avoir") || doc.status === "brouillon" || !doc.issueDate) continue;
+      const issued = localDateOf(doc.issueDate);
       if (isNaN(issued.getTime())) continue;
       const key = monthKey(issued);
-      const amount = computeTotals(doc).subtotalHT || 0;
+      const amount = (computeTotals(doc).subtotalHT || 0) * (doc.type === "avoir" ? -1 : 1);
       if (byKey.has(key)) byKey.get(key).current += amount;
       if (byPrevKey.has(key)) { byPrevKey.get(key).previous += amount; hasPrevious = true; }
     }
@@ -15349,7 +15469,7 @@ function RevenueChart({ documents }) {
 // et bornes calculées dans src/kpis.js (testé unitairement).
 function SalesKpis({ documents, fiscalStartMonth = 1, darkMode = false }) {
   const kpis = useMemo(
-    () => computeSalesKpis(documents, { now: new Date(), fiscalStartMonth, amountOf: (d) => (d.type === "situation" ? computeSituation(d).subtotalHT : computeTotals(d).subtotalHT) }),
+    () => computeSalesKpis(documents, { now: new Date(), fiscalStartMonth, amountOf: (d) => { const ht = d.type === "situation" ? computeSituation(d).subtotalHT : computeTotals(d).subtotalHT; return d.type === "avoir" ? -ht : ht; } }),
     [documents, fiscalStartMonth],
   );
   const monthName = FISCAL_MONTHS[(Number(fiscalStartMonth) || 1) - 1];
@@ -15396,6 +15516,36 @@ function StatCard({ label, value, sub, color }) {
 
 // Facture déjà réglée puis modifiée : elle repasse en « envoyée » avec le
 // reste à payer recalculé — rappel de la voie normale (avoir).
+// Facture née d'un devis dont une facture d'acompte a été PAYÉE : signalé,
+// avec la déduction proposée — jamais pré-remplie, c'est à l'artisan de
+// confirmer que l'acompte a bien été encaissé.
+function acompteSuggestionFor(doc, documents) {
+  if (!doc || doc.type !== "facture" || !doc.linkedDevisId || doc.acompteSuggestionDismissed || !Array.isArray(documents)) return null;
+  if ((Number(doc.acompteVerse) || 0) > 0) return null;
+  const devis = documents.find((d) => d.id === doc.linkedDevisId);
+  const ref = String(devis?.docNumber || "").trim();
+  if (!ref) return null;
+  const paid = documents.filter((d) => d.type === "acompte" && d.status === "payée" && String(d.sourceDevisRef || "").trim() === ref);
+  if (!paid.length) return null;
+  const amount = Math.round(paid.reduce((s, d) => s + computeTotals(d).totalTTC, 0) * 100) / 100;
+  return amount > 0 ? { devisNumber: ref, docNumbers: paid.map((d) => d.docNumber || ""), amount } : null;
+}
+function AcompteSuggestionNotice({ suggestion, currency, onApply, onDismiss }) {
+  if (!suggestion || !(suggestion.amount > 0)) return null;
+  const several = suggestion.docNumbers.length > 1;
+  return (
+    <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.moss}14`, border: `1px solid ${colors.moss}55` }} data-testid="acompte-suggestion">
+      <span className="flex items-start gap-2 text-sm" style={{ color: colors.moss }}>
+        <Check size={16} className="mt-0.5 shrink-0" />
+        <span>{several ? "Les factures d'acompte" : "La facture d'acompte"} <strong>{suggestion.docNumbers.join(", ")}</strong> du devis {suggestion.devisNumber} {several ? "sont payées" : "est payée"} ({formatMoney(suggestion.amount, currency)} TTC). Déduire ce montant comme acompte déjà versé ?</span>
+      </span>
+      <span className="flex gap-2">
+        <button onClick={() => onApply(suggestion.amount)} className="rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.moss }}>Déduire {formatMoney(suggestion.amount, currency)}</button>
+        <button onClick={onDismiss} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Ignorer</button>
+      </span>
+    </div>
+  );
+}
 function PaymentRevertNotice({ notice, onDismiss }) {
   if (!notice) return null;
   return (
@@ -15497,7 +15647,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
   }, [orgId, reloadTick]);
   const reload = () => setReloadTick((t) => t + 1);
 
-  const candidates = useMemo(() => openInvoiceCandidates(documents, documentAmountDue), [documents]);
+  const candidates = useMemo(() => openInvoiceCandidates(documents, (d) => documentAmountDue(d, documents)), [documents]);
   const docById = (id) => docsRef.current.find((d) => d.id === id);
 
   // Paiement enregistré sur la facture, puis opération marquée rapprochée.
@@ -15507,7 +15657,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
     const list = workingDocs || docsRef.current;
     const doc = list.find((d) => d.id === documentId);
     if (!doc) throw new Error("Cette facture n'existe plus.");
-    const patch = applyBankPayment(doc, bankTx(row), documentAmountDue(doc));
+    const patch = applyBankPayment(doc, bankTx(row), documentAmountDue(doc, documents));
     if (patch) onPatchDocument(doc.id, patch);
     const { error } = await db.from("bank_transactions").update({ status: "rapproche", document_id: doc.id, payment_id: `pay_bank_${row.id}`, matched_by: matchedBy }).eq("id", row.id);
     if (error) throw error;
@@ -15530,7 +15680,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
   const undo = (row) => run(row, async () => {
     const doc = docById(row.document_id);
     if (doc) {
-      const patch = revertBankPayment(doc, row.id, documentAmountDue(doc));
+      const patch = revertBankPayment(doc, row.id, documentAmountDue(doc, documents));
       if (patch) onPatchDocument(doc.id, patch);
     }
     await setRowStatus(row, "a_traiter");
@@ -15724,7 +15874,7 @@ function useOnlinePaymentsSync(doc, onSync, setLocalDoc) {
   }, [docId, awaiting, setLocalDoc]);
 }
 
-function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
+function PaymentsEditor({ doc, totals, onPatch, disabled = false, creditTotal = 0 }) {
   const payments = Array.isArray(doc.payments) ? doc.payments : [];
   const currency = doc.currency || "EUR";
   const todayIso = toIsoDate(new Date());
@@ -15739,7 +15889,7 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
     const sumAfter = next.reduce((sum, p) => sum + Math.max(0, Number(p.amount) || 0), 0);
     // Base NON plafonnée : retirer un trop-perçu doit redonner le vrai reste
     // (net à payer d'une situation, sinon TTC moins l'acompte déjà versé).
-    const baseDue = totals.netAPayer !== undefined ? Number(totals.netAPayer) || 0 : (Number(totals.totalTTC) || 0) - (Number(totals.acompteVerse) || 0);
+    const baseDue = (totals.netAPayer !== undefined ? Number(totals.netAPayer) || 0 : (Number(totals.totalTTC) || 0) - (Number(totals.acompteVerse) || 0)) - (Number(creditTotal) || 0);
     const remainingAfter = Math.round((baseDue - sumAfter) * 100) / 100;
     const patch = { payments: next };
     if (remainingAfter <= 0.005 && doc.status !== "payée") patch.status = "payée";
@@ -15809,7 +15959,7 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false }) {
   );
 }
 
-function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null }) {
+function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, acompteSuggestion = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const [clientQuery, setClientQuery] = useState("");
@@ -16531,6 +16681,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       <div className="no-print mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
         <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />
+        {!isViewer && <AcompteSuggestionNotice suggestion={acompteSuggestion} currency={localDoc.currency} onApply={(amount) => patch({ acompteVerse: amount })} onDismiss={() => patch({ acompteSuggestionDismissed: true })} />}
         {splitNotice && (
           <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.moss}15`, border: `1px solid ${colors.moss}40` }}>
             <span className="text-sm" style={{ color: colors.moss }}>
@@ -16963,6 +17114,13 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               </div>
               <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Un avoir doit obligatoirement référencer la facture qu'il corrige, et préciser le motif — sans ça, il n'est pas valide (art. 289 du CGI). Les champs marqués * sont obligatoires pour l'enregistrer.</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs sm:col-span-2" style={{ color: colors.inkSoft }}>
+                  Facture corrigée (rattachée : son reste à payer tient compte de cet avoir)
+                  <select className="df-select mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={inputStyle} value={localDoc.factureOrigineId || ""} aria-label="Facture corrigée" onChange={(e) => { const inv = linkableInvoices.find((d) => d.id === e.target.value); if (!inv) { patch({ factureOrigineId: null }); return; } patch({ factureOrigineId: inv.id, factureOrigineRef: inv.docNumber || "", factureOrigineDate: inv.issueDate || "", ...(String(localDoc.client?.name || "").trim() ? {} : { client: { ...(localDoc.client || {}), ...(inv.client || {}) }, clientId: inv.clientId || null }) }); }}>
+                    <option value="">— Saisie libre (numéro ci-dessous) —</option>
+                    {linkableInvoices.map((d) => <option key={d.id} value={d.id}>{d.docNumber} · {d.client?.name || "sans client"} · {formatMoney(documentSettledTotal(d), d.currency)}</option>)}
+                  </select>
+                </label>
                 <label className="text-xs" style={{ color: colors.inkSoft }}>
                   Facture d'origine (numéro) *
                   <input className="df-input mt-1 w-full rounded-md px-2 py-1.5 text-sm" style={{ ...inputStyle, borderColor: (localDoc.factureOrigineRef || "").trim() ? colors.line : colors.brick }} placeholder="ex : FAC-014" value={localDoc.factureOrigineRef || ""} onChange={(e) => patch({ factureOrigineRef: e.target.value })} />
@@ -17290,7 +17448,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               <Landmark size={14} className="mt-0.5 shrink-0" /> <span>IBAN manquant dans Mon entreprise : tes clients ne verront pas de coordonnées de virement sur le lien ni le QR code de cette facture.</span>
             </p>
           )}
-          {(localDoc.type === "facture" || localDoc.type === "acompte") && <PaymentsEditor doc={localDoc} totals={totals} onPatch={patch} disabled={isLocked || isViewer} />}
+          {(localDoc.type === "facture" || localDoc.type === "acompte") && <PaymentsEditor doc={localDoc} totals={totals} creditTotal={creditTotal} onPatch={patch} disabled={isLocked || isViewer} />}
 
           <div className="mt-8 flex flex-wrap items-start justify-between gap-8 border-t pt-8" style={{ borderColor: colors.line }}>
             <div className="flex flex-wrap gap-6">
@@ -17461,5 +17619,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

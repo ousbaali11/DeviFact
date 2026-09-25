@@ -9,7 +9,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@17?target=deno";
-import { isPayableDoc } from "../_shared/totals.ts";
+import { isPayableDoc, creditNotesTotalFor } from "../_shared/totals.ts";
 import { syncOnlinePayments } from "../_shared/online-payments.ts";
 import { INVOICE_ONLINE_PAYMENTS_ENABLED } from "../_shared/payments-flags.ts";
 
@@ -125,7 +125,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled, paymentInfo }),
+      JSON.stringify({ document: publicDoc, signedAt: link.signed_at, paidAt, siteName: settingsRow?.name || "Chantiflow", onlinePaymentEnabled, paymentInfo, creditTotal: creditNotesTotalFor(doc, documents) }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err) {

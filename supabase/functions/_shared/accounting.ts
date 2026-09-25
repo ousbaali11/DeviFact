@@ -154,7 +154,10 @@ export function accountingExportRow(d: any): Array<string | number> {
   }
   if (d.type === "relance") return [...head, "", "", fixed2(num(d.montantDu))];
   const t = computeDocTotals(d);
-  return [...head, fixed2(t.subtotalHT), fixed2(t.totalTVA), fixed2(t.totalTTC)];
+  // Avoir : montants en négatif (même règle que le site).
+  const sign = d.type === "avoir" ? -1 : 1;
+  const signed = (n: number) => { const v = fixed2(sign * n); return v === 0 ? 0 : v; };
+  return [...head, signed(t.subtotalHT), signed(t.totalTVA), signed(t.totalTTC)];
 }
 export const EXPORT_HEADER = ["Type", "Numéro", "Date d'émission", "Client", "Statut", "Montant HT", "Montant TVA", "Montant TTC"];
 export const ENTRIES_HEADER = ["Date", "Journal", "Pièce", "Libellé", "Compte", "Débit", "Crédit", "Code activité", "Source"];
@@ -301,7 +304,8 @@ export function entriesInPeriod(entries: Entry[], period: { from: string; to: st
 // comptable » et, si demandé (forfaits Pro/Entreprise), de la feuille
 // « Écritures » (ventes + entrées de stock de la période).
 export function buildExportSheets(documents: any[], period: ExportPeriod, opts: { includeEntries: boolean; products?: any[]; movements?: any[]; defaults?: any }) {
-  const docs = documentsInPeriod(documents, period);
+  // Documents de vente émis seulement (même filtre que l'export manuel).
+  const docs = documentsInPeriod(documents, period).filter(isSalesDocument);
   const rows: Array<Array<string | number>> = [EXPORT_HEADER, ...docs.map(accountingExportRow)];
   let entryRows: Array<Array<string | number>> | null = null;
   if (opts.includeEntries) {

@@ -75,14 +75,17 @@ export function computeDocTotals(doc: any): DocTotals {
   const lines: DocTotals["lines"] = items.map((item: any) => {
     const baseHT = lineBaseHT(item);
     const totalHTBrut = lineNetHT(item);
-    return { item, baseHT, totalHTBrut, totalHT: totalHTBrut * (1 - rate), rate: num(item.tva) };
+    // Règle d'arrondi unique, identique au site (computeTotals) : ligne HT au
+    // centime, TVA par taux au centime sur la somme des lignes, TTC = HT + TVA.
+    return { item, baseHT, totalHTBrut: round2(totalHTBrut), totalHT: round2(totalHTBrut * (1 - rate)), rate: num(item.tva) };
   });
-  const subtotalHTBrut = lines.reduce((s: number, l) => s + l.totalHTBrut, 0);
-  const subtotalHT = lines.reduce((s: number, l) => s + l.totalHT, 0);
+  const subtotalHTBrut = round2(lines.reduce((s: number, l) => s + l.totalHTBrut, 0));
+  const subtotalHT = round2(lines.reduce((s: number, l) => s + l.totalHT, 0));
   const tvaByRate: Record<string, number> = {};
-  for (const l of lines) tvaByRate[String(l.rate)] = (tvaByRate[String(l.rate)] || 0) + (l.totalHT * l.rate) / 100;
-  const totalTVA = Object.values(tvaByRate).reduce((a: number, b: number) => a + b, 0);
-  const totalTTC = subtotalHT + totalTVA;
+  for (const l of lines) tvaByRate[String(l.rate)] = (tvaByRate[String(l.rate)] || 0) + l.totalHT;
+  for (const k of Object.keys(tvaByRate)) tvaByRate[k] = round2((tvaByRate[k] * Number(k)) / 100);
+  const totalTVA = round2(Object.values(tvaByRate).reduce((a: number, b: number) => a + b, 0));
+  const totalTTC = round2(subtotalHT + totalTVA);
   // Facture ET facture d'acompte, comme sur le site (computeTotals) — sinon
   // le serveur (paiement en ligne, relances) ignorait l'acompte déjà versé et
   // les paiements reçus d'une facture d'acompte.
@@ -90,10 +93,10 @@ export function computeDocTotals(doc: any): DocTotals {
   const acompteVerse = payable ? Math.max(0, num(doc.acompteVerse)) : 0;
   // Paiements reçus (partiels ou solde), eux aussi déduits.
   const paymentsReceived = payable ? paymentsTotalOf(doc) : 0;
-  const totalPaid = acompteVerse + paymentsReceived;
+  const totalPaid = round2(acompteVerse + paymentsReceived);
   return {
-    subtotalHTBrut, globalDiscountPct: rate * 100, globalDiscountAmount: subtotalHTBrut - subtotalHT, subtotalHT,
-    tvaByRate, totalTVA, totalTTC, acompteVerse, paymentsReceived, totalPaid, montantARegler: Math.max(0, totalTTC - totalPaid), lines,
+    subtotalHTBrut, globalDiscountPct: rate * 100, globalDiscountAmount: round2(subtotalHTBrut - subtotalHT), subtotalHT,
+    tvaByRate, totalTVA, totalTTC, acompteVerse, paymentsReceived, totalPaid, montantARegler: Math.max(0, round2(totalTTC - totalPaid)), lines,
   };
 }
 export const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -105,30 +108,39 @@ export const round2 = (n: number) => Math.round(n * 100) / 100;
 export function computeSituationTotals(doc: any) {
   const items = (Array.isArray(doc?.items) ? doc.items : []).filter((l: any) => l && l.type === "line");
   const lines: Array<{ rate: number; montantCetteSituation: number }> = items.map((l: any) => {
-    const montantMarche = num(l.qty) * num(l.unitPrice);
-    const montantCumuleActuel = (montantMarche * num(l.avancementPct)) / 100;
-    return { rate: num(l.tva), montantCetteSituation: montantCumuleActuel - num(l.montantCumulePrecedent) };
+    const montantMarche = round2(num(l.qty) * num(l.unitPrice));
+    const montantCumuleActuel = round2((montantMarche * num(l.avancementPct)) / 100);
+    return { rate: num(l.tva), montantCetteSituation: round2(montantCumuleActuel - round2(num(l.montantCumulePrecedent))) };
   });
-  const subtotalHT = lines.reduce((s: number, l) => s + l.montantCetteSituation, 0);
+  const subtotalHT = round2(lines.reduce((s: number, l) => s + l.montantCetteSituation, 0));
   const tvaByRate: Record<string, number> = {};
-  for (const l of lines) tvaByRate[String(l.rate)] = (tvaByRate[String(l.rate)] || 0) + (l.montantCetteSituation * l.rate) / 100;
-  const totalTVA = Object.values(tvaByRate).reduce((a: number, b: number) => a + b, 0);
-  const totalTTCBrut = subtotalHT + totalTVA;
-  const retenueGarantie = totalTTCBrut * (num(doc?.retenueGarantiePct) / 100);
-  const acompteVerse = num(doc?.acompteVerse);
-  const netAPayer = totalTTCBrut - retenueGarantie - acompteVerse;
-  const paymentsReceived = paymentsTotalOf(doc);
-  return { subtotalHT, tvaByRate, totalTVA, totalTTCBrut, retenueGarantie, acompteVerse, netAPayer, paymentsReceived, totalPaid: acompteVerse + paymentsReceived, montantARegler: Math.max(0, netAPayer - paymentsReceived) };
+  for (const l of lines) tvaByRate[String(l.rate)] = (tvaByRate[String(l.rate)] || 0) + l.montantCetteSituation;
+  for (const k of Object.keys(tvaByRate)) tvaByRate[k] = round2((tvaByRate[k] * Number(k)) / 100);
+  const totalTVA = round2(Object.values(tvaByRate).reduce((a: number, b: number) => a + b, 0));
+  const totalTTCBrut = round2(subtotalHT + totalTVA);
+  const retenueGarantie = round2(totalTTCBrut * (num(doc?.retenueGarantiePct) / 100));
+  const acompteVerse = round2(num(doc?.acompteVerse));
+  const netAPayer = round2(totalTTCBrut - retenueGarantie - acompteVerse);
+  const paymentsReceived = round2(paymentsTotalOf(doc));
+  return { subtotalHT, tvaByRate, totalTVA, totalTTCBrut, retenueGarantie, acompteVerse, netAPayer, paymentsReceived, totalPaid: round2(acompteVerse + paymentsReceived), montantARegler: Math.max(0, round2(netAPayer - paymentsReceived)) };
 }
 // Documents que le client règle : facture, facture d'acompte, situation
 // valant facture — même règle que isPayableDoc() côté site.
 export function isPayableDoc(doc: any): boolean {
   return !!doc && (doc.type === "facture" || doc.type === "acompte" || (doc.type === "situation" && doc.vautFacture === true));
 }
-// Montant restant à régler d'un document à payer (0 si non concerné).
-export function amountDueOf(doc: any): number {
+// Avoirs rattachés à une facture (factureOrigineId), hors brouillons — même
+// règle que creditNotesTotalFor côté site.
+export function creditNotesTotalFor(doc: any, documents: any[] | null | undefined): number {
+  if (!doc || !Array.isArray(documents)) return 0;
+  return round2(documents.reduce((s: number, d: any) => (d && d.type === "avoir" && d.factureOrigineId === doc.id && d.status !== "brouillon" ? s + computeDocTotals(d).totalTTC : s), 0));
+}
+// Montant restant à régler d'un document à payer (0 si non concerné),
+// avoirs rattachés déduits quand la liste des documents est fournie.
+export function amountDueOf(doc: any, documents: any[] | null = null): number {
   if (!isPayableDoc(doc)) return 0;
-  return doc.type === "situation" ? computeSituationTotals(doc).montantARegler : computeDocTotals(doc).montantARegler;
+  const due = doc.type === "situation" ? computeSituationTotals(doc).montantARegler : computeDocTotals(doc).montantARegler;
+  return Math.max(0, round2(due - creditNotesTotalFor(doc, documents)));
 }
 
 // Montant lisible pour un e-mail (texte brut) : « 1 234,56 € », « 1 234,56 DH ».

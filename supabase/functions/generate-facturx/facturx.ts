@@ -75,7 +75,7 @@ export const VAT_EXEMPTIONS: Record<string, { category: VatCategory; code: strin
 
 export interface FxInvoiceModel {
   number: string;
-  typeCode: "380";
+  typeCode: "380" | "381" | "386"; // 380 facture, 381 avoir, 386 facture d'acompte
   issueDate: string;         // YYYY-MM-DD
   dueDate: string;           // YYYY-MM-DD
   currency: string;
@@ -343,7 +343,7 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
 
   return {
     model: {
-      number, typeCode: "380", issueDate, dueDate, currency,
+      number, typeCode: doc.type === "avoir" ? "381" : doc.type === "acompte" ? "386" : "380", issueDate, dueDate, currency,
       businessProcess: CATEGORY_TO_PROCESS[operationCategory],
       operationCategory, vatOnDebits,
       seller, buyer, buyerIsBusiness, treatment, shipTo, deliveryDate, lines, vat,
@@ -627,7 +627,7 @@ export async function buildFacturXPdf(m: FxInvoiceModel, xml: string, assets: Pd
   const hr = () => { page.drawLine({ start: { x: MARGIN, y }, end: { x: A4.w - MARGIN, y }, thickness: 0.6, color: LINE }); y -= 10; };
 
   // En-tête
-  text(`FACTURE N° ${m.number}`, MARGIN, 16, bold);
+  text(`${m.typeCode === "381" ? "AVOIR" : m.typeCode === "386" ? "FACTURE D'ACOMPTE" : "FACTURE"} N° ${m.number}`, MARGIN, 16, bold);
   const right = (s: string, size = 9, f = font, color = INK) => { const w = f.widthOfTextAtSize(s, size); page.drawText(s, { x: A4.w - MARGIN - w, y, size, font: f, color }); };
   right(m.seller.name, 12, bold);
   y -= 16;
@@ -737,7 +737,7 @@ export async function buildFacturXPdf(m: FxInvoiceModel, xml: string, assets: Pd
   });
 
   const producer = `${m.siteName} — générateur Factur-X`;
-  const title = `Facture ${m.number}`;
+  const title = `${m.typeCode === "381" ? "Avoir" : "Facture"} ${m.number}`;
   pdf.setTitle(title);
   pdf.setAuthor(m.seller.name);
   pdf.setSubject("Facture électronique Factur-X (EN 16931)");

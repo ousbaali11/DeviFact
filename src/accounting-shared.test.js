@@ -94,10 +94,14 @@ describe("périodes et envoi programmé", () => {
   it("feuilles d'une période : documents et écritures de la période seulement, écritures uniquement si demandées", () => {
     const period = shared.previousPeriod(at("2026-09-25"), "mensuel");
     const withEntries = shared.buildExportSheets(docs, period, { includeEntries: true, products, movements, defaults });
-    expect(withEntries.documentCount).toBe(docs.length - 1); // FAC-002 est en septembre
+    // Ventes émises d'août seulement : FAC-001, AV-001, ACO-001, SIT-002
+    // (FAC-002 est en septembre ; devis, brouillon, proforma, contrat,
+    // relance, révisions et PV ne sont pas des documents de vente).
+    expect(withEntries.documentCount).toBe(4);
     expect(withEntries.rows[0]).toEqual(shared.EXPORT_HEADER);
     expect(withEntries.rows.map((r) => r[1])).not.toContain("FAC-002");
-    expect(withEntries.rows[1][1]).toBe("CT-001"); // triées par date
+    expect(withEntries.rows.slice(1).map((r) => r[1])).toEqual(["FAC-001", "AV-001", "ACO-001", "SIT-002"]); // triées par date
+    expect(withEntries.rows.find((r) => r[1] === "AV-001").slice(5)).toEqual([-80, -16, -96]); // avoir en négatif
     expect(withEntries.entryRows[0]).toEqual(shared.ENTRIES_HEADER);
     const pieces = new Set(withEntries.entryRows.slice(1).map((r) => r[2]));
     expect(pieces.has("BL-1")).toBe(true);

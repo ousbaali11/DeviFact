@@ -10,7 +10,7 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeDocTotals, formatAmount } from "../_shared/totals.ts";
+import { amountDueOf, formatAmount } from "../_shared/totals.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 
 const dbAdmin = createClient(
@@ -62,11 +62,11 @@ serve(async (req) => {
         let changed = false;
 
         for (const doc of documents) {
-          // Exactement la même règle que le bouton de relance manuelle du
-          // tableau de bord : uniquement les factures "envoyée" — jamais
-          // un brouillon (jamais transmis au client), ni une facture déjà
-          // payée ou en retard traitée à part.
-          if (doc.type !== "facture" || doc.status !== "envoyée") continue;
+          // Exactement la même règle que la liste des relances du tableau de
+          // bord : factures « envoyée » ou « en retard » (statut posé à la
+          // main) — jamais un brouillon (jamais transmis au client), ni une
+          // facture déjà payée.
+          if (doc.type !== "facture" || (doc.status !== "envoyée" && doc.status !== "en retard")) continue;
           if (doc.remindersEnabled === false) continue; // désactivé explicitement sur cette facture
           if (!doc.client?.email) continue;
 
@@ -79,7 +79,7 @@ serve(async (req) => {
 
           // Montant restant à régler, même calcul que la facture (_shared/totals.ts) ;
           // plus rien à relancer si les paiements reçus couvrent le total.
-          const due = computeDocTotals(doc).montantARegler;
+          const due = amountDueOf(doc, documents); // acompte, paiements et avoirs rattachés déduits
           if (due <= 0.005) continue;
           const amount = formatAmount(due, doc.currency);
           const emailResp = await fetch("https://api.resend.com/emails", {
