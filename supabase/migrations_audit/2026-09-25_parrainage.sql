@@ -29,7 +29,9 @@ declare
   i int;
 begin
   loop
-    bytes := gen_random_bytes(8);
+    -- 16 octets aléatoires depuis gen_random_uuid() (natif, sans l'extension
+    -- pgcrypto, absente du chemin de recherche figé) ; les 8 premiers servent.
+    bytes := decode(replace(gen_random_uuid()::text, '-', ''), 'hex');
     code := '';
     for i in 0..7 loop
       code := code || substr(alphabet, (get_byte(bytes, i) % 32) + 1, 1);
