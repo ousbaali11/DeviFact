@@ -161,8 +161,10 @@ describe("budget chantier", () => {
     const stats = atelierChantierStats(docs, []);
     expect(stats).toHaveLength(1);
     expect(stats[0].nom).toBe("Maison Dupont");
-    expect(stats[0].devisTotal).toBe(1200);
-    expect(stats[0].factureTotal).toBe(1200 + 360 + 600 - 120);
+    // Montants HT depuis la priorité 6 (marge) : devis 1 000, facture 1 000,
+    // acompte 300, situation 500, avoir −100.
+    expect(stats[0].devisTotal).toBe(1000);
+    expect(stats[0].factureTotal).toBe(1000 + 300 + 500 - 100);
   });
 });
 

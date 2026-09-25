@@ -24,6 +24,7 @@
 export const DEFAULT_ACCOUNTS = {
   sales: "706000",        // produits (prestations de services)
   purchases: "607000",    // achats de marchandises
+  subcontracting: "604000", // sous-traitance (prestations de services)
   vatSales: "445710",     // TVA collectée
   vatPurchases: "445660", // TVA déductible sur biens et services
   customer: "411000",     // clients
@@ -210,4 +211,45 @@ export function entriesToCsv(entries) {
   const rows = [["Date", "Journal", "Pièce", "Libellé", "Compte", "Débit", "Crédit", "Code activité", "Source"]];
   for (const e of entries || []) rows.push([e.date, e.journal, e.piece, e.label, e.account, fmt(e.debit), fmt(e.credit), e.activity || "", e.source]);
   return "﻿" + rows.map((r) => r.map(esc).join(";")).join("\r\n");
+}
+
+// ---------------------------------------------------------------------
+// Factures reçues (fournisseurs et sous-traitants, priorité 6) : montant
+// HT saisi, TVA au taux choisi, TTC calculé — même arrondi que les ventes.
+// ---------------------------------------------------------------------
+export function isPurchaseDocument(doc) {
+  return !!doc && doc.type === "facture_recue";
+}
+export function factureRecueTotals(doc) {
+  const ht = r2(Number(doc?.montantHT) || 0);
+  const rate = Number(doc?.tvaRate) || 0;
+  const tva = r2((ht * rate) / 100);
+  return { ht, rate, tva, ttc: r2(ht + tva) };
+}
+// Rôle de la fiche (client, fournisseur, sous-traitant) : la sous-traitance
+// va au compte 604, les autres achats au compte 607 (ou ceux réglés dans
+// Comptabilité). `clients` : fiches enregistrées, pour retrouver le rôle.
+export function purchaseAccountFor(doc, clients, acc) {
+  const byId = doc?.clientId ? (clients || []).find((c) => c && c.id === doc.clientId) : null;
+  const name = String(doc?.client?.name || "").trim().toLowerCase();
+  const byName = !byId && name ? (clients || []).find((c) => String(c?.name || "").trim().toLowerCase() === name) : null;
+  const role = (byId || byName)?.role || "";
+  return role === "sous_traitant" ? acc.subcontracting : acc.purchases;
+}
+// Écritures d'achat : une facture reçue = débit achats (HT), débit TVA
+// déductible, crédit fournisseur (TTC). Journal achats. Source « achat ».
+export function buildPurchaseEntries(documents, { clients = [], defaults } = {}) {
+  const acc = accountingDefaults(defaults);
+  const entries = [];
+  for (const doc of documents || []) {
+    if (!isPurchaseDocument(doc)) continue;
+    const t = factureRecueTotals(doc);
+    if (t.ht === 0) continue;
+    const supplier = String(doc.client?.name || "").trim() || "Fournisseur";
+    const base = { date: String(doc.issueDate || "").slice(0, 10), journal: acc.journalPurchases, piece: String(doc.supplierInvoiceNumber || "").trim() || doc.docNumber || "", label: `Facture reçue ${supplier}${doc.objet ? ` - ${String(doc.objet).trim()}` : ""}`, source: "achat", documentId: doc.id, activity: "" };
+    entries.push(entry(base, purchaseAccountFor(doc, clients, acc), t.ht, 0));
+    if (t.tva !== 0) entries.push(entry(base, acc.vatPurchases, t.tva, 0));
+    entries.push(entry(base, acc.supplier, 0, t.ttc));
+  }
+  return entries;
 }

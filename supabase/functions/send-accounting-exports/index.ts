@@ -61,15 +61,16 @@ async function sendExport(organizationId: string, profile: any, period: ReturnTy
   ]);
   // Écritures : forfaits Pro et Entreprise, paiement actif (même règle que hasAccess côté site).
   const includeEntries = ["pro", "entreprise"].includes(org?.plan || "") && org?.payment_status === "payé";
-  let products: any[] = [], movements: any[] = [];
+  let products: any[] = [], movements: any[] = [], clients: any[] = [];
   if (includeEntries) {
-    const [p, m] = await Promise.all([
+    const [p, m, c] = await Promise.all([
       dbAdmin.from("products").select("*").eq("organization_id", organizationId),
       dbAdmin.from("stock_movements").select("*").eq("organization_id", organizationId).gte("moved_at", period.from).lte("moved_at", `${period.to}T23:59:59.999Z`),
+      readKv(organizationId, "clients"), // rôle des fiches (sous-traitant → compte 604)
     ]);
-    products = p.data || []; movements = m.data || [];
+    products = p.data || []; movements = m.data || []; clients = Array.isArray(c) ? c : [];
   }
-  const sheets = buildExportSheets(Array.isArray(documents) ? documents : [], period, { includeEntries, products, movements, defaults: profile?.accounting });
+  const sheets = buildExportSheets(Array.isArray(documents) ? documents : [], period, { includeEntries, products, movements, defaults: profile?.accounting, clients });
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(sheets.rows);

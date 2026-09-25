@@ -4,7 +4,7 @@ import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
-import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument } from "./accounting.js";
+import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument, buildPurchaseEntries, factureRecueTotals } from "./accounting.js";
 import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
@@ -543,6 +543,8 @@ const UNIT_OPTIONS = ["", ...UNITS];
 const unitLabel = (u) => u || "— (non précisé)";
 const DEVIS_STATUSES = ["brouillon", "envoyé", "vu", "signé", "refusé", "expiré"];
 const FACTURE_STATUSES = ["brouillon", "envoyée", "payée", "en retard"];
+// Facture reçue d'un fournisseur : à payer, puis payée (date de paiement).
+const FACTURE_RECUE_STATUSES = ["à payer", "payée"];
 // Version du modèle des documents : les règles de champs obligatoires ne
 // bloquent l'enregistrement final que pour les documents créés avec cette
 // version ou une plus récente (voir REQUIRED_FIELD_RULES).
@@ -590,6 +592,7 @@ function docTypeLabel(type) {
   if (type === "acompte") return "Facture d'acompte";
   if (type === "commande") return "Bon de commande";
   if (type === "livraison") return "Bon de livraison";
+  if (type === "facture_recue") return "Facture reçue";
   if (type === "situation") return "Situation de travaux";
   if (type === "pv_reception") return "PV de réception";
   if (type === "bpu") return "Bordereau de prix unitaires";
@@ -613,6 +616,7 @@ const SERVICES = [
   { id: "avoir", label: "Avoir", icon: RotateCcw, description: "Note de crédit pour annuler ou corriger une facture", implemented: true },
   { id: "commande", label: "Bon de commande", icon: ShoppingCart, description: "Commande de matériel auprès d'un fournisseur", implemented: true },
   { id: "livraison", label: "Bon de livraison", icon: Truck, description: "Accusé de réception de matériel ou de travaux", implemented: true },
+  { id: "facture_recue", label: "Facture reçue", icon: ArrowDownToLine, description: "Facture d'un fournisseur ou d'un sous-traitant, rattachée à un chantier (dépense)", implemented: true },
   { id: "situation", label: "Situation de travaux", icon: BarChart3, description: "Facturation par tranches selon l'avancement du chantier", implemented: true },
   { id: "pv_reception", label: "PV de réception", icon: ClipboardCheck, description: "Validation de fin de chantier signée par le client", implemented: true },
   { id: "bpu", label: "Bordereau de prix unitaires", icon: List, description: "Liste de prix détaillée par unité", implemented: true },
@@ -815,8 +819,14 @@ const COUNTRIES = [
 // l'adresse en un seul bloc telle qu'elle est saisie et imprimée
 // aujourd'hui, les nouveaux champs portent les informations que la norme
 // EN 16931 exige séparément (code postal, ville, SIRET/SIREN, n° TVA).
+// Rôle d'une fiche : client (valeur par défaut, les fiches existantes le
+// restent), fournisseur, sous-traitant — un sous-traitant est un
+// fournisseur de prestations, même fiche (priorité 6).
+const CLIENT_ROLES = [["client", "Client"], ["fournisseur", "Fournisseur"], ["sous_traitant", "Sous-traitant"]];
+const clientRoleLabel = (role) => CLIENT_ROLES.find(([id]) => id === (role || "client"))?.[1] || "Client";
+const rankSupplier = (c) => (c?.role === "fournisseur" || c?.role === "sous_traitant" ? 1 : 0);
 function emptyClient() {
-  return { id: nextId("cli"), type: "entreprise", name: "", address: "", country: geoDefaults().country, email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" };
+  return { id: nextId("cli"), type: "entreprise", role: "client", name: "", address: "", country: geoDefaults().country, email: "", phone: "", siret: "", tva: "", postalCode: "", city: "" };
 }
 // Profil d'entreprise sans pays renseigné : proposé avec le pays détecté
 // dans le formulaire (l'utilisateur peut le changer avant d'enregistrer).
@@ -940,7 +950,7 @@ function emptyCompanyProfile() {
   };
 }
 function nextNumber(documents, type) {
-  const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", situation: "SIT", pv_reception: "PV", bpu: "BPU", rapport: "RI", contrat: "CTR", relance: "MED", planning: "PLN" };
+  const prefixes = { devis: "DEV", proforma: "PRO", revision: "REV", acompte: "ACO", avoir: "AVO", commande: "CMD", livraison: "BL", facture_recue: "FR", situation: "SIT", pv_reception: "PV", bpu: "BPU", rapport: "RI", contrat: "CTR", relance: "MED", planning: "PLN" };
   const prefix = prefixes[type] || "FAC";
   const nums = documents.filter((d) => d.type === type).map((d) => parseInt((String(d.docNumber ?? "").match(/(\d+)$/) || [])[1] || "0", 10));
   const next = (nums.length ? Math.max(...nums) : 0) + 1;
@@ -1655,6 +1665,36 @@ function computeInterventionDuree(doc) {
 // générique et doit être adapté (ou relu par un professionnel du
 // droit) avant signature — c'est rappelé dans le formulaire et sur
 // le PDF lui-même.
+// Facture reçue d'un fournisseur ou d'un sous-traitant : pas de PDF généré
+// (c'est lui qui l'a émise), montant HT et TVA saisis, scan en pièce
+// jointe (bucket privé purchase-files), dépense du chantier rattaché.
+function newFactureRecueDocument(documents) {
+  const today = toIsoDate(new Date());
+  return {
+    id: nextId("doc"),
+    type: "facture_recue",
+    schemaVersion: DOCUMENT_SCHEMA_VERSION,
+    docNumber: nextNumber(documents, "facture_recue"),
+    issueDate: today,
+    currency: geoDefaults().currency || "EUR",
+    supplierInvoiceNumber: "",
+    dueDate: "",
+    chantier: "",
+    objet: "",
+    montantHT: "",
+    tvaRate: 20,
+    commandeId: null,
+    status: "à payer",
+    paidAt: null,
+    attachment: null,
+    company: { type: "entreprise", name: "", siret: "", address: "", country: "", email: "", phone: "", tva: "", logo: null },
+    client: { type: "entreprise", name: "", address: "", country: "", email: "", phone: "", siret: "" },
+    clientId: null,
+    notes: "",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
 function newContratChantierDocument(documents) {
   const today = toIsoDate(new Date());
   return {
@@ -2077,6 +2117,12 @@ const REQUIRED_FIELD_RULES = {
     { label: "Nom du fournisseur", test: (d) => hasText(d.client?.name) },
     { label: "Au moins une ligne avec une désignation", test: hasOneLine },
   ],
+  // Facture reçue : fournisseur, date et montant HT.
+  facture_recue: [
+    { label: "Nom du fournisseur ou du sous-traitant", test: (d) => hasText(d.client?.name) },
+    { label: "Date de la facture", test: (d) => hasText(d.issueDate) },
+    { label: "Montant HT", test: (d) => Number(d.montantHT) > 0 },
+  ],
   // Bon de livraison : destinataire, au moins une ligne, réserves décrites
   // si la livraison n'est pas conforme (comme le PV de réception).
   livraison: [
@@ -2210,6 +2256,7 @@ function isDocumentEmpty(doc) {
     avoir: ["factureOrigineRef", "factureOrigineDate", "motifAvoir", "modeRemboursement"],
     acompte: ["sourceDevisRef", "montantMarcheHT", "acompteMontantFixe"],
     commande: ["offreFournisseurRef", "conditionsPaiement", "adresseLivraison"],
+    facture_recue: ["supplierInvoiceNumber", "objet", "montantHT", "chantier", "dueDate"],
     bpu: ["marcheRef", "referenceRevision"],
     livraison: ["commandeRef", "reservesLivraison", "transporteur"],
   };
@@ -2368,6 +2415,11 @@ function creditNotesTotalFor(doc, documents) {
 // Pièce comptable émise (facture, facture d'acompte, situation valant
 // facture, avoir — hors brouillon) : la loi impose de la conserver, elle ne
 // se supprime jamais ; elle s'annule par un avoir.
+// Limite de documents du forfait Gratuit : les factures reçues (suivi de
+// dépenses, pas un document de vente) n'y comptent pas.
+function countedDocumentsLength(documents) {
+  return (documents || []).filter((d) => d?.type !== "facture_recue").length;
+}
 function isIssuedAccountingDocument(doc) {
   return !!doc && (isPayableDoc(doc) || doc.type === "avoir") && !!doc.status && doc.status !== "brouillon";
 }
@@ -4381,6 +4433,7 @@ function DeviFactAppInner() {
     if (isLocked) return;
     // Fichiers des photos de chantier de tous les documents effacés.
     removeDocumentsPhotoFiles(documents);
+    removeDocumentsPurchaseFiles(documents);
     setDocuments([]);
     setClients([]);
     setPrestations([]);
@@ -4398,12 +4451,12 @@ function DeviFactAppInner() {
 
   function openNew(type) {
     const plan = plans.find((p) => p.id === (account?.plan || "gratuit")) || PLANS[0];
-    if (documents.length >= plan.limit) {
+    if (countedDocumentsLength(documents) >= plan.limit) {
       setLimitNotice(true);
       setView("pricing");
       return;
     }
-    const doc = type === "situation" ? newSituationDocument(documents) : type === "pv_reception" ? newPvReceptionDocument(documents) : type === "rapport" ? newRapportInterventionDocument(documents) : type === "contrat" ? newContratChantierDocument(documents) : type === "relance" ? newRelanceFormelleDocument(documents) : type === "planning" ? newPlanningChantierDocument(documents) : newDocument(type, documents);
+    const doc = type === "facture_recue" ? newFactureRecueDocument(documents) : type === "situation" ? newSituationDocument(documents) : type === "pv_reception" ? newPvReceptionDocument(documents) : type === "rapport" ? newRapportInterventionDocument(documents) : type === "contrat" ? newContratChantierDocument(documents) : type === "relance" ? newRelanceFormelleDocument(documents) : type === "planning" ? newPlanningChantierDocument(documents) : newDocument(type, documents);
     if (companyProfile.name) doc.company = companySnapshotOf(companyProfile);
     doc.workStage = "brouillon";
     // N'enregistre PAS encore ce document — reste seulement en mémoire
@@ -4413,11 +4466,11 @@ function DeviFactAppInner() {
     // erreur ou juste pour voir créait un brouillon vide inutile.
     setPendingDoc(doc);
     setActiveId(doc.id);
-    setView(type === "situation" ? "situation-editor" : type === "pv_reception" ? "pv-editor" : type === "rapport" ? "rapport-editor" : type === "contrat" ? "contrat-editor" : type === "relance" ? "relance-editor" : type === "planning" ? "planning-editor" : "editor");
+    setView(type === "situation" ? "situation-editor" : type === "pv_reception" ? "pv-editor" : type === "rapport" ? "rapport-editor" : type === "contrat" ? "contrat-editor" : type === "relance" ? "relance-editor" : type === "planning" ? "planning-editor" : type === "facture_recue" ? "facture-recue-editor" : "editor");
   }
   function createNextSituationDoc(sourceDoc) {
     const plan = plans.find((p) => p.id === (account?.plan || "gratuit")) || PLANS[0];
-    if (documents.length >= plan.limit) {
+    if (countedDocumentsLength(documents) >= plan.limit) {
       setLimitNotice(true);
       setView("pricing");
       return;
@@ -4429,7 +4482,7 @@ function DeviFactAppInner() {
   }
   function openNewRevision(sector, country) {
     const plan = plans.find((p) => p.id === (account?.plan || "gratuit")) || PLANS[0];
-    if (documents.length >= plan.limit) {
+    if (countedDocumentsLength(documents) >= plan.limit) {
       setLimitNotice(true);
       setView("pricing");
       return;
@@ -4451,7 +4504,7 @@ function DeviFactAppInner() {
       if (completed !== target) persist(documents.map((d) => (d.id === id ? { ...completed, updatedAt: Date.now() } : d)));
     }
     setActiveId(id);
-    setView(target?.type === "revision" ? "revision-editor" : target?.type === "situation" ? "situation-editor" : target?.type === "pv_reception" ? "pv-editor" : target?.type === "rapport" ? "rapport-editor" : target?.type === "contrat" ? "contrat-editor" : target?.type === "relance" ? "relance-editor" : target?.type === "planning" ? "planning-editor" : "editor");
+    setView(target?.type === "revision" ? "revision-editor" : target?.type === "situation" ? "situation-editor" : target?.type === "pv_reception" ? "pv-editor" : target?.type === "rapport" ? "rapport-editor" : target?.type === "contrat" ? "contrat-editor" : target?.type === "relance" ? "relance-editor" : target?.type === "planning" ? "planning-editor" : target?.type === "facture_recue" ? "facture-recue-editor" : "editor");
   }
   function backToDashboard() {
     // Abandonne proprement le document "en attente" s'il n'a jamais
@@ -4583,7 +4636,7 @@ function DeviFactAppInner() {
     // Les photos de chantier du document disparaissent avec lui — une fois
     // la suppression réellement enregistrée (sinon un échec réseau laissait
     // un document sans ses photos).
-    persist(documents.filter((d) => d.id !== id)).then((ok) => { if (ok && doc) removeDocumentsPhotoFiles([doc]); });
+    persist(documents.filter((d) => d.id !== id)).then((ok) => { if (ok && doc) { removeDocumentsPhotoFiles([doc]); removeDocumentsPurchaseFiles([doc]); } });
     if (activeId === id) backToDashboard();
   }
   function duplicateDoc(id) {
@@ -4943,6 +4996,7 @@ function DeviFactAppInner() {
       const defaults = accountingDefaults(companyProfile?.accounting);
       const entries = [
         ...buildSalesEntries(documents, { productById, defaults, computeLines: accountingLinesOf }),
+        ...buildPurchaseEntries(documents, { clients, defaults }),
         ...buildStockEntries(mvts, { productById, defaults }).entries,
       ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
       const entryRows = [["Date", "Journal", "Pièce", "Libellé", "Compte", "Débit", "Crédit", "Code activité", "Source"]];
@@ -5026,7 +5080,7 @@ function DeviFactAppInner() {
   }
 
   const freeLimit = plans.find((p) => p.id === "gratuit")?.limit ?? 3;
-  const freeLimitReached = (account?.plan || "gratuit") === "gratuit" && documents.length >= freeLimit;
+  const freeLimitReached = (account?.plan || "gratuit") === "gratuit" && countedDocumentsLength(documents) >= freeLimit;
   const isViewer = account?.role === "viewer" || account?.role === "comptable";
   const isLocked = freeLimitReached || isViewer || offlineMode;
 
@@ -5152,6 +5206,27 @@ function DeviFactAppInner() {
     );
   }
 
+  if (view === "facture-recue-editor" && activeDoc) {
+    return (
+      <FactureRecueEditor
+        doc={activeDoc}
+        documents={documents}
+        clients={clients}
+        companyProfile={companyProfile}
+        saving={saving}
+        account={account}
+        plans={plans}
+        siteSettings={siteSettings}
+        isLocked={isLocked}
+        isViewer={isViewer}
+        onChange={(patch) => updateDoc(activeDoc.id, patch)}
+        onFinalize={() => finalizeDoc(activeDoc.id)}
+        onBack={backToDashboard}
+        onGoToPricing={() => setView("pricing")}
+      />
+    );
+  }
+
   if (view === "contrat-editor" && activeDoc) {
     return (
       <ContratChantierEditor
@@ -5220,7 +5295,7 @@ function DeviFactAppInner() {
       return;
     }
     if (serviceId === "revision") { setView("revision-sector"); return; }
-    if (serviceId === "devis" || serviceId === "facture" || serviceId === "proforma" || serviceId === "acompte" || serviceId === "avoir" || serviceId === "commande" || serviceId === "livraison" || serviceId === "situation" || serviceId === "pv_reception" || serviceId === "bpu" || serviceId === "rapport" || serviceId === "contrat" || serviceId === "relance" || serviceId === "planning") {
+    if (serviceId === "devis" || serviceId === "facture" || serviceId === "proforma" || serviceId === "acompte" || serviceId === "avoir" || serviceId === "commande" || serviceId === "livraison" || serviceId === "facture_recue" || serviceId === "situation" || serviceId === "pv_reception" || serviceId === "bpu" || serviceId === "rapport" || serviceId === "contrat" || serviceId === "relance" || serviceId === "planning") {
       openNew(serviceId);
       return;
     }
@@ -5240,7 +5315,7 @@ function DeviFactAppInner() {
       return <StockMovementView key={which} kind={which === "stock-entree" ? "entree" : "sortie"} products={products} warehouses={warehouses} stockDetail={stockDetail} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onSubmit={submitStockMovement} onGoToProducts={() => setView("stock-produits")} onGoToWarehouses={() => setView("stock-entrepots")} />;
     }
     if (which === "stock-comptabilite") {
-      return <ComptabiliteView documents={documents} products={products} movements={movements} movementsLoading={movementsLoading} companyProfile={companyProfile} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onRefreshMovements={loadMovements} onSaveDefaults={(accounting) => persistCompanyProfile({ ...companyProfile, accounting })} onExportXlsx={exportAccountingCSV} />;
+      return <ComptabiliteView documents={documents} clients={clients} products={products} movements={movements} movementsLoading={movementsLoading} companyProfile={companyProfile} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onRefreshMovements={loadMovements} onSaveDefaults={(accounting) => persistCompanyProfile({ ...companyProfile, accounting })} onExportXlsx={exportAccountingCSV} />;
     }
     if (which === "stock-documents") {
       return <StockDocumentsView movements={movements} loading={movementsLoading} products={products} warehouses={warehouses} account={account} siteSettings={siteSettings} darkMode={darkMode} onRefresh={loadMovements} onGoToEntry={() => setView("stock-entree")} onGoToExit={() => setView("stock-sortie")} />;
@@ -9590,6 +9665,208 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
   );
 });
 
+// Facture reçue (fournisseur ou sous-traitant) : formulaire simple, sans
+// PDF généré ; scan en pièce jointe ; dépense du chantier rattaché.
+function FactureRecueEditor({ doc, documents = [], clients = [], companyProfile = null, saving, account, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing }) {
+  const [localDoc, setLocalDoc] = useState(doc);
+  const saveTimer = useRef(null);
+  const pendingPatchRef = useRef(null);
+  const docRef = useRef(doc);
+  docRef.current = doc;
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileError, setFileError] = useState("");
+  useEffect(() => {
+    function handleBeforeUnload(e) { if (saveTimer.current) { e.preventDefault(); e.returnValue = ""; } }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+  useEffect(() => setLocalDoc(docRef.current), [doc.id]);
+  useEffect(() => {
+    const current = docRef.current;
+    setLocalDoc((prev) => {
+      if (!prev || prev.id !== current.id) return prev;
+      const pending = pendingPatchRef.current || {};
+      let next = prev;
+      for (const key of ["status", "paidAt", "attachment", "workStage"]) {
+        if (!(key in pending) && prev[key] !== current[key]) next = { ...next, [key]: current[key] };
+      }
+      return next;
+    });
+  }, [doc.id, doc.status, doc.paidAt, doc.attachment, doc.workStage]);
+  function patch(p) {
+    setLocalDoc((prev) => ({ ...prev, ...p }));
+    pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const merged = pendingPatchRef.current;
+      pendingPatchRef.current = null;
+      saveTimer.current = null;
+      if (merged) onChange(merged);
+    }, 400);
+  }
+  function flushPendingPatch() {
+    if (!saveTimer.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const merged = pendingPatchRef.current;
+    pendingPatchRef.current = null;
+    if (merged) onChange(merged);
+  }
+  const listId = `df-fournisseurs-${localDoc.id}`;
+  // Fournisseurs et sous-traitants d'abord, puis les autres fiches.
+  const suppliers = useMemo(() => [...clients].sort((a, b) => rankSupplier(b) - rankSupplier(a) || String(a.name || "").localeCompare(String(b.name || ""))), [clients]);
+  function setClientName(name) {
+    const match = findClientByName(clients, name);
+    patch({ client: mergeClientRecord(localDoc.client, match, name), clientId: match ? match.id : null });
+  }
+  const chantierNames = useMemo(() => [...new Set(documents.map((d) => String(d.chantier || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [documents]);
+  const norm = (s) => String(s || "").trim().toLowerCase();
+  const commandes = useMemo(() => documents.filter((d) => d.type === "commande" && (!norm(localDoc.client?.name) || norm(d.client?.name) === norm(localDoc.client?.name))), [documents, localDoc.client?.name]);
+  const totals = factureRecueTotals(localDoc);
+  const currency = localDoc.currency || "EUR";
+  const errors = documentValidationErrors(localDoc, { companyProfile, clients });
+  const readOnly = isLocked || isViewer;
+  const inputStyle = { border: `1px solid ${colors.line}` };
+  const labelCls = "mb-1 block text-xs font-semibold uppercase tracking-wide";
+  async function addFile(file) {
+    if (!file) return;
+    const problem = attestationFileProblem(file);
+    if (problem) { setFileError(problem); return; }
+    setFileBusy(true); setFileError("");
+    try {
+      const up = await uploadPurchaseFile(account?.organizationId, localDoc.id, file);
+      const previous = localDoc.attachment?.path;
+      patch({ attachment: { path: up.path, fileName: up.name, size: up.size, mime: up.mime } });
+      if (previous && previous !== up.path) removePurchaseFile(previous);
+    } catch (err) { setFileError(err?.message || "Envoi impossible."); }
+    finally { setFileBusy(false); }
+  }
+  async function openFile() {
+    try { window.open(await signPurchaseFile(localDoc.attachment.path), "_blank", "noopener"); }
+    catch (err) { console.error("Scan indisponible", err); alert("Fichier indisponible pour le moment."); }
+  }
+  function removeFile() {
+    if (!window.confirm("Retirer le scan de cette facture ?")) return;
+    const path = localDoc.attachment?.path;
+    patch({ attachment: null });
+    if (path) removePurchaseFile(path);
+  }
+  function setStatus(status) {
+    patch(status === "payée" ? { status, paidAt: localDoc.paidAt || toIsoDate(new Date()) } : { status, paidAt: null });
+  }
+  return (
+    <div className="df-root min-h-full w-full" style={{ backgroundColor: colors.paper, color: colors.ink }}>
+      <GlobalStyle />
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
+        <div className="flex items-center gap-2">
+          <select value={FACTURE_RECUE_STATUSES.includes(localDoc.status) ? localDoc.status : "à payer"} onChange={(e) => setStatus(e.target.value)} disabled={readOnly} className="df-select rounded-full px-3 py-1.5 text-xs font-medium" style={{ background: `${statusColor(localDoc.status)}22`, color: "white", border: `1px solid ${statusColor(localDoc.status)}` }} aria-label="Statut">
+            {FACTURE_RECUE_STATUSES.map((s) => <option key={s} value={s} style={{ color: colors.ink }}>{s}</option>)}
+          </select>
+          {saving ? <span className="flex items-center gap-1 text-xs text-white"><Loader2 size={12} className="animate-spin" /> Enregistrement…</span> : <span className="flex items-center gap-1 text-xs text-white"><Check size={12} /> Enregistré</span>}
+        </div>
+      </div>
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      {isLocked && (
+        <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ background: `${colors.brick}14`, border: `1px solid ${colors.brick}55` }}>
+          <span className="flex items-center gap-2 text-sm" style={{ color: colors.brick }}><Lock size={15} /> {isViewer ? "Accès en lecture seule — ce document n'est pas modifiable." : "Limite du forfait Gratuit atteinte — ce document n'est plus modifiable."}</span>
+          {!isViewer && <button onClick={onGoToPricing} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brassDark }}>Voir les forfaits</button>}
+        </div>
+      )}
+      <div className="rounded-2xl p-6 shadow-sm sm:p-8" style={{ background: colors.surface, border: `1px solid ${colors.line}`, pointerEvents: readOnly ? "none" : "auto", opacity: readOnly ? 0.55 : 1 }}>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-4" style={{ borderColor: colors.line }}>
+          <div>
+            <h1 className="df-display text-xl font-semibold">Facture reçue</h1>
+            <span className="text-xs" style={{ color: colors.inkSoft }}>Facture d'un fournisseur ou d'un sous-traitant : dépense du chantier, sans PDF généré.</span>
+          </div>
+          <div className="text-right">
+            <div className="df-mono text-sm font-semibold">{localDoc.docNumber}</div>
+            <div className="text-xs" style={{ color: colors.inkSoft }}>référence interne</div>
+          </div>
+        </div>
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls} style={{ color: colors.slate }}>Fournisseur ou sous-traitant *</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${(localDoc.client?.name || "").trim() ? colors.line : colors.brick}` }} placeholder="Nom ou raison sociale" list={listId} value={localDoc.client?.name || ""} onChange={(e) => setClientName(e.target.value)} aria-label="Fournisseur" />
+            <datalist id={listId}>{suppliers.map((c) => <option key={c.id} value={c.name}>{(c.role || "client") !== "client" ? clientRoleLabel(c.role) : ""}</option>)}</datalist>
+            {localDoc.clientId && <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Fiche liée : {clientRoleLabel(clients.find((c) => c.id === localDoc.clientId)?.role)}{clients.find((c) => c.id === localDoc.clientId)?.role === "sous_traitant" ? " (compte 604 en comptabilité)" : ""}.</p>}
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: colors.slate }}>N° de la facture du fournisseur</label>
+            <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="ex : F-2026-0142" value={localDoc.supplierInvoiceNumber || ""} onChange={(e) => patch({ supplierInvoiceNumber: e.target.value })} aria-label="Numéro de la facture du fournisseur" />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: colors.slate }}>Date de la facture *</label>
+            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={localDoc.issueDate || ""} onChange={(e) => patch({ issueDate: e.target.value })} aria-label="Date de la facture" />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: colors.slate }}>Échéance de paiement</label>
+            <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={localDoc.dueDate || ""} onChange={(e) => patch({ dueDate: e.target.value })} aria-label="Échéance" />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: colors.slate }}>Chantier (dépense rattachée)</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="Ex : Rénovation cuisine Dupont" list={`df-chantiers-${localDoc.id}`} value={localDoc.chantier || ""} onChange={(e) => patch({ chantier: e.target.value })} aria-label="Chantier" />
+            <datalist id={`df-chantiers-${localDoc.id}`}>{chantierNames.map((n) => <option key={n} value={n} />)}</datalist>
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: colors.slate }}>Bon de commande lié (optionnel)</label>
+            <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={localDoc.commandeId || ""} onChange={(e) => patch({ commandeId: e.target.value || null })} aria-label="Bon de commande lié">
+              <option value="">— Aucun —</option>
+              {commandes.map((d) => <option key={d.id} value={d.id}>{d.docNumber} · {d.client?.name || "sans fournisseur"} · {formatMoney(computeTotals(d).totalTTC, d.currency)}</option>)}
+            </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls} style={{ color: colors.slate }}>Objet</label>
+            <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="ex : Pose de la charpente, lot 3" value={localDoc.objet || ""} onChange={(e) => patch({ objet: e.target.value })} aria-label="Objet" />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: colors.slate }}>Montant HT ({currencyLabel(currency)}) *</label>
+            <input type="number" min="0" step="0.01" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${Number(localDoc.montantHT) > 0 ? colors.line : colors.brick}` }} value={localDoc.montantHT ?? ""} onChange={(e) => patch({ montantHT: e.target.value })} aria-label="Montant HT" />
+          </div>
+          <div>
+            <label className={labelCls} style={{ color: colors.slate }}>TVA</label>
+            <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={String(localDoc.tvaRate ?? 20)} onChange={(e) => patch({ tvaRate: Number(e.target.value) })} aria-label="Taux de TVA">
+              {[0, 5.5, 10, 20].map((r) => <option key={r} value={String(r)}>{r} %</option>)}
+            </select>
+          </div>
+          {localDoc.status === "payée" && (
+            <div>
+              <label className={labelCls} style={{ color: colors.slate }}>Payée le</label>
+              <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={inputStyle} value={String(localDoc.paidAt || "").slice(0, 10)} onChange={(e) => patch({ paidAt: e.target.value })} aria-label="Payée le" />
+            </div>
+          )}
+        </div>
+        <div className="mb-6 rounded-xl p-4" style={{ background: colors.paper }} data-testid="facture-recue-totals">
+          <div className="flex justify-between text-sm"><span style={{ color: colors.inkSoft }}>Montant HT</span><span className="df-mono">{formatMoney(totals.ht, currency)}</span></div>
+          <div className="flex justify-between text-sm"><span style={{ color: colors.inkSoft }}>TVA {totals.rate} %</span><span className="df-mono">{formatMoney(totals.tva, currency)}</span></div>
+          <div className="mt-1 flex justify-between border-t pt-1 text-sm font-semibold" style={{ borderColor: colors.line }}><span>Total TTC</span><span className="df-mono">{formatMoney(totals.ttc, currency)}</span></div>
+        </div>
+        <div className="mb-6" data-testid="facture-recue-file">
+          <label className={labelCls} style={{ color: colors.slate }}>Scan de la facture (PDF, JPG ou PNG, 10 Mo max)</label>
+          {localDoc.attachment?.path ? (
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="flex items-center gap-1.5"><Paperclip size={14} /> {localDoc.attachment.fileName || "fichier"}</span>
+              <button type="button" onClick={openFile} className="text-xs font-medium" style={{ color: colors.brassDark }}>Ouvrir</button>
+              <label className="cursor-pointer text-xs font-medium" style={{ color: colors.slate }}>Remplacer<input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="hidden" onChange={(e) => addFile(e.target.files?.[0])} /></label>
+              <button type="button" onClick={removeFile} className="text-xs font-medium" style={{ color: colors.brick }}>Retirer</button>
+            </div>
+          ) : (
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="block w-full text-sm" disabled={fileBusy} onChange={(e) => addFile(e.target.files?.[0])} aria-label="Scan de la facture" />
+          )}
+          {fileBusy && <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Envoi du fichier…</p>}
+          {fileError && <p className="mt-1 text-xs font-medium" style={{ color: colors.brick }}>{fileError}</p>}
+        </div>
+        <div>
+          <label className={labelCls} style={{ color: colors.slate }}>Notes internes</label>
+          <textarea className="df-textarea w-full rounded-md px-3 py-2 text-sm" style={{ ...inputStyle, minHeight: "3rem" }} value={localDoc.notes || ""} onChange={(e) => patch({ notes: e.target.value })} aria-label="Notes" />
+        </div>
+      </div>
+      <FinalizeButton doc={localDoc} onFinalize={(...args) => { flushPendingPatch(); onFinalize(...args); }} siteSettings={siteSettings} errors={errors} />
+      </div>
+    </div>
+  );
+}
+
 function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, companyProfile = null, clients = [], documents = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
@@ -10604,7 +10881,7 @@ const ATELIER_FAMILIES = [
   { id: "vendre", label: "Vendre", hint: "Avant les travaux", services: ["devis", "contrat", "proforma", "bpu"] },
   { id: "facturer", label: "Facturer", hint: "Pendant et après", services: ["facture", "acompte", "situation", "avoir", "relance"] },
   { id: "chantier", label: "Suivre le chantier", hint: "Sur place", services: ["planning", "rapport", "pv_reception"] },
-  { id: "acheter", label: "Acheter et recevoir", hint: "Fournisseurs", services: ["commande", "livraison"] },
+  { id: "acheter", label: "Acheter et recevoir", hint: "Fournisseurs", services: ["commande", "livraison", "facture_recue"] },
   { id: "marches", label: "Marchés longs", hint: "Indices officiels", services: ["revision"] },
 ];
 const ATELIER_TABS = [
@@ -10903,12 +11180,13 @@ function atelierStatusesFor(type) {
   if (type === "devis") return DEVIS_STATUSES;
   if (type === "proforma") return PROFORMA_STATUSES;
   if (type === "facture" || type === "acompte" || type === "avoir" || type === "situation") return FACTURE_STATUSES;
+  if (type === "facture_recue") return FACTURE_RECUE_STATUSES;
   return null;
 }
 function atelierStatusColor(status, tone) {
   if (["signé", "payée", "acceptée"].includes(status)) return tone.success;
   if (["refusé", "expiré", "expirée", "en retard"].includes(status)) return tone.danger;
-  if (["envoyé", "envoyée", "vu"].includes(status)) return tone.warning;
+  if (["envoyé", "envoyée", "vu", "à payer"].includes(status)) return tone.warning;
   return tone.inkSoft;
 }
 function atelierCapitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
@@ -10920,6 +11198,7 @@ function atelierDocAmount(d, documents = null) {
   if (d.type === "contrat") { const ht = Number(d.montantTotalHT) || 0; return ht ? { value: ht, note: "HT" } : null; }
   if (d.type === "relance") { const v = Number(d.montantDu) || 0; return v ? { value: v, note: "dû" } : null; }
   if (d.type === "revision") { const r = computeRevision(d); return r.valid ? { value: r.montantRevise, note: "révisé" } : null; }
+  if (d.type === "facture_recue") { const t = factureRecueTotals(d); return t.ttc ? { value: t.ttc, note: d.status === "payée" ? "payée TTC" : "à payer TTC" } : null; }
   const hasLines = (d.items || []).some((it) => it.type === "line" && (it.designation || "").trim());
   if (!hasLines) return null;
   const t = computeTotals(d);
@@ -10955,11 +11234,20 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
   // Garanties légales qui expirent dans les 30 jours : information légale,
   // affichée quel que soit le forfait.
   const garantieAlerts = useMemo(() => warrantyAlerts(documents), [documents]);
+  // Factures reçues à payer dont l'échéance est dépassée, les plus en retard d'abord.
+  const purchaseAlerts = useMemo(() => {
+    const todayIso = toIsoDate(new Date());
+    return documents
+      .filter((d) => d.type === "facture_recue" && d.status !== "payée" && /^\d{4}-\d{2}-\d{2}$/.test(String(d.dueDate || "")) && d.dueDate < todayIso)
+      .map((d) => ({ id: d.id, docNumber: d.docNumber || "", supplier: d.client?.name || "Fournisseur", dueDate: d.dueDate, daysLate: Math.round((localDateOf(todayIso) - localDateOf(d.dueDate)) / 86400000), ttc: factureRecueTotals(d).ttc }))
+      .sort((a, b) => b.daysLate - a.daysLate);
+  }, [documents]);
 
   const todo = useMemo(() => {
     const devisAttente = documents.filter((d) => d.type === "devis" && ["envoyé", "vu"].includes(d.status));
     const facturesEnvoyees = documents.filter((d) => d.type === "facture" && d.status === "envoyée");
     const facturesRetard = documents.filter((d) => d.type === "facture" && d.status === "en retard");
+    const facturesRecues = documents.filter((d) => d.type === "facture_recue" && d.status !== "payée");
     const enCours = documents.filter((d) => d.workStage !== "termine" && (d.status === "brouillon" || !d.status));
     const sum = (list) => list.reduce((s, d) => s + computeTotals(d).totalTTC, 0);
     // Factures : ce qu'il reste à encaisser, paiements partiels déduits.
@@ -10970,6 +11258,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
       devisAttente: { count: devisAttente.length, amount: sum(devisAttente) },
       aEncaisser: { count: facturesEnvoyees.length, amount: sumDue(facturesEnvoyees) },
       enRetard: { count: facturesRetard.length, amount: sumDue(facturesRetard) },
+      recues: { count: facturesRecues.length, amount: facturesRecues.reduce((s, d) => s + factureRecueTotals(d).ttc, 0) },
       enCours: { count: enCours.length },
       tauxSignature: devisTraites.length ? Math.round((devisSignes.length / devisTraites.length) * 100) : null,
     };
@@ -10979,6 +11268,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
     { id: "devis", icon: Inbox, label: "Devis en attente de réponse", count: todo.devisAttente.count, sub: eur(todo.devisAttente.amount), color: tone.warning, preset: { type: "devis", status: "attente" } },
     { id: "encaisser", label: "Factures à encaisser", icon: Wallet, count: todo.aEncaisser.count, sub: eur(todo.aEncaisser.amount), color: tone.accent, preset: { type: "facture", status: "envoyée" } },
     { id: "retard", label: "Factures en retard", icon: AlertTriangle, count: todo.enRetard.count, sub: eur(todo.enRetard.amount), color: tone.danger, preset: { type: "facture", status: "en retard" } },
+    { id: "recues", label: "Factures reçues à payer", icon: ArrowDownToLine, count: todo.recues.count, sub: eur(todo.recues.amount), color: tone.warning, preset: { type: "facture_recue", status: "à payer" } },
     { id: "encours", label: "Documents en cours", icon: Pencil, count: todo.enCours.count, sub: "brouillons à terminer", color: tone.inkSoft, preset: { stage: "encours" } },
   ];
 
@@ -11003,7 +11293,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3" style={{ ...card, borderColor: freeLimitReached ? tone.danger : tone.line }}>
           <span className="flex items-center gap-2 text-sm" style={{ color: freeLimitReached ? tone.danger : tone.inkSoft }}>
             {freeLimitReached && <Lock size={15} />}
-            Forfait Gratuit : <strong className="df-mono">{documents.length}/{freeLimit}</strong> documents utilisés{freeLimitReached && ", compte verrouillé jusqu'au passage à un forfait payant"}
+            Forfait Gratuit : <strong className="df-mono">{countedDocumentsLength(documents)}/{freeLimit}</strong> documents utilisés{freeLimitReached && ", compte verrouillé jusqu'au passage à un forfait payant"}
           </span>
           <button onClick={onGoToPricing} className="df-at-tap rounded-lg px-3 py-2 text-sm font-semibold" style={freeLimitReached ? { background: tone.danger, color: "white" } : { color: tone.accent, border: `1px solid ${tone.line}` }}>Voir les forfaits</button>
         </div>
@@ -11089,7 +11379,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
 
       <section className="mb-8">
         <h2 className="df-display mb-3 text-base font-semibold">Relances à faire</h2>
-        {(garantieAlerts.length > 0 || attestationAlerts.length > 0) && (
+        {(garantieAlerts.length > 0 || attestationAlerts.length > 0 || purchaseAlerts.length > 0) && (
           <div className="mb-3 overflow-hidden rounded-xl" style={card} data-testid="warranty-alerts">
             {attestationAlerts.map((a, i) => (
               <button key={`att-${a.id}`} onClick={() => onOpenCompany && onOpenCompany()} className="df-at-tap flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }} data-testid="attestation-alert">
@@ -11101,8 +11391,18 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
                 <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
               </button>
             ))}
+            {purchaseAlerts.slice(0, 6).map((a, i) => (
+              <button key={`fr-${a.id}`} onClick={() => onOpenDoc(a.id)} className="df-at-tap flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i || attestationAlerts.length ? `1px solid ${tone.line}` : "none" }} data-testid="purchase-alert">
+                <ArrowDownToLine size={16} className="shrink-0" style={{ color: tone.danger }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-semibold">Facture reçue <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{a.docNumber}</span> · {a.supplier}</span>
+                  <span className="block text-sm" style={{ color: tone.danger }}>Échéance dépassée depuis {a.daysLate} j ({fr(a.dueDate)}) · {eur(a.ttc)} à payer</span>
+                </span>
+                <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+              </button>
+            ))}
             {garantieAlerts.slice(0, 6).map((a, i) => (
-              <button key={`${a.docId}-${a.key}`} onClick={() => (a.chantier && onOpenChantier ? onOpenChantier(a.chantier) : onOpenDoc(a.docId))} className="df-at-tap flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i || attestationAlerts.length ? `1px solid ${tone.line}` : "none" }}>
+              <button key={`${a.docId}-${a.key}`} onClick={() => (a.chantier && onOpenChantier ? onOpenChantier(a.chantier) : onOpenDoc(a.docId))} className="df-at-tap flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i || attestationAlerts.length || purchaseAlerts.length ? `1px solid ${tone.line}` : "none" }}>
                 <Shield size={16} className="shrink-0" style={{ color: tone.warning }} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15px] font-semibold">{a.label} · {a.chantier || `PV ${a.docNumber} (chantier non renseigné)`}</span>
@@ -11183,7 +11483,7 @@ function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset,
   const selectedDocs = documents.filter((d) => selectedIds.includes(d.id));
   const sameType = selectedDocs.length > 0 && selectedDocs.every((d) => d.type === selectedDocs[0].type);
   const canMerge = selectedDocs.length >= 2 && sameType && !isLocked && (selectedDocs[0].type === "devis" || selectedDocs[0].type === "facture");
-  const canBatch = selectedDocs.length >= 2 && sameType;
+  const canBatch = selectedDocs.length >= 2 && sameType && selectedDocs[0].type !== "facture_recue"; // pas de PDF ni d'Excel généré pour une facture reçue
   const card = { background: tone.surface, border: `1px solid ${tone.line}` };
   const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
   const canEdit = !isLocked && !isViewer;
@@ -11362,16 +11662,19 @@ function atelierChantierStats(documents, slots) {
     const nom = (d.chantier || "").trim();
     if (!nom) continue;
     const key = nom.toLowerCase(); // « Dupont » et « dupont » : un seul chantier
-    if (!map.has(key)) map.set(key, { nom, docs: [], devisTotal: 0, factureTotal: 0, photos: 0, clients: new Map(), lastUpdate: 0 });
+    if (!map.has(key)) map.set(key, { nom, docs: [], devisTotal: 0, factureTotal: 0, depensesTotal: 0, photos: 0, clients: new Map(), lastUpdate: 0 });
     const c = map.get(key);
     c.docs.push(d);
     const emis = !!d.status && d.status !== "brouillon";
-    // Prévu : devis vivants (ni brouillon, ni refusé, ni expiré). Facturé :
-    // factures et acomptes émis, situations valant facture, avoirs déduits.
-    if (d.type === "devis" && emis && !["refusé", "expiré", "expirée", "annulé"].includes(d.status)) c.devisTotal += computeTotals(d).totalTTC;
-    if ((d.type === "facture" || d.type === "acompte") && emis) c.factureTotal += computeTotals(d).totalTTC;
-    if (d.type === "situation" && d.vautFacture === true && emis) c.factureTotal += computeSituation(d).totalTTCBrut;
-    if (d.type === "avoir" && emis) c.factureTotal -= computeTotals(d).totalTTC;
+    // Montants HT (une marge n'a de sens qu'en HT). Prévu : devis vivants
+    // (ni brouillon, ni refusé, ni expiré). Facturé : factures et acomptes
+    // émis, situations valant facture, avoirs déduits. Dépenses : factures
+    // reçues des fournisseurs et sous-traitants rattachées au chantier.
+    if (d.type === "devis" && emis && !["refusé", "expiré", "expirée", "annulé"].includes(d.status)) c.devisTotal += computeTotals(d).subtotalHT;
+    if ((d.type === "facture" || d.type === "acompte") && emis) c.factureTotal += computeTotals(d).subtotalHT;
+    if (d.type === "situation" && d.vautFacture === true && emis) c.factureTotal += computeSituation(d).subtotalHT;
+    if (d.type === "avoir" && emis) c.factureTotal -= computeTotals(d).subtotalHT;
+    if (d.type === "facture_recue") c.depensesTotal += factureRecueTotals(d).ht;
     if (Array.isArray(d.photos)) c.photos += d.photos.length;
     const clientName = (d.client?.name || "").trim();
     if (clientName) c.clients.set(clientName, (c.clients.get(clientName) || 0) + 1);
@@ -11382,7 +11685,7 @@ function atelierChantierStats(documents, slots) {
     const client = [...c.clients.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
     const mine = (slots || []).filter((s) => (s.chantier || "").trim() === c.nom).sort((a, b) => a.start.localeCompare(b.start));
     const next = mine.find((s) => s.end >= todayIso) || null;
-    return { ...c, client, slots: mine, nextSlot: next, ecart: c.devisTotal - c.factureTotal };
+    return { ...c, client, slots: mine, nextSlot: next, ecart: c.devisTotal - c.factureTotal, marge: c.factureTotal - c.depensesTotal };
   }).sort((a, b) => b.lastUpdate - a.lastUpdate);
 }
 
@@ -11508,10 +11811,11 @@ function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLo
                     </span>
                     <ChevronRight size={18} className="shrink-0" style={{ color: tone.inkSoft }} />
                   </span>
-                  <span className="grid grid-cols-3 gap-2 text-xs">
-                    <span><span className="block" style={{ color: tone.inkSoft }}>Prévu</span><span className="df-mono font-medium">{eur(c.devisTotal)}</span></span>
-                    <span><span className="block" style={{ color: tone.inkSoft }}>Facturé</span><span className="df-mono font-medium">{eur(c.factureTotal)}</span></span>
-                    <span><span className="block" style={{ color: tone.inkSoft }}>Écart</span><span className="df-mono font-semibold" style={{ color: c.ecart >= 0 ? tone.success : tone.danger }}>{c.ecart >= 0 ? "+" : ""}{eur(c.ecart)}</span></span>
+                  <span className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                    <span><span className="block" style={{ color: tone.inkSoft }}>Prévu HT</span><span className="df-mono font-medium">{eur(c.devisTotal)}</span></span>
+                    <span><span className="block" style={{ color: tone.inkSoft }}>Facturé HT</span><span className="df-mono font-medium">{eur(c.factureTotal)}</span></span>
+                    <span><span className="block" style={{ color: tone.inkSoft }}>Dépenses HT</span><span className="df-mono font-medium">{eur(c.depensesTotal)}</span></span>
+                    <span><span className="block" style={{ color: tone.inkSoft }}>Marge HT</span><span className="df-mono font-semibold" style={{ color: c.marge >= 0 ? tone.success : tone.danger }}>{c.marge >= 0 ? "+" : ""}{eur(c.marge)}</span></span>
                   </span>
                   {c.nextSlot && <span className="flex items-center gap-1.5 text-xs" style={{ color: tone.accent }}><Calendar size={13} /> {fr(c.nextSlot.start)} : {c.nextSlot.title}{c.nextSlot.memberLabel ? ` (${c.nextSlot.memberLabel})` : ""}</span>}
                   {warrantyByChantier.has(c.nom.toLowerCase()) && (() => { const a = warrantyByChantier.get(c.nom.toLowerCase()); return <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: tone.warning }} data-testid="chantier-warranty-badge"><Shield size={13} /> {a.label} : {a.daysLeft === 0 ? "expire aujourd'hui" : `expire dans ${a.daysLeft} j`}</span>; })()}
@@ -11537,7 +11841,7 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
   const card = { background: tone.surface, border: `1px solid ${tone.line}` };
   const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
 
-  const stats = useMemo(() => atelierChantierStats(documents, slots).find((c) => c.nom === name) || { nom: name, docs: [], devisTotal: 0, factureTotal: 0, ecart: 0, client: "", photos: 0, slots: [], nextSlot: null }, [documents, slots, name]);
+  const stats = useMemo(() => atelierChantierStats(documents, slots).find((c) => c.nom === name) || { nom: name, docs: [], devisTotal: 0, factureTotal: 0, depensesTotal: 0, ecart: 0, marge: 0, client: "", photos: 0, slots: [], nextSlot: null }, [documents, slots, name]);
   const families = ATELIER_FAMILIES.map((f) => ({ ...f, docs: stats.docs.filter((d) => f.services.includes(d.type)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)) })).filter((f) => f.docs.length);
   const photoDocs = stats.docs.filter((d) => Array.isArray(d.photos) && d.photos.length);
   const allPhotos = photoDocs.flatMap((d) => d.photos.map((p) => ({ ...p, doc: d })));
@@ -11595,8 +11899,8 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
         )}
       </div>
 
-      <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3">
-        {[["Prévu (devis)", eur(stats.devisTotal), tone.ink], ["Facturé", eur(stats.factureTotal), tone.ink], ["Écart", `${stats.ecart >= 0 ? "+" : ""}${eur(stats.ecart)}`, stats.ecart >= 0 ? tone.success : tone.danger]].map(([label, value, color]) => (
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+        {[["Prévu HT (devis)", eur(stats.devisTotal), tone.ink], ["Facturé HT", eur(stats.factureTotal), tone.ink], ["Dépenses HT (factures reçues)", eur(stats.depensesTotal), tone.ink], ["Marge HT", `${stats.marge >= 0 ? "+" : ""}${eur(stats.marge)}`, stats.marge >= 0 ? tone.success : tone.danger]].map(([label, value, color]) => (
           <div key={label} className="rounded-xl p-3 sm:p-4" style={card}>
             <div className="text-xs" style={{ color: tone.inkSoft }}>{label}</div>
             <div className="df-mono truncate text-sm font-semibold sm:text-lg" style={{ color }}>{value}</div>
@@ -12042,8 +12346,10 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [nameError, setNameError] = useState(false);
+  const [roleFilter, setRoleFilter] = useState("tous");
 
   const filtered = clients.filter((c) => {
+    if (roleFilter !== "tous" && (c.role || "client") !== roleFilter) return false;
     if (!search.trim()) return true;
     const s = search.toLowerCase();
     return (c.name || "").toLowerCase().includes(s) || (c.email || "").toLowerCase().includes(s);
@@ -12067,7 +12373,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="df-display text-2xl font-semibold">Clients</h1>
-          <p className="text-sm" style={{ color: colors.inkSoft }}>Ta base de clients, réutilisable dans chaque devis ou facture.</p>
+          <p className="text-sm" style={{ color: colors.inkSoft }}>Clients, fournisseurs et sous-traitants, réutilisables dans chaque devis, facture ou bon de commande.</p>
         </div>
         <button onClick={startNew} disabled={isLocked} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: isLocked ? colors.line : colors.ink, color: isLocked ? colors.inkSoft : "white", cursor: isLocked ? "not-allowed" : "pointer" }}>
           {isLocked ? <Lock size={15} /> : <UserPlus size={15} />} Nouveau client
@@ -12093,6 +12399,12 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
             <span style={{ color: colors.inkSoft }}>Type :</span>
             {[["entreprise", "Entreprise"], ["particulier", "Particulier"]].map(([id, label]) => (
               <button key={id} type="button" onClick={() => setEditing({ ...editing, type: id })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: (editing.type || "entreprise") === id ? colors.ink : "transparent", color: (editing.type || "entreprise") === id ? "white" : colors.inkSoft, border: `1px solid ${colors.line}` }}>{label}</button>
+            ))}
+          </div>
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" data-testid="client-role">
+            <span style={{ color: colors.inkSoft }}>Rôle :</span>
+            {CLIENT_ROLES.map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setEditing({ ...editing, role: id })} className="rounded px-2 py-0.5 text-xs font-medium" style={{ background: (editing.role || "client") === id ? colors.ink : "transparent", color: (editing.role || "client") === id ? "white" : colors.inkSoft, border: `1px solid ${colors.line}` }}>{label}</button>
             ))}
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -12121,6 +12433,11 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
         {saving && <Loader2 size={13} className="animate-spin" style={{ color: colors.inkSoft }} />}
       </div>
 
+      <div className="mb-3 flex flex-wrap gap-2" data-testid="client-role-filter">
+        {[["tous", "Tous"], ...CLIENT_ROLES.map(([id, label]) => [id, label === "Client" ? "Clients" : label === "Fournisseur" ? "Fournisseurs" : "Sous-traitants"])].map(([id, label]) => (
+          <button key={id} onClick={() => setRoleFilter(id)} className="rounded-full px-3 py-1 text-xs font-medium" style={{ background: roleFilter === id ? colors.ink : colors.surface, color: roleFilter === id ? "white" : colors.inkSoft, border: `1px solid ${roleFilter === id ? colors.ink : colors.line}` }}>{label}</button>
+        ))}
+      </div>
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl px-6 py-16 text-center" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
           <Users size={28} style={{ color: colors.inkSoft }} />
@@ -12131,7 +12448,7 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           {filtered.map((c, idx) => (
             <div key={c.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: idx ? `1px solid ${colors.line}` : "none" }}>
-              <div className="min-w-0 grow basis-40 truncate text-sm font-medium">{c.name}</div>
+              <div className="flex min-w-0 grow basis-40 items-center gap-2 text-sm font-medium"><span className="truncate">{c.name}</span>{(c.role || "client") !== "client" && <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-normal" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>{clientRoleLabel(c.role)}</span>}</div>
               <div className="min-w-0 grow basis-40 truncate text-xs" style={{ color: colors.inkSoft }}>{c.email || "—"}</div>
               <div className="w-28 shrink-0 text-xs" style={{ color: colors.inkSoft }}>{c.phone || "—"}</div>
               <div className="w-24 shrink-0 df-mono text-xs" style={{ color: colors.inkSoft }}>{countDocs(c)} document(s)</div>
@@ -12281,6 +12598,35 @@ async function signProductFile(path) {
 // (PDF, JPG, PNG, 10 Mo), un dossier par organisation ; ajout et
 // suppression réservés au propriétaire (politiques du bucket), lecture par
 // les membres via des liens signés.
+// Scan d'une facture reçue : bucket privé « purchase-files » (PDF, JPG,
+// PNG, 10 Mo), un dossier par organisation et par document ; ajout et
+// suppression par les éditeurs, lecture par les membres (liens signés).
+const PURCHASE_FILES_BUCKET = "purchase-files";
+async function uploadPurchaseFile(organizationId, documentId, file) {
+  const problem = attestationFileProblem(file);
+  if (problem) throw new Error(problem);
+  const path = `${organizationId}/${documentId}/${Date.now()}-${sanitizeFileName(file.name)}`;
+  const { error } = await db.storage.from(PURCHASE_FILES_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+  if (error) throw new Error(/mime|type/i.test(error.message || "") ? "Ce type de fichier n'est pas accepté (PDF, JPG ou PNG, 10 Mo max)." : "Impossible d'envoyer ce fichier pour l'instant.");
+  return { path, name: file.name, size: Number(file.size) || 0, mime: file.type || "" };
+}
+async function signPurchaseFile(path) {
+  const { data, error } = await db.storage.from(PURCHASE_FILES_BUCKET).createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+async function removePurchaseFile(path) {
+  if (!path) return;
+  const { error } = await db.storage.from(PURCHASE_FILES_BUCKET).remove([path]);
+  if (error) console.error("Scan de facture non supprimé", path, error);
+}
+// Scans des factures reçues d'une liste de documents (suppression, remise à zéro).
+async function removeDocumentsPurchaseFiles(docs) {
+  const paths = (docs || []).map((d) => d?.attachment?.path).filter(Boolean);
+  if (!paths.length) return;
+  const { error } = await db.storage.from(PURCHASE_FILES_BUCKET).remove(paths);
+  if (error) console.error("Scans de factures non supprimés", error);
+}
 const COMPANY_FILES_BUCKET = "company-files";
 async function uploadCompanyFile(organizationId, file) {
   const problem = attestationFileProblem(file);
@@ -12754,13 +13100,13 @@ const ACCOUNT_KIND_LABELS = { produits: "Comptes de produits (ventes)", achats: 
 const ACCOUNT_DEFAULT_FIELDS = [
   ["sales", "Compte de produits par défaut"], ["purchases", "Compte d'achats par défaut"],
   ["vatSales", "TVA collectée par défaut"], ["vatPurchases", "TVA déductible par défaut"],
-  ["customer", "Compte clients"], ["supplier", "Compte fournisseurs"],
+  ["customer", "Compte clients"], ["supplier", "Compte fournisseurs"], ["subcontracting", "Sous-traitance (604)"],
   ["journalSales", "Journal des ventes"], ["journalPurchases", "Journal des achats"],
 ];
 const amount2 = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const isoDay = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
 
-function ComptabiliteView({ documents, products, movements, movementsLoading, companyProfile, canEdit, onRefreshMovements, onSaveDefaults, onExportXlsx }) {
+function ComptabiliteView({ documents, products, movements, movementsLoading, companyProfile, canEdit, onRefreshMovements, onSaveDefaults, onExportXlsx, clients = [] }) {
   const surface = colors.surface;
   const card = { background: surface, border: `1px solid ${colors.line}` };
   const inputStyle = { border: `1px solid ${colors.line}`, background: colors.surface, color: colors.ink };
@@ -12781,9 +13127,10 @@ function ComptabiliteView({ documents, products, movements, movementsLoading, co
   const defaults = useMemo(() => accountingDefaults(companyProfile?.accounting), [companyProfile?.accounting]);
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const salesEntries = useMemo(() => buildSalesEntries(documents, { productById, defaults, computeLines: accountingLinesOf }), [documents, productById, defaults]);
+  const purchaseEntries = useMemo(() => buildPurchaseEntries(documents, { clients, defaults }), [documents, clients, defaults]);
   const stock = useMemo(() => buildStockEntries(movements, { productById, defaults }), [movements, productById, defaults]);
   const consumption = useMemo(() => valuedStockMovements(movements, { productById }).filter((m) => (!from || m.date >= from) && (!to || m.date <= to)), [movements, productById, from, to]);
-  const allEntries = useMemo(() => [...salesEntries, ...stock.entries].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)), [salesEntries, stock.entries]);
+  const allEntries = useMemo(() => [...salesEntries, ...purchaseEntries, ...stock.entries].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)), [salesEntries, purchaseEntries, stock.entries]);
   const journals = useMemo(() => [...new Set(allEntries.map((e) => e.journal))].sort(), [allEntries]);
   const activities = useMemo(() => [...new Set([...allEntries.map((e) => e.activity), ...products.map((p) => (p.activity_code || "").trim())])].filter(Boolean).sort(), [allEntries, products]);
   const entries = useMemo(() => filterEntries(allEntries, { from, to, journal, activity, source }), [allEntries, from, to, journal, activity, source]);
@@ -12874,7 +13221,7 @@ function ComptabiliteView({ documents, products, movements, movementsLoading, co
         <label className="text-xs" style={{ color: colors.inkSoft }}>Au<input type="date" className="df-input mt-1 block rounded-md px-3 py-2 text-sm" style={inputStyle} value={to} onChange={(e) => setTo(e.target.value)} /></label>
         <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={journal} onChange={(e) => setJournal(e.target.value)}><option value="">Tous les journaux</option>{journals.map((j) => <option key={j} value={j}>{j}</option>)}</select>
         <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={activity} onChange={(e) => setActivity(e.target.value)}><option value="">Tous les codes activité</option>{activities.map((a) => <option key={a} value={a}>{a}</option>)}</select>
-        <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={source} onChange={(e) => setSource(e.target.value)}><option value="">Ventes et stock</option><option value="vente">Ventes uniquement</option><option value="stock">Entrées de stock uniquement</option></select>
+        <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={source} onChange={(e) => setSource(e.target.value)}><option value="">Ventes, achats et stock</option><option value="vente">Ventes uniquement</option><option value="achat">Achats (factures reçues) uniquement</option><option value="stock">Entrées de stock uniquement</option></select>
         <button onClick={resetFilters} className="rounded-md px-3 py-2 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }}>Exercice en cours</button>
       </div>
 
@@ -16342,7 +16689,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   }, []);
 
   const matchingClients = clientQuery.trim()
-    ? clients.filter((c) => (c.name || "").toLowerCase().includes(clientQuery.toLowerCase())).slice(0, 5)
+    ? clients.filter((c) => (c.name || "").toLowerCase().includes(clientQuery.toLowerCase())).sort((a, b) => (localDoc.type === "commande" ? rankSupplier(b) - rankSupplier(a) : 0)).slice(0, 5)
     : [];
 
   useEffect(() => setLocalDoc(doc), [doc.id]);
@@ -17940,5 +18287,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

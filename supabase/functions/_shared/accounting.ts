@@ -16,6 +16,7 @@ const fixed2 = (n: number) => Number(n.toFixed(2));
 export const DEFAULT_ACCOUNTS = {
   sales: "706000",
   purchases: "607000",
+  subcontracting: "604000",
   vatSales: "445710",
   vatPurchases: "445660",
   customer: "411000",
@@ -179,6 +180,41 @@ export function accountingLinesOf(d: any): Array<{ productId?: string; totalHT: 
 export type Entry = { date: string; journal: string; piece: string; label: string; account: string; debit: number; credit: number; activity?: string; source: string; documentId?: string };
 const entry = (base: any, account: string, debit: number, credit: number): Entry => ({ ...base, account, debit: r2(debit), credit: r2(credit) });
 
+// Factures reçues (fournisseurs et sous-traitants) — même règle que
+// src/accounting.js : débit achats (604 sous-traitance selon le rôle de la
+// fiche, sinon 607) HT, débit TVA déductible, crédit fournisseur TTC.
+export function isPurchaseDocument(doc: any): boolean {
+  return !!doc && doc.type === "facture_recue";
+}
+export function factureRecueTotals(doc: any): { ht: number; rate: number; tva: number; ttc: number } {
+  const ht = r2(num(doc?.montantHT));
+  const rate = num(doc?.tvaRate);
+  const tva = r2((ht * rate) / 100);
+  return { ht, rate, tva, ttc: r2(ht + tva) };
+}
+export function purchaseAccountFor(doc: any, clients: any[], acc: any): string {
+  const byId = doc?.clientId ? (clients || []).find((c: any) => c && c.id === doc.clientId) : null;
+  const name = String(doc?.client?.name || "").trim().toLowerCase();
+  const byName = !byId && name ? (clients || []).find((c: any) => String(c?.name || "").trim().toLowerCase() === name) : null;
+  const role = (byId || byName)?.role || "";
+  return role === "sous_traitant" ? acc.subcontracting : acc.purchases;
+}
+export function buildPurchaseEntries(documents: any[], { clients = [] as any[], defaults = null as any } = {}): Entry[] {
+  const acc = accountingDefaults(defaults);
+  const entries: Entry[] = [];
+  for (const doc of documents || []) {
+    if (!isPurchaseDocument(doc)) continue;
+    const t = factureRecueTotals(doc);
+    if (t.ht === 0) continue;
+    const supplier = String(doc.client?.name || "").trim() || "Fournisseur";
+    const base = { date: String(doc.issueDate || "").slice(0, 10), journal: acc.journalPurchases, piece: String(doc.supplierInvoiceNumber || "").trim() || doc.docNumber || "", label: `Facture reçue ${supplier}${doc.objet ? ` - ${String(doc.objet).trim()}` : ""}`, source: "achat", documentId: doc.id, activity: "" };
+    entries.push(entry(base, purchaseAccountFor(doc, clients, acc), t.ht, 0));
+    if (t.tva !== 0) entries.push(entry(base, acc.vatPurchases, t.tva, 0));
+    entries.push(entry(base, acc.supplier, 0, t.ttc));
+  }
+  return entries;
+}
+
 export function buildSalesEntries(documents: any[], { productById = new Map<string, any>(), defaults = null as any } = {}): Entry[] {
   const acc = accountingDefaults(defaults);
   const entries: Entry[] = [];
@@ -303,7 +339,7 @@ export function entriesInPeriod(entries: Entry[], period: { from: string; to: st
 // Feuilles de l'export d'une période : lignes de la feuille « Export
 // comptable » et, si demandé (forfaits Pro/Entreprise), de la feuille
 // « Écritures » (ventes + entrées de stock de la période).
-export function buildExportSheets(documents: any[], period: ExportPeriod, opts: { includeEntries: boolean; products?: any[]; movements?: any[]; defaults?: any }) {
+export function buildExportSheets(documents: any[], period: ExportPeriod, opts: { includeEntries: boolean; products?: any[]; movements?: any[]; defaults?: any; clients?: any[] }) {
   // Documents de vente émis seulement (même filtre que l'export manuel).
   const docs = documentsInPeriod(documents, period).filter(isSalesDocument);
   const rows: Array<Array<string | number>> = [EXPORT_HEADER, ...docs.map(accountingExportRow)];
@@ -313,6 +349,7 @@ export function buildExportSheets(documents: any[], period: ExportPeriod, opts: 
     const defaults = accountingDefaults(opts.defaults);
     const entries = entriesInPeriod([
       ...buildSalesEntries(documents, { productById, defaults }),
+      ...buildPurchaseEntries(documents, { clients: opts.clients || [], defaults }),
       ...buildStockEntries(opts.movements || [], { productById, defaults }).entries,
     ], period);
     entryRows = [ENTRIES_HEADER, ...entries.map((e) => [e.date, e.journal, e.piece, e.label, e.account, e.debit, e.credit, e.activity || "", e.source])];
