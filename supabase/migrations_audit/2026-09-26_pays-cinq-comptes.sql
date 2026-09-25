@@ -1,5 +1,5 @@
 -- Pays de la fiche Mon entreprise pour cinq comptes (26/09/2026) — à lancer
--- dans l'éditeur SQL Supabase après vérification des comptes listés.
+-- dans l'éditeur SQL Supabase.
 --
 -- Constat en base (lecture du 26/09) : seul ousbaali11@gmail.com a une fiche
 -- entreprise enregistrée (pays déjà 🇫🇷 FR, rien à changer). Les quatre
@@ -8,7 +8,9 @@
 -- nom vide, pays), que l'utilisateur complétera ; une fiche existante n'est
 -- modifiée que sur le pays, et seulement s'il diffère.
 --
--- Valeur du pays : le même format que le sélecteur du site (drapeau + code).
+-- Valeur du pays : le format du sélecteur du site (drapeau + code) ; la
+-- vérification finale l'affiche en clair (FRANCE / MAROC).
+-- created_by (obligatoire) : le propriétaire du compte.
 
 with cibles(email, pays) as (
   values
@@ -19,23 +21,30 @@ with cibles(email, pays) as (
     ('rachidbaaly@gmail.com',       '🇲🇦 MA')
 ),
 orgs as (
-  select distinct m.organization_id, c.pays
+  select distinct on (m.organization_id) m.organization_id, c.pays, p.id as owner_id
   from cibles c
   join public.profiles p on lower(p.email) = c.email
   join public.organization_members m on m.user_id = p.id and m.role = 'owner' and m.status = 'active'
+  order by m.organization_id
 )
 insert into public.kv_store (organization_id, key, shared, value, created_by, updated_at)
 select organization_id, 'company-profile', false,
        jsonb_build_object('type', 'entreprise', 'name', '', 'country', pays),
-       null, now()
+       owner_id, now()
 from orgs
 on conflict (organization_id, key, shared) do update
   set value = kv_store.value || jsonb_build_object('country', excluded.value->>'country'),
       updated_at = now()
   where coalesce(kv_store.value->>'country', '') <> excluded.value->>'country';
 
--- Vérification attendue : les cinq comptes avec le pays voulu.
-select p.email, o.name as organisation, kv.value->>'name' as entreprise, kv.value->>'country' as pays
+-- Vérification attendue :
+--   ousbaali11@gmail.com        Stratos consulting   FRANCE
+--   hassan.simou1993@gmail.com  (nom vide)           FRANCE
+--   ouderrou.d@gmail.com        (nom vide)           MAROC
+--   oulaarabi.b@hotmail.com     (nom vide)           MAROC
+--   rachidbaaly@gmail.com       (nom vide)           MAROC
+select p.email, o.name as organisation, coalesce(nullif(kv.value->>'name', ''), '(nom vide)') as entreprise,
+       case kv.value->>'country' when '🇫🇷 FR' then 'FRANCE' when '🇲🇦 MA' then 'MAROC' else coalesce(kv.value->>'country', '(vide)') end as pays
 from public.profiles p
 join public.organization_members m on m.user_id = p.id and m.role = 'owner'
 left join public.organizations o on o.id = m.organization_id
