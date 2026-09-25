@@ -112,3 +112,23 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
 - Super PDP propose aussi `POST /invoices/convert?from=en16931&to=factur-x`
   (JSON + PDF → Factur-X) : notre générateur reste indépendant, mais cette
   route peut servir de contrôle croisé.
+
+## 6. Réalisé — étape 1 (26/09/2026) : connexion OAuth du compte de l'artisan
+
+- Fonction `superpdp-oauth` (propriétaire seulement) : `start` (état + PKCE
+  gardés 10 min dans `pdp_oauth_states`, adresse `/oauth2/authorize`
+  pré-remplie avec `login_hint`, `superpdp_company_number` + `fr_siren`),
+  `callback` (échange du code côté serveur, lecture de `companies/me` et
+  `oauth2_sessions/me`, refus des entreprises en production tant que
+  `SUPERPDP_ALLOW_PRODUCTION` ≠ `true`, jetons chiffrés), `status`, `disconnect`.
+- Module `_shared/superpdp.ts` : chiffrement AES-256-GCM des jetons
+  (`SUPERPDP_TOKEN_KEY`), rafraîchissement avec rotation et écriture
+  conditionnelle, `superpdpFetch` pour les étapes suivantes.
+- Table `pdp_connections` (script `2026-09-26_super-pdp-etape1.sql`, RLS sans
+  politique : clé de service seulement) ; le navigateur ne reçoit qu'un état.
+- Site : carte « Facturation électronique : Super PDP » dans Mon entreprise
+  (propriétaire, entreprise en France), retour sur `?superpdp=retour`.
+- Secrets : `SUPERPDP_CLIENT_ID`, `SUPERPDP_CLIENT_SECRET`, `SUPERPDP_TOKEN_KEY`
+  (`openssl rand -base64 32`), `SUPERPDP_API_BASE` (facultatif), `SITE_URL`.
+  Adresse de retour à déclarer dans l'application Super PDP :
+  `https://www.chantiflow.fr/?superpdp=retour`.

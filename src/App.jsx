@@ -772,6 +772,10 @@ function companySnapshotOf(profile) {
 // publique, réglages Admin, rapprochement) : repasser à true le réactive.
 // Même décision côté serveur : supabase/functions/_shared/payments-flags.ts.
 const ONLINE_PAYMENTS_ENABLED = false;
+// Plateforme Agréée (Super PDP) : connexion du compte de l'artisan depuis
+// Mon entreprise (étape 1). Bac à sable seulement tant que le serveur ne
+// l'autorise pas (voir superpdp-oauth). Réservé aux entreprises en France.
+const SUPERPDP_ENABLED = true;
 
 const DOC_COMPANY_FIELDS = ["type", "name", "siret", "tva", "address", "postalCode", "city", "country", "email", "phone", "logo"];
 const DOC_CLIENT_FIELDS = ["type", "name", "address", "postalCode", "city", "country", "email", "phone", "siret", "tva"];
@@ -10659,6 +10663,10 @@ function countryCodeOf(entry) {
 function isFranceCompany(profile) {
   return countryCodeOf(profile?.country) === "fr";
 }
+function sirenFromSiret(value) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits.length === 9 || digits.length === 14 ? digits.slice(0, 9) : "";
+}
 
 // Remplace le <select> natif pour le pays : les emojis drapeaux ne
 // s'affichent pas correctement sur Windows (ils retombent sur du texte
@@ -14669,6 +14677,118 @@ function companyInsuranceLabel(p) {
 // jamais par le compte de la plateforme.
 // ---------------------------------------------------------------------------
 const STRIPE_DASHBOARD_URL = "https://dashboard.stripe.com";
+// Appel de la fonction superpdp-oauth (propriétaire) : start, callback, status, disconnect.
+async function callSuperPdp(organizationId, action, extra = {}) {
+  const { data: { session } } = await db.auth.getSession();
+  const { data, error } = await db.functions.invoke("superpdp-oauth", {
+    body: { organizationId, action, ...extra },
+    headers: { Authorization: `Bearer ${session?.access_token}` },
+  });
+  if (error || data?.error) {
+    let message = data?.error;
+    if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
+    throw new Error(message || error?.message || "Super PDP indisponible pour l'instant.");
+  }
+  return data;
+}
+// Carte « Super PDP » de Mon entreprise (propriétaire, entreprise en France) :
+// connexion du compte Super PDP de l'artisan par OAuth, état, déconnexion.
+// Retour de l'autorisation : ?superpdp=retour&code=…&state=… (ou &error=…).
+function SuperPdpCard({ account, profile = null, onRedirect = (url) => { window.location.href = url; } }) {
+  const isOwner = account?.role === "owner";
+  const organizationId = account?.organizationId;
+  const [status, setStatus] = useState(null); // null = vérification en cours
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [justConnected, setJustConnected] = useState(false);
+  const sirenReady = !!sirenFromSiret(profile?.siret);
+  useEffect(() => {
+    if (!isOwner || !organizationId) return;
+    let cancelled = false;
+    let returned = null;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("superpdp") === "retour") {
+        returned = { code: params.get("code") || "", state: params.get("state") || "", error: params.get("error") || "", description: params.get("error_description") || "" };
+        ["superpdp", "code", "state", "error", "error_description"].forEach((k) => params.delete(k));
+        const qs = params.toString();
+        window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+      }
+    } catch { /* adresse non modifiable : sans conséquence */ }
+    (async () => {
+      try {
+        if (returned) {
+          if (returned.error) throw new Error(returned.error === "access_denied" ? "Connexion annulée chez Super PDP." : `Super PDP a refusé l'autorisation (${returned.description || returned.error}).`);
+          setBusy(true);
+          const res = await callSuperPdp(organizationId, "callback", { code: returned.code, state: returned.state });
+          if (cancelled) return;
+          setStatus(res);
+          setJustConnected(true);
+        } else {
+          const res = await callSuperPdp(organizationId, "status");
+          if (cancelled) return;
+          setStatus(res);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Super PDP", err);
+        setError(err?.message || "Super PDP indisponible pour l'instant.");
+        if (returned) { try { setStatus(await callSuperPdp(organizationId, "status")); } catch { setStatus({ configured: true, connected: false }); } }
+        else setStatus({ unavailable: true });
+      } finally { if (!cancelled) setBusy(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [isOwner, organizationId]);
+  async function start() {
+    setBusy(true); setError("");
+    try {
+      const { url } = await callSuperPdp(organizationId, "start");
+      if (!url) throw new Error("Lien d'autorisation manquant.");
+      onRedirect(url);
+    } catch (err) { console.error("Connexion Super PDP impossible", err); setError(err?.message || "Connexion impossible pour l'instant."); setBusy(false); }
+  }
+  async function disconnect() {
+    if (!window.confirm("Déconnecter le compte Super PDP ? Les factures déjà transmises restent chez Super PDP ; il faudra reconnecter le compte pour en envoyer d'autres.")) return;
+    setBusy(true); setError("");
+    try { setStatus(await callSuperPdp(organizationId, "disconnect")); setJustConnected(false); }
+    catch (err) { setError(err?.message || "Déconnexion impossible pour l'instant."); }
+    finally { setBusy(false); }
+  }
+  if (!isOwner) return null;
+  const envBadge = status?.connected ? (status.env === "production" ? { label: "Production", color: colors.moss } : { label: "Bac à sable", color: colors.brassDark }) : null;
+  return (
+    <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }} data-testid="superpdp-card">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Facturation électronique : Super PDP</span>
+        {envBadge && <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: `${envBadge.color}18`, color: envBadge.color }} data-testid="superpdp-env">{envBadge.label}</span>}
+      </div>
+      <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Plateforme Agréée par laquelle tes factures électroniques sont transmises à tes clients professionnels et à l'administration. Chaque entreprise connecte son propre compte Super PDP, à son SIREN.</p>
+      {status === null ? (
+        <p className="flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}><Loader2 size={14} className="animate-spin" /> Vérification…</p>
+      ) : status.unavailable ? (
+        <p className="text-sm" style={{ color: colors.inkSoft }}>État indisponible pour l'instant.</p>
+      ) : status.configured === false ? (
+        <p className="text-sm" style={{ color: colors.inkSoft }}>La connexion à Super PDP n'est pas encore activée par l'administrateur du site.</p>
+      ) : status.connected ? (
+        <div className="space-y-2 text-sm">
+          {justConnected && <p className="flex items-center gap-1.5 font-medium" style={{ color: colors.moss }}><Check size={15} /> Compte Super PDP connecté.</p>}
+          <p><strong>{status.companyName || "Entreprise"}</strong>{status.companyNumber ? <span className="df-mono" style={{ color: colors.inkSoft }}> · {status.companyNumberScheme === "sandbox" ? "n°" : "SIREN"} {status.companyNumber}</span> : null}</p>
+          {status.verificationStatus && status.verificationStatus !== "verified" && <p className="text-xs" style={{ color: colors.brick }}>Entreprise pas encore vérifiée chez Super PDP ({status.verificationStatus}) : l'envoi de factures sera refusé tant que la vérification n'est pas faite.</p>}
+          {status.env !== "production" && <p className="text-xs" style={{ color: colors.inkSoft }}>Bac à sable : rien n'est transmis à l'administration, les envois servent aux tests.</p>}
+          <button onClick={disconnect} disabled={busy} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.brick, opacity: busy ? 0.6 : 1 }}>Déconnecter</button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-xs" style={{ color: colors.inkSoft }}>Tu seras redirigé vers Super PDP pour créer ton compte ou te connecter, puis autoriser Chantiflow. L'inscription sera pré-remplie avec ton e-mail{sirenReady ? " et ton SIREN" : ""}{!sirenReady ? " (renseigne le SIRET dans Mon entreprise pour pré-remplir aussi le SIREN)" : ""}.</p>
+          <button onClick={start} disabled={busy} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: busy ? 0.7 : 1 }}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} Connecter mon compte Super PDP
+          </button>
+        </div>
+      )}
+      {error && <p className="mt-2 text-xs" style={{ color: colors.brick }}>{error}</p>}
+    </div>
+  );
+}
 async function callConnectOnboarding(organizationId, action) {
   const { data: { session } } = await db.auth.getSession();
   const { data, error } = await db.functions.invoke("connect-onboarding", {
@@ -15316,6 +15436,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
       )}
 
       {ONLINE_PAYMENTS_ENABLED && <StripeConnectCard account={account} siteSettings={siteSettings} profile={profile} />}
+      {SUPERPDP_ENABLED && isFranceCompany(profile) && <SuperPdpCard account={account} profile={profile} />}
 
       <AttestationsCard profile={profile} account={account} isLocked={isLocked} isViewer={isViewer} saving={saving} onSave={(list) => { patch({ attestations: list }); return onSave({ ...profile, attestations: list }); }} />
 
@@ -18853,5 +18974,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, isFranceCompany, rememberSignupCountry, takeSignupCountry, SIGNUP_COUNTRY_KEY, accountingExportRows, acompteDeduitSplit, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange, RevenueChart, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, isFranceCompany, rememberSignupCountry, takeSignupCountry, SIGNUP_COUNTRY_KEY, SuperPdpCard, sirenFromSiret, accountingExportRows, acompteDeduitSplit, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange, RevenueChart, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
