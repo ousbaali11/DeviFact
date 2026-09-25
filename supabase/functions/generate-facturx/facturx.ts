@@ -716,8 +716,12 @@ export async function buildFacturXPdf(m: FxInvoiceModel, xml: string, assets: Pd
     rr(fmt(l.netUnitPrice), cols.pu + 40);
     rr(`${l.vatRate} %`, cols.tva + 24);
     rr(fmt(l.lineTotal), cols.total - 4);
-    y -= 4;
-    page.drawLine({ start: { x: MARGIN, y: y + 2 }, end: { x: A4.w - MARGIN, y: y + 2 }, thickness: 0.4, color: LINE });
+    // Séparateur 7 pt sous la dernière ligne de base de cette ligne (sous les
+    // jambages), puis 10 pt d'espace avant la ligne suivante. Avant, il était
+    // tracé 2 pt au-dessus de la ligne de base de la LIGNE SUIVANTE, qui
+    // apparaissait barrée (toutes les lignes sauf la première).
+    page.drawLine({ start: { x: MARGIN, y: y + 5 }, end: { x: A4.w - MARGIN, y: y + 5 }, thickness: 0.4, color: LINE });
+    y -= 5;
   }
   y -= 8;
 
