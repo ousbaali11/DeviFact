@@ -17,6 +17,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { recurringInvoiceCopy, advanceRecurrenceDate } from "../_shared/recurring.ts";
+import { parisTodayIso } from "../_shared/dates.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 
 const dbAdmin = createClient(
@@ -51,7 +52,7 @@ serve(async (req) => {
   }
 
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = parisTodayIso(); // jour en heure de Paris
     let organizationsUpdated = 0;
     let invoicesCreated = 0;
     let page = 0;

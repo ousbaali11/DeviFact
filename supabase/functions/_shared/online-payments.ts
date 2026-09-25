@@ -59,7 +59,7 @@ export async function syncOnlinePayments(
       const before = paymentsCount(docs[idx]);
       // Date du paiement = date de la session Stripe, pas celle du rapprochement.
       const paidAt = new Date((Number(s.created) || Date.now() / 1000) * 1000).toISOString();
-      const next = addOnlinePayment(docs[idx], s.id, Number(s.amount_total) || 0, paidAt);
+      const next = addOnlinePayment(docs[idx], s.id, Number(s.amount_total) || 0, paidAt, docs);
       if (paymentsCount(next) > before) {
         docs[idx] = next;
         added++;

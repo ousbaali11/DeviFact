@@ -9,6 +9,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { updateKvValue } from "../_shared/kv.ts";
 import { computeDocTotals, isCountedLine } from "../_shared/totals.ts";
+import { parisTodayIso } from "../_shared/dates.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -66,6 +67,13 @@ serve(async (req) => {
       if (!target) return new Response(JSON.stringify({ error: "Ce document n'existe plus." }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       if (target.type !== "devis") return new Response(JSON.stringify({ error: "Ce document ne se signe pas en ligne." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       if (["signé", "refusé", "expiré"].includes(String(target.status || ""))) return new Response(JSON.stringify({ error: "Ce devis ne peut plus être signé." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      // Options cochées vérifiées AVANT la prise du verrou : une option
+      // retirée par l'artisan pendant que le client avait la page ouverte ne
+      // laisse plus le lien marqué « déjà signé » pour toujours.
+      const knownOptionIds = new Set<string>((target.items || []).filter((it: any) => it?.type === "line" && it.optional === true).map((it: any) => String(it.id)));
+      for (const id of accepted) {
+        if (!knownOptionIds.has(id)) return new Response(JSON.stringify({ error: "Une option cochée n'existe plus sur ce devis : recharge la page." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
     // Prise de signature atomique : le lien est marqué signé AVANT la
     // modification, en une seule opération conditionnelle — deux envois
@@ -84,13 +92,18 @@ serve(async (req) => {
       .maybeSingle();
 
     const documents = Array.isArray(docsRow?.value) ? docsRow.value : [];
+    // Le verrou est rendu si le document a disparu ou si une option a été
+    // retirée entre la vérification ci-dessus et la relecture.
+    const releaseClaim = () => dbAdmin.from("public_document_links").update({ signed_at: null }).eq("id", link.id);
     const docIndex = documents.findIndex((d: any) => d.id === link.document_id);
     if (docIndex === -1) {
+      await releaseClaim();
       return new Response(JSON.stringify({ error: "Ce document n'existe plus." }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const optionalIds = new Set<string>((documents[docIndex].items || []).filter((it: any) => it?.type === "line" && it.optional === true).map((it: any) => String(it.id)));
     for (const id of accepted) {
       if (!optionalIds.has(id)) {
+        await releaseClaim();
         return new Response(JSON.stringify({ error: "Option inconnue sur ce devis." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
@@ -126,7 +139,7 @@ serve(async (req) => {
           id: `doc_${crypto.randomUUID()}`,
           type: "facture",
           docNumber: `FAC-${String(nextNum).padStart(3, "0")}`,
-          issueDate: new Date().toISOString().slice(0, 10),
+          issueDate: parisTodayIso(), // date du jour en heure de Paris
           status: "brouillon",
           workStage: "brouillon",
           linkedDevisId: list[idx].id,

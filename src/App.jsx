@@ -4,7 +4,7 @@ import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
-import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument, buildPurchaseEntries, factureRecueTotals } from "./accounting.js";
+import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument, buildPurchaseEntries, factureRecueTotals, csvCell } from "./accounting.js";
 import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
@@ -738,7 +738,26 @@ function localDateOf(d) {
   if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) { const [y, m, day] = d.split("-").map(Number); return new Date(y, m - 1, day); }
   return d instanceof Date ? d : new Date(d);
 }
-const fr = (d) => localDateOf(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+// Date + n jours en calendrier local — jamais en millisecondes : un
+// changement d'heure dans l'intervalle décalait l'échéance d'un jour
+// (émis le 10/10 + 30 j tombait le 8/11 à 23 h au lieu du 9/11).
+function addDaysLocal(d, n) {
+  const x = localDateOf(d);
+  if (isNaN(x.getTime())) return x;
+  const y = new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  y.setDate(y.getDate() + (Number(n) || 0));
+  return y;
+}
+// Date absente ou invalide : « — » plutôt que « Invalid Date ».
+const fr = (d) => { const x = localDateOf(d); return isNaN(x.getTime()) ? "—" : x.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }); };
+// Signature client d'un document qui n'en a pas encore (facture issue d'un
+// devis, document dupliqué : signature: null) — l'éditeur affiche le bloc vide.
+const EMPTY_SIGNATURE = { mode: "texte", name: "", image: null, drawing: null };
+// Onglet ouvert pendant le geste utilisateur (Safari et Firefox bloquent une
+// ouverture après un await), dirigé ensuite vers un lien signé.
+function openBlankTab() {
+  try { const w = window.open("about:blank", "_blank"); if (w) w.opener = null; return w || null; } catch { return null; }
+}
 // Format court pour la colonne "Situation" des révisions de prix :
 // jour + mois sur 3 lettres, en majuscules, sans année (ex: "21 FEV").
 const MOIS_COURTS = ["JAN", "FEV", "MAR", "AVR", "MAI", "JUN", "JUL", "AOU", "SEP", "OCT", "NOV", "DEC"];
@@ -747,7 +766,7 @@ const frShort = (d) => {
   const jour = String(date.getDate()).padStart(2, "0");
   return `${jour} ${MOIS_COURTS[date.getMonth()]}`;
 };
-const frLong = (d) => localDateOf(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+const frLong = (d) => { const x = localDateOf(d); return isNaN(x.getTime()) ? "—" : x.toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }); };
 
 // Ligne d'article sans aucun contenu (désignation, sous-détails, prix) :
 // c'est celle qu'un produit inséré depuis la bibliothèque doit remplir.
@@ -931,6 +950,10 @@ function duplicatedDocumentOf(original, documents) {
     delete copy.previousSituationId; copy.numeroSituation = 1;
     if (Array.isArray(copy.items)) copy.items = copy.items.map((it) => (it && it.type === "line" ? { ...it, montantCumulePrecedent: 0 } : it));
   }
+  // Devis à options : les cases cochées par le client appartiennent au devis signé.
+  if (copy.type === "devis" && Array.isArray(copy.items)) copy.items = copy.items.map((it) => (it && it.type === "line" && it.optional === true ? { ...it, optionAccepted: false } : it));
+  // Facture reçue : repart « à payer », sans le scan de l'original.
+  if (copy.type === "facture_recue") { copy.status = "à payer"; copy.attachment = null; }
   return copy;
 }
 // Client enregistré dont le nom correspond (sans tenir compte de la casse ni
@@ -2448,8 +2471,8 @@ function documentSettledTotal(doc) {
 }
 // Reste à payer RÉEL, toujours recalculé depuis les lignes et les paiements
 // reçus, y compris pour un document marqué « payée » : ce qui a été
-// considéré réglé au passage en « payée » (paidTotal, à défaut le total du
-// moment) reste acquis ; tout ce que le total dépasse depuis (lignes
+// considéré réglé au passage en « payée » (paidTotal, net des avoirs déjà
+// rattachés ; à défaut le total du moment) reste acquis ; tout ce que le total dépasse depuis (lignes
 // ajoutées, remise retirée…) est dû.
 function documentOutstanding(doc, documents = null) {
   if (!isPayableDoc(doc)) return 0;
@@ -2466,7 +2489,7 @@ function documentOutstanding(doc, documents = null) {
 function paymentRevertPatch(original, patch, documents = null) {
   if (!original || original.status !== "payée" || patch.status !== undefined || !isPayableDoc(original)) return null;
   const next = { ...original, ...patch };
-  const settledRef = Number(original.paidTotal) > 0 ? Number(original.paidTotal) : documentSettledTotal(original);
+  const settledRef = Number(original.paidTotal) > 0 ? Number(original.paidTotal) : Math.max(0, documentSettledTotal(original) - creditNotesTotalFor(original, documents));
   const outstanding = documentOutstanding({ ...next, status: "payée", paidTotal: settledRef }, documents);
   if (outstanding <= 0.005) return null;
   return { patch: { status: "envoyée", paidAt: null, paidTotal: null }, notice: { docNumber: next.docNumber || "", amount: outstanding, currency: original.currency } };
@@ -2703,8 +2726,8 @@ function legalMentionLines(doc, companyProfile, options = {}) {
 const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSettings, watermarkEnabled = true, publicQr = null, companyProfile = null }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const hasGlobalDiscount = (totals.globalDiscountPct || 0) > 0 && (totals.globalDiscountAmount || 0) > 0;
-  const validityDate = new Date(localDateOf(doc.issueDate).getTime() + (Number(doc.validityDays) || 0) * 86400000);
-  const dueDate = new Date(localDateOf(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000);
+  const validityDate = addDaysLocal(doc.issueDate, doc.validityDays);
+  const dueDate = addDaysLocal(doc.issueDate, doc.dueDays);
   const lineItems = (doc.items || []).filter((i) => i.type === "line" || i.type === "section");
   const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
   const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
@@ -2788,7 +2811,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
         <div style={{ textAlign: "right" }}>
           <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontWeight: 700 }}>
             {docTypeLabel(doc.type).toUpperCase()} N° : 
-            <span style={mono}>{doc.docNumber || "—"}/{localDateOf(doc.issueDate).getFullYear()}</span>
+            <span style={mono}>{doc.docNumber || "—"}/{doc.issueDate ? localDateOf(doc.issueDate).getFullYear() : "—"}</span>
           </div>
           <div style={{ fontSize: "9.5pt", color: inkSoft, marginTop: "4px" }}>Date d'émission : {frLong(doc.issueDate)}</div>
           {doc.type === "facture" && doc.serviceDate && (
@@ -2909,8 +2932,8 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
           <div style={{ marginBottom: "18px", position: "relative", zIndex: 1, background: box, borderRadius: "4px", padding: "10px 14px" }}>
             <div style={{ fontWeight: 700, marginBottom: "6px", color: brassDark, fontSize: "9pt", textTransform: "uppercase", letterSpacing: "0.04em" }}>Informations complémentaires</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 18px", fontSize: "9pt" }}>
-              {rows.map(([label, value]) => (
-                <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+              {rows.map(([label, value], i) => (
+                <div key={`${i}-${label}`} style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
                   <span style={{ color: inkSoft }}>{label}</span>
                   <span style={{ fontWeight: 600, textAlign: "right" }}>{value}</span>
                 </div>
@@ -3190,7 +3213,7 @@ function siteSettingsFromRow(data) {
 }
 // Classe df-atelier sur le corps de page et variables du thème posées dès le
 // chargement du script, avant le premier rendu : l'écran de chargement
-// lui-même est déjà dans la bonne version.
+// lui-même a déjà la bonne apparence.
 function applyCachedSiteAppearance() {
   if (typeof document === "undefined") return;
   document.body.classList.add("df-atelier");
@@ -3200,7 +3223,7 @@ function applyCachedSiteAppearance() {
 }
 applyCachedSiteAppearance();
 
-// Lien du logo / nom du site (les trois versions) : une vraie balise <a>
+// Lien du logo / nom du site : une vraie balise <a>
 // avec un href, pour que le clic droit propose « Ouvrir dans un nouvel
 // onglet » et que Ctrl/Cmd-clic et clic molette ouvrent le site nativement.
 // Le clic gauche simple navigue en interne vers l'accueil, sans
@@ -4265,7 +4288,8 @@ function DeviFactAppInner() {
     setCompanyProfile(next);
     setSavingCompany(true);
     try {
-      await window.storage.set("company-profile", JSON.stringify(next), false);
+      const res = await window.storage.set("company-profile", JSON.stringify(next), false);
+      if (res?.merged) setCompanyProfile(JSON.parse(res.value)); // fusion champ par champ avec la fiche modifiée par un autre membre
       clearSaveError("Mon entreprise");
     } catch (e) {
       console.error("Erreur d'enregistrement profil entreprise", e);
@@ -4606,7 +4630,8 @@ function DeviFactAppInner() {
       // réglé mémorisé (paidTotal) — la référence qui permet, plus tard, de
       // voir qu'une modification a fait réapparaître un reste à payer.
       if (original && patch.status === "payée" && original.status !== "payée" && isPayableDoc(original)) {
-        patch = { ...patch, paidTotal: documentSettledTotal({ ...original, ...patch }), paidAt: patch.paidAt || new Date().toISOString() };
+        // Net des avoirs déjà rattachés : ce que le client a réellement réglé.
+        patch = { ...patch, paidTotal: Math.max(0, Math.round((documentSettledTotal({ ...original, ...patch }) - creditNotesTotalFor(original, documents)) * 100) / 100), paidAt: patch.paidAt || new Date().toISOString() };
       }
       const revert = paymentRevertPatch(original, patch, documents);
       if (revert) {
@@ -4978,13 +5003,13 @@ function DeviFactAppInner() {
     const list = [];
     documents.forEach((d) => {
       if (d.type === "devis" && ["envoyé", "vu"].includes(d.status)) {
-        const validityDate = new Date(localDateOf(d.issueDate).getTime() + (Number(d.validityDays) || 0) * 86400000);
+        const validityDate = addDaysLocal(d.issueDate, d.validityDays);
         const daysLeft = Math.round((validityDate - today) / 86400000);
         if (daysLeft <= 3) list.push({ doc: d, reason: daysLeft < 0 ? "Devis expiré" : daysLeft === 0 ? "Expire aujourd'hui" : `Expire dans ${daysLeft} j`, urgent: daysLeft <= 0 });
       }
       if (d.type === "facture" && (d.status === "envoyée" || d.status === "en retard")) {
         if (documentOutstanding(d, documents) <= 0.005) return; // soldée par les paiements ou un avoir
-        const dueDate = new Date(localDateOf(d.issueDate).getTime() + (Number(d.dueDays) || 0) * 86400000);
+        const dueDate = addDaysLocal(d.issueDate, d.dueDays);
         const daysLate = Math.round((today - dueDate) / 86400000);
         if (daysLate >= 0) list.push({ doc: d, reason: daysLate === 0 ? "Échéance aujourd'hui" : `${daysLate} j de retard`, urgent: daysLate > 0 });
       }
@@ -5114,6 +5139,7 @@ function DeviFactAppInner() {
   if (view === "editor" && activeDoc) {
     return (
       <Editor
+        key={activeDoc.id}
         doc={activeDoc}
         saving={saving}
         clients={clients}
@@ -5152,6 +5178,7 @@ function DeviFactAppInner() {
   if (view === "revision-editor" && activeDoc) {
     return (
       <RevisionEditor
+        key={activeDoc.id}
         doc={activeDoc}
         saving={saving}
         clients={clients}
@@ -5172,6 +5199,7 @@ function DeviFactAppInner() {
   if (view === "situation-editor" && activeDoc) {
     return (
       <SituationEditor
+        key={activeDoc.id}
         doc={activeDoc}
         clients={clients}
         companyProfile={companyProfile}
@@ -5197,6 +5225,7 @@ function DeviFactAppInner() {
   if (view === "pv-editor" && activeDoc) {
     return (
       <PvReceptionEditor
+        key={activeDoc.id}
         doc={activeDoc}
         clients={clients}
         chantierNames={[...new Set(documents.map((d) => String(d.chantier || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))}
@@ -5217,6 +5246,7 @@ function DeviFactAppInner() {
   if (view === "rapport-editor" && activeDoc) {
     return (
       <RapportInterventionEditor
+        key={activeDoc.id}
         doc={activeDoc}
         clients={clients}
         saving={saving}
@@ -5236,6 +5266,7 @@ function DeviFactAppInner() {
   if (view === "facture-recue-editor" && activeDoc) {
     return (
       <FactureRecueEditor
+        key={activeDoc.id}
         doc={activeDoc}
         documents={documents}
         clients={clients}
@@ -5257,6 +5288,7 @@ function DeviFactAppInner() {
   if (view === "contrat-editor" && activeDoc) {
     return (
       <ContratChantierEditor
+        key={activeDoc.id}
         doc={activeDoc}
         clients={clients}
         companyProfile={companyProfile}
@@ -5277,6 +5309,7 @@ function DeviFactAppInner() {
   if (view === "relance-editor" && activeDoc) {
     return (
       <RelanceFormelleEditor
+        key={activeDoc.id}
         doc={activeDoc}
         documents={documents}
         clients={clients}
@@ -5298,6 +5331,7 @@ function DeviFactAppInner() {
   if (view === "planning-editor" && activeDoc) {
     return (
       <PlanningChantierEditor
+        key={activeDoc.id}
         doc={activeDoc}
         clients={clients}
         saving={saving}
@@ -5328,26 +5362,25 @@ function DeviFactAppInner() {
     }
   }
 
-  // Pages de la Gestion de stock (mêmes composants dans les trois
-  // versions) — réservées aux forfaits Pro et Entreprise.
+  // Pages de la Gestion de stock — réservées aux forfaits Pro et Entreprise.
   function renderStockPage(which, goPricing) {
     if (!hasAccess(account, "pro")) {
       return <LockedFeature onGoToPricing={goPricing} title="Gestion de stock réservée aux forfaits Pro et Entreprise" text="Produits, entrepôts et mouvements de stock font partie des forfaits Pro et Entreprise." />;
     }
     const canEdit = !isLocked && !isViewer;
     if (which === "stock-entrepots") {
-      return <WarehousesView warehouses={warehouses} products={products} stockDetail={stockDetail} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onSave={saveWarehouse} onDelete={deleteWarehouse} />;
+      return <WarehousesView warehouses={warehouses} products={products} stockDetail={stockDetail} canEdit={canEdit} onSave={saveWarehouse} onDelete={deleteWarehouse} />;
     }
     if (which === "stock-entree" || which === "stock-sortie") {
-      return <StockMovementView key={which} kind={which === "stock-entree" ? "entree" : "sortie"} products={products} warehouses={warehouses} stockDetail={stockDetail} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onSubmit={submitStockMovement} onGoToProducts={() => setView("stock-produits")} onGoToWarehouses={() => setView("stock-entrepots")} />;
+      return <StockMovementView key={which} kind={which === "stock-entree" ? "entree" : "sortie"} products={products} warehouses={warehouses} stockDetail={stockDetail} canEdit={canEdit} onSubmit={submitStockMovement} onGoToProducts={() => setView("stock-produits")} onGoToWarehouses={() => setView("stock-entrepots")} />;
     }
     if (which === "stock-comptabilite") {
-      return <ComptabiliteView documents={documents} clients={clients} products={products} movements={movements} movementsLoading={movementsLoading} companyProfile={companyProfile} canEdit={canEdit} siteSettings={siteSettings} darkMode={darkMode} onRefreshMovements={loadMovements} onSaveDefaults={(accounting) => persistCompanyProfile({ ...companyProfile, accounting })} onExportXlsx={exportAccountingCSV} />;
+      return <ComptabiliteView documents={documents} clients={clients} products={products} movements={movements} movementsLoading={movementsLoading} companyProfile={companyProfile} canEdit={canEdit} onRefreshMovements={loadMovements} onSaveDefaults={(accounting) => persistCompanyProfile({ ...companyProfile, accounting })} onExportXlsx={exportAccountingCSV} />;
     }
     if (which === "stock-documents") {
-      return <StockDocumentsView movements={movements} loading={movementsLoading} products={products} warehouses={warehouses} account={account} siteSettings={siteSettings} darkMode={darkMode} onRefresh={loadMovements} onGoToEntry={() => setView("stock-entree")} onGoToExit={() => setView("stock-sortie")} />;
+      return <StockDocumentsView movements={movements} loading={movementsLoading} products={products} warehouses={warehouses} account={account} onRefresh={loadMovements} onGoToEntry={() => setView("stock-entree")} onGoToExit={() => setView("stock-sortie")} />;
     }
-    return <ProductsView products={products} stockByProduct={stockByProduct} stockDetail={stockDetail} warehouses={warehouses} warehousePrices={warehousePrices} loading={productsLoading} error={productsError} importInfo={legacyImportInfo} isLocked={isLocked} isViewer={isViewer} account={account} siteSettings={siteSettings} darkMode={darkMode} onSave={saveProduct} onDelete={deleteProduct} onDuplicate={duplicateProduct} onToggleActive={toggleProductActive} onGoToPricing={goPricing} />;
+    return <ProductsView products={products} stockByProduct={stockByProduct} stockDetail={stockDetail} warehouses={warehouses} warehousePrices={warehousePrices} loading={productsLoading} error={productsError} importInfo={legacyImportInfo} isLocked={isLocked} isViewer={isViewer} account={account} onSave={saveProduct} onDelete={deleteProduct} onDuplicate={duplicateProduct} onToggleActive={toggleProductActive} onGoToPricing={goPricing} />;
   }
 
   // ---------------------------------------------------------------------
@@ -5398,19 +5431,19 @@ function DeviFactAppInner() {
   } else if (view === "atelier-chantier") {
     page = <AtelierChantiersView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }} onNewChantier={openCreateForChantier} />;
   } else if (view === "clients") {
-    page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} darkMode={darkMode} />;
+    page = <ClientsView clients={clients} documents={documents} saving={savingClients} onSave={upsertClient} onDelete={deleteClient} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} />;
   } else if (view === "company") {
     page = <CompanyView profile={companyProfile} saving={savingCompany} onSave={persistCompanyProfile} onReset={resetTestData} documentCount={documents.length} clientCount={clients.length} account={account} isLocked={isLocked} isViewer={isViewer} onGoToPricing={goPricing} siteSettings={siteSettings} />;
   } else if (view === "banque" && bankModuleVisible(siteSettings)) {
     page = <BankView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} onPatchDocument={updateDoc} />;
   } else if (view === "team") {
-    page = <TeamView account={account} siteSettings={siteSettings} />;
+    page = <TeamView account={account} />;
   } else if (view === "planning-equipe") {
-    page = <PlanningView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} />;
+    page = <PlanningView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} />;
   } else if (view === "api") {
-    page = <ApiView account={account} siteSettings={siteSettings} />;
+    page = <ApiView account={account} />;
   } else if (view === "account") {
-    page = <AccountView account={account} siteSettings={siteSettings} />;
+    page = <AccountView account={account} />;
   } else if (isStockView(view) || view === "prestations") {
     page = renderStockPage(view, goPricing);
   } else if (view === "pricing") {
@@ -5724,9 +5757,11 @@ function PublicDocumentView({ token }) {
   }
 
   useEffect(() => {
+    let cancelled = false; // réponse d'un chargement précédent (ou après démontage) ignorée
     (async () => {
       try {
         const { data, error } = await db.functions.invoke("get-public-document", { body: { token } });
+        if (cancelled) return;
         if (error) throw error;
         if (data?.error) throw new Error(data.error);
         // Paiement en ligne : uniquement si le serveur l'annonce (compte
@@ -5734,9 +5769,11 @@ function PublicDocumentView({ token }) {
         setState({ loading: false, error: null, document: data.document, siteName: data.siteName, signedAt: data.signedAt, paidAt: data.paidAt, onlinePayment: data.onlinePaymentEnabled === true , paymentInfo: data.paymentInfo || null, creditTotal: Math.max(0, Number(data.creditTotal) || 0), attachments: Array.isArray(data.attachments) ? data.attachments : [] });
         if (paymentReturn) setPaidBaseline((b) => (b === null ? documentPaidTotal(data.document) : b));
       } catch (err) {
+        if (cancelled) return;
         setState({ loading: false, error: err.message || "Impossible de charger ce document.", document: null, siteName: "", signedAt: null, paidAt: null, onlinePayment: false });
       }
     })();
+    return () => { cancelled = true; };
   }, [token, reloadTick, paymentReturn]);
   // Après un paiement, Stripe confirme par webhook quelques secondes plus
   // tard : on relit le document jusqu'à 5 fois (toutes les 3 s) tant qu'il
@@ -5869,7 +5906,7 @@ function PublicDocumentView({ token }) {
                 <ul className="space-y-1.5">
                   {state.attachments.map((a, i) => (
                     <li key={i} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                      <span>{a.label}{a.organism ? ` (${a.organism})` : ""} · valide jusqu'au {fr(a.expiresAt)}</span>
+                      <span>{a.label}{a.organism ? ` (${a.organism})` : ""}{a.expiresAt ? ` · valide jusqu'au ${fr(a.expiresAt)}` : ""}</span>
                       <a href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 font-medium" style={{ color: colors.brassDark }}><Download size={14} /> Télécharger</a>
                     </li>
                   ))}
@@ -5885,7 +5922,7 @@ function PublicDocumentView({ token }) {
                     { id: "texte", label: "Taper mon nom", icon: TypeIcon },
                     { id: "dessin", label: "Dessiner ma signature", icon: PenTool },
                   ].map(({ id, label, icon: Icon }) => (
-                    <button key={id} type="button" onClick={() => { setSignMode(id); setSignError(null); }} className="flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium" style={{ background: signMode === id ? colors.ink : "transparent", color: signMode === id ? "white" : colors.inkSoft, border: `1px solid ${signMode === id ? colors.ink : colors.line}` }}>
+                    <button key={id} type="button" onClick={() => { setSignMode(id); setSignError(null); setDrawing(null); }} className="flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium" style={{ background: signMode === id ? colors.ink : "transparent", color: signMode === id ? "white" : colors.inkSoft, border: `1px solid ${signMode === id ? colors.ink : colors.line}` }}>
                       <Icon size={13} /> {label}
                     </button>
                   ))}
@@ -6594,7 +6631,7 @@ function RegularizationScreen({ account, plans, onLogout, onContact }) {
         </div>
 
         <div className="mb-5 text-center">
-          <span className="df-display text-2xl font-bold">{price}€</span>
+          <span className="df-display text-2xl font-bold">{Number.isFinite(Number(price)) && price !== "" && price !== null ? price : "—"}€</span>
           <span className="text-sm" style={{ color: colors.inkSoft }}> / {billing === "annuel" ? "an" : "mois"}</span>
         </div>
 
@@ -6692,7 +6729,8 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onS
 
         if (data.user) {
           if (companyName.trim() || firstName.trim() || lastName.trim()) {
-            await db.from("profiles").update({ company_name: companyName.trim(), first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", data.user.id);
+            const { error: profileError } = await db.from("profiles").update({ company_name: companyName.trim(), first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", data.user.id);
+            if (profileError) console.error("Profil (nom, entreprise) non enregistré à l'inscription", profileError);
           }
           // Force la confirmation côté Supabase EN PREMIER, avant tout
           // le reste — pour que la connexion ne dépende JAMAIS du
@@ -7771,7 +7809,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
   // « Cette situation vaut facture » : échéance et mentions légales de facture
   // (mêmes règles que PrintDocument, sur la copie du profil ou le profil courant).
   const vautFacture = doc.vautFacture === true;
-  const dueDate = vautFacture ? new Date(localDateOf(doc.issueDate).getTime() + (Number(doc.dueDays) || 0) * 86400000) : null;
+  const dueDate = vautFacture ? addDaysLocal(doc.issueDate, doc.dueDays) : null;
   const legalLines = vautFacture ? legalMentionLines({ ...doc, type: "facture" }, companyProfile) : [];
   const periode = doc.periodeDebut || doc.periodeFin ? [doc.periodeDebut ? `du ${localDateOf(doc.periodeDebut).toLocaleDateString("fr-FR")}` : "", doc.periodeFin ? `au ${localDateOf(doc.periodeFin).toLocaleDateString("fr-FR")}` : ""].filter(Boolean).join(" ") : "";
   const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
@@ -7951,12 +7989,12 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
       if (!prev || prev.id !== doc.id) return prev;
       const pending = pendingPatchRef.current || {};
       let next = prev;
-      for (const key of ["status", "paidAt", "paidTotal", "payments", "workStage"]) {
+      for (const key of ["status", "paidAt", "paidTotal", "payments", "workStage", "items", "signature"]) {
         if (!(key in pending) && prev[key] !== doc[key]) next = { ...next, [key]: doc[key] };
       }
       return next;
     });
-  }, [doc.id, doc.status, doc.paidAt, doc.paidTotal, doc.payments, doc.workStage]);
+  }, [doc.id, doc.status, doc.paidAt, doc.paidTotal, doc.payments, doc.workStage, doc.items, doc.signature]);
 
   function patch(p) {
     setLocalDoc((prev) => ({ ...prev, ...p }));
@@ -8082,7 +8120,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
     if (localDoc.periodeDebut || localDoc.periodeFin) rows.push(["Période couverte", [localDoc.periodeDebut ? `du ${fr(localDoc.periodeDebut)}` : "", localDoc.periodeFin ? `au ${fr(localDoc.periodeFin)}` : ""].filter(Boolean).join(" ")]);
     if (localDoc.dateDebut) rows.push(["Début des travaux", fr(localDoc.dateDebut)]);
     rows.push(["Vaut facture", localDoc.vautFacture === true]);
-    if (localDoc.vautFacture === true) rows.push(["Échéance", fr(new Date(localDateOf(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 0) * 86400000))]);
+    if (localDoc.vautFacture === true) rows.push(["Échéance", fr(addDaysLocal(localDoc.issueDate, localDoc.dueDays))]);
     if ((localDoc.paymentTerms || "").trim()) rows.push(["Conditions de paiement", localDoc.paymentTerms.trim()]);
     if ((localDoc.visaMaitreOeuvre || "").trim()) rows.push(["Visa du maître d'œuvre", localDoc.visaMaitreOeuvre.trim()]);
     rows.push(["Avancement global", `${s.avancementGlobalPct.toFixed(1)}%`]);
@@ -8223,7 +8261,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                 <Landmark size={14} className="mt-0.5 shrink-0" /> <span>IBAN manquant dans Mon entreprise : tes clients ne verront pas de coordonnées de virement sur le lien ni le QR code de cette situation.</span>
               </p>
             )}
-            {localDoc.vautFacture === true && <PaymentsEditor doc={localDoc} totals={{ totalPaid: s.totalPaid, montantARegler: s.montantARegler }} onPatch={patch} disabled={isLocked || isViewer} />}
+            {localDoc.vautFacture === true && <PaymentsEditor doc={localDoc} totals={s} creditTotal={creditNotesTotalFor(localDoc, documents)} onPatch={patch} disabled={isLocked || isViewer} />}
           </div>
 
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -9779,7 +9817,7 @@ function FactureRecueEditor({ doc, documents = [], clients = [], companyProfile 
   }
   const chantierNames = useMemo(() => [...new Set(documents.map((d) => String(d.chantier || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [documents]);
   const norm = (s) => String(s || "").trim().toLowerCase();
-  const commandes = useMemo(() => documents.filter((d) => d.type === "commande" && (!norm(localDoc.client?.name) || norm(d.client?.name) === norm(localDoc.client?.name))), [documents, localDoc.client?.name]);
+  const commandes = useMemo(() => documents.filter((d) => d.type === "commande" && (d.id === localDoc.commandeId || !norm(localDoc.client?.name) || norm(d.client?.name) === norm(localDoc.client?.name))), [documents, localDoc.client?.name, localDoc.commandeId]);
   const totals = factureRecueTotals(localDoc);
   const currency = localDoc.currency || "EUR";
   const errors = documentValidationErrors(localDoc, { companyProfile, clients });
@@ -9800,8 +9838,9 @@ function FactureRecueEditor({ doc, documents = [], clients = [], companyProfile 
     finally { setFileBusy(false); }
   }
   async function openFile() {
-    try { window.open(await signPurchaseFile(localDoc.attachment.path), "_blank", "noopener"); }
-    catch (err) { console.error("Scan indisponible", err); alert("Fichier indisponible pour le moment."); }
+    const w = openBlankTab();
+    try { const url = await signPurchaseFile(localDoc.attachment.path); if (w) w.location.href = url; else window.open(url, "_blank", "noopener"); }
+    catch (err) { if (w) w.close(); console.error("Scan indisponible", err); alert("Fichier indisponible pour le moment."); }
   }
   function removeFile() {
     if (!window.confirm("Retirer le scan de cette facture ?")) return;
@@ -9905,11 +9944,11 @@ function FactureRecueEditor({ doc, documents = [], clients = [], companyProfile 
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span className="flex items-center gap-1.5"><Paperclip size={14} /> {localDoc.attachment.fileName || "fichier"}</span>
               <button type="button" onClick={openFile} className="text-xs font-medium" style={{ color: colors.brassDark }}>Ouvrir</button>
-              <label className="cursor-pointer text-xs font-medium" style={{ color: colors.slate }}>Remplacer<input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="hidden" onChange={(e) => addFile(e.target.files?.[0])} /></label>
+              <label className="cursor-pointer text-xs font-medium" style={{ color: colors.slate }}>Remplacer<input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="hidden" disabled={fileBusy} onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; addFile(file); }} /></label>
               <button type="button" onClick={removeFile} className="text-xs font-medium" style={{ color: colors.brick }}>Retirer</button>
             </div>
           ) : (
-            <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="block w-full text-sm" disabled={fileBusy} onChange={(e) => addFile(e.target.files?.[0])} aria-label="Scan de la facture" />
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="block w-full text-sm" disabled={fileBusy} onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; addFile(file); }} aria-label="Scan de la facture" />
           )}
           {fileBusy && <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Envoi du fichier…</p>}
           {fileError && <p className="mt-1 text-xs font-medium" style={{ color: colors.brick }}>{fileError}</p>}
@@ -9984,7 +10023,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
     const inv = relanceInvoices.find((d) => d.id === id);
     if (!inv) { patch({ factureId: null }); return; }
     const due = documentOutstanding(inv, documents);
-    const echeance = inv.issueDate ? toIsoDate(new Date(localDateOf(inv.issueDate).getTime() + (Number(inv.dueDays) || 0) * 86400000)) : "";
+    const echeance = inv.issueDate ? toIsoDate(addDaysLocal(inv.issueDate, inv.dueDays)) : "";
     patch({ factureId: inv.id, factureRef: inv.docNumber || "", factureDate: inv.issueDate || "", dateEcheanceOrigine: echeance, montantDu: due, currency: inv.currency || localDoc.currency, ...(String(localDoc.client?.name || "").trim() ? {} : { client: { ...(localDoc.client || {}), ...(inv.client || {}) }, clientId: inv.clientId || null }) });
   }
   function patchDeep(field, p) { patch({ [field]: { ...localDoc[field], ...p } }); }
@@ -10687,7 +10726,8 @@ function PlanningView({ documents, account, isLocked, isViewer }) {
     setSlots(next);
     setSaving(true);
     try {
-      await window.storage.set("team-planning", JSON.stringify(next), false);
+      const res = await window.storage.set("team-planning", JSON.stringify(next), false);
+      if (res?.merged) setSlots(JSON.parse(res.value)); // fusion avec les créneaux d'un autre membre
     } catch (err) {
       console.error("Erreur d'enregistrement du planning", err);
       alert("Impossible d'enregistrer le planning pour l'instant. Réessaie dans un instant.");
@@ -10710,7 +10750,7 @@ function PlanningView({ documents, account, isLocked, isViewer }) {
     if (editing.end < editing.start) { alert("La date de fin doit être après la date de début."); return; }
     const member = members.find((m) => m.userId === editing.memberUserId);
     const now = Date.now();
-    const base = { title: editing.title.trim(), start: editing.start, end: editing.end, memberUserId: member?.userId || "", memberLabel: member?.label || "", chantier: (editing.chantier || "").trim(), updatedAt: now };
+    const base = { title: editing.title.trim(), start: editing.start, end: editing.end, memberUserId: member ? member.userId : (editing.memberUserId || ""), memberLabel: member ? member.label : (editing.memberUserId ? editing.memberLabel || "" : ""), chantier: (editing.chantier || "").trim(), updatedAt: now };
     if (editing.id) {
       persistSlots((slots || []).map((s) => (s.id === editing.id ? { ...s, ...base } : s)));
     } else {
@@ -10886,6 +10926,7 @@ function PlanningView({ documents, account, isLocked, isViewer }) {
                 <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Membre de l'équipe</label>
                 <select className="df-select w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={editing.memberUserId || ""} onChange={(e) => setEditing({ ...editing, memberUserId: e.target.value })} disabled={!canEdit}>
                   <option value="">Non assigné</option>
+                  {editing.memberUserId && !members.some((m) => m.userId === editing.memberUserId) && <option value={editing.memberUserId}>{editing.memberLabel || "Membre"} (ancienne fiche)</option>}
                   {members.map((m) => <option key={m.userId} value={m.userId}>{m.label}</option>)}
                 </select>
               </div>
@@ -11264,7 +11305,7 @@ function atelierDocBadge(d) {
 }
 function atelierDocDate(d) {
   const raw = d.issueDate || d.updatedAt || d.createdAt;
-  const date = new Date(raw);
+  const date = localDateOf(raw);
   return isNaN(date.getTime()) ? "" : fr(date);
 }
 
@@ -11281,15 +11322,16 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
   const hasPro = hasAccess(account, "pro");
   // Garanties légales qui expirent dans les 30 jours : information légale,
   // affichée quel que soit le forfait.
-  const garantieAlerts = useMemo(() => warrantyAlerts(documents), [documents]);
+  const todayKey = toIsoDate(new Date()); // change au premier rendu d'un nouveau jour : les alertes suivent
+  const garantieAlerts = useMemo(() => warrantyAlerts(documents, localDateOf(todayKey)), [documents, todayKey]);
   // Factures reçues à payer dont l'échéance est dépassée, les plus en retard d'abord.
   const purchaseAlerts = useMemo(() => {
-    const todayIso = toIsoDate(new Date());
+    const todayIso = todayKey;
     return documents
       .filter((d) => d.type === "facture_recue" && d.status !== "payée" && /^\d{4}-\d{2}-\d{2}$/.test(String(d.dueDate || "")) && d.dueDate < todayIso)
       .map((d) => ({ id: d.id, docNumber: d.docNumber || "", supplier: d.client?.name || "Fournisseur", dueDate: d.dueDate, daysLate: Math.round((localDateOf(todayIso) - localDateOf(d.dueDate)) / 86400000), ttc: factureRecueTotals(d).ttc }))
       .sort((a, b) => b.daysLate - a.daysLate);
-  }, [documents]);
+  }, [documents, todayKey]);
 
   const todo = useMemo(() => {
     const devisAttente = documents.filter((d) => d.type === "devis" && ["envoyé", "vu"].includes(d.status));
@@ -11434,7 +11476,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
                 <Shield size={16} className="shrink-0" style={{ color: a.state === "expiree" ? tone.danger : tone.warning }} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15px] font-semibold">{a.label} · Mon entreprise</span>
-                  <span className="block text-sm" style={{ color: a.state === "expiree" ? tone.danger : tone.warning }}>{attestationStateLabel(a)} ({fr(a.expiresAt)})</span>
+                  <span className="block text-sm" style={{ color: a.state === "expiree" ? tone.danger : tone.warning }}>{attestationStateLabel(a)}{a.expiresAt ? ` (${fr(a.expiresAt)})` : ""}</span>
                 </span>
                 <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
               </button>
@@ -11485,7 +11527,7 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
         )}
       </section>
 
-      <RevenueChart documents={documents} darkMode={darkMode} />
+      <RevenueChart documents={documents} />
     </div>
   );
 }
@@ -11691,7 +11733,8 @@ function useAtelierPlanning(organizationId) {
     setSlots(next);
     setSaving(true);
     try {
-      await window.storage.set("team-planning", JSON.stringify(next), false);
+      const res = await window.storage.set("team-planning", JSON.stringify(next), false);
+      if (res?.merged) setSlots(JSON.parse(res.value)); // fusion avec les créneaux d'un autre membre
     } catch (err) {
       console.error("Erreur d'enregistrement du planning", err);
       alert("Impossible d'enregistrer le planning pour l'instant. Réessaie dans un instant.");
@@ -11789,7 +11832,7 @@ function atelierChantierStats(documents, slots) {
   const todayIso = toIsoDate(new Date());
   return [...map.values()].map((c) => {
     const client = [...c.clients.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
-    const mine = (slots || []).filter((s) => (s.chantier || "").trim() === c.nom).sort((a, b) => a.start.localeCompare(b.start));
+    const mine = (slots || []).filter((s) => (s.chantier || "").trim().toLowerCase() === c.nom.toLowerCase()).sort((a, b) => a.start.localeCompare(b.start));
     const next = mine.find((s) => s.end >= todayIso) || null;
     return { ...c, client, slots: mine, nextSlot: next, ecart: c.devisTotal - c.factureTotal, marge: c.factureTotal - c.depensesTotal };
   }).sort((a, b) => b.lastUpdate - a.lastUpdate);
@@ -11828,6 +11871,7 @@ function AtelierSlotModal({ editing, setEditing, members, canEdit, onSave, onDel
             <label className="mb-1 block text-xs font-medium" style={{ color: tone.inkSoft }}>Membre de l'équipe</label>
             <select className="df-select df-at-tap w-full rounded-md px-3 py-2 text-[15px]" style={field} value={editing.memberUserId || ""} onChange={(e) => setEditing({ ...editing, memberUserId: e.target.value })} disabled={!canEdit}>
               <option value="">Non assigné</option>
+              {editing.memberUserId && !members.some((m) => m.userId === editing.memberUserId) && <option value={editing.memberUserId}>{editing.memberLabel || "Membre"} (ancienne fiche)</option>}
               {members.map((m) => <option key={m.userId} value={m.userId}>{m.label}</option>)}
             </select>
           </div>
@@ -11881,7 +11925,7 @@ function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLo
       </div>
 
       {tab === "planning" ? (
-        <div className="-mx-4 sm:-mx-6"><PlanningView documents={documents} account={account} siteSettings={siteSettings} darkMode={darkMode} isLocked={isLocked} isViewer={isViewer} /></div>
+        <div className="-mx-4 sm:-mx-6"><PlanningView documents={documents} account={account} isLocked={isLocked} isViewer={isViewer} /></div>
       ) : (
         <>
           {canEdit && (
@@ -11977,7 +12021,7 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
   const card = { background: tone.surface, border: `1px solid ${tone.line}` };
   const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
 
-  const stats = useMemo(() => atelierChantierStats(documents, slots).find((c) => c.nom === name) || { nom: name, docs: [], devisTotal: 0, factureTotal: 0, depensesTotal: 0, ecart: 0, marge: 0, client: "", photos: 0, slots: [], nextSlot: null }, [documents, slots, name]);
+  const stats = useMemo(() => atelierChantierStats(documents, slots).find((c) => c.nom.toLowerCase() === String(name || "").trim().toLowerCase()) || { nom: name, docs: [], devisTotal: 0, factureTotal: 0, depensesTotal: 0, ecart: 0, marge: 0, client: "", photos: 0, slots: [], nextSlot: null }, [documents, slots, name]);
   const families = ATELIER_FAMILIES.map((f) => ({ ...f, docs: stats.docs.filter((d) => f.services.includes(d.type)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)) })).filter((f) => f.docs.length);
   const photoDocs = stats.docs.filter((d) => Array.isArray(d.photos) && d.photos.length);
   const allPhotos = photoDocs.flatMap((d) => d.photos.map((p) => ({ ...p, doc: d })));
@@ -12003,7 +12047,7 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
     if (editing.end < editing.start) { alert("La date de fin doit être après la date de début."); return; }
     const member = members.find((m) => m.userId === editing.memberUserId);
     const now = Date.now();
-    const base = { title: editing.title.trim(), start: editing.start, end: editing.end, memberUserId: member?.userId || "", memberLabel: member?.label || "", chantier: name, updatedAt: now };
+    const base = { title: editing.title.trim(), start: editing.start, end: editing.end, memberUserId: member ? member.userId : (editing.memberUserId || ""), memberLabel: member ? member.label : (editing.memberUserId ? editing.memberLabel || "" : ""), chantier: name, updatedAt: now };
     if (editing.id) persist((slots || []).map((s) => (s.id === editing.id ? { ...s, ...base } : s)));
     else persist([...(slots || []), { id: nextId("pl"), createdAt: now, ...base }]);
     setEditing(null);
@@ -12625,12 +12669,14 @@ function ClientsView({ clients, documents, saving, onSave, onDelete, isLocked, i
           <button key={id} onClick={() => setRoleFilter(id)} className="rounded-full px-3 py-1 text-xs font-medium" style={{ background: roleFilter === id ? colors.ink : colors.surface, color: roleFilter === id ? "white" : colors.inkSoft, border: `1px solid ${roleFilter === id ? colors.ink : colors.line}` }}>{label}</button>
         ))}
       </div>
-      {filtered.length === 0 ? (
+      {clients.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl px-6 py-16 text-center" style={{ background: colors.surface, border: `1px dashed ${colors.line}` }}>
           <Users size={28} style={{ color: colors.inkSoft }} />
           <p className="df-display mt-3 text-lg font-semibold">Aucun client enregistré</p>
           <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Ajoute un client ici, ou enregistre-le directement depuis un devis.</p>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-2xl px-6 py-10 text-center text-sm" style={{ background: colors.surface, border: `1px dashed ${colors.line}`, color: colors.inkSoft }}>Aucune fiche ne correspond à cette recherche ou à ce filtre.</div>
       ) : (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           {filtered.map((c, idx) => (
@@ -12868,11 +12914,11 @@ function productAvailability(p, stockByProduct) {
 
 // Sous-menu « Gestion de stock » dans les navigations (déroulant sur grand
 // écran, liste indentée sur mobile). `variant` : "dropdown" | "inline".
-function StockMenu({ view, setView, locked, styleFor, iconColor, onNavigate, buttonClass = "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium", iconSize = 15, responsiveLabel = false }) {
+function StockMenu({ view, setView, locked, styleFor, iconColor, buttonClass = "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium", iconSize = 15, responsiveLabel = false }) {
   const active = isStockView(view);
   const [open, setOpen] = useState(false);
   useEscapeToClose(open, () => setOpen(false));
-  const go = (id) => { setView(id); setOpen(false); if (onNavigate) onNavigate(); };
+  const go = (id) => { setView(id); setOpen(false); };
   const chevron = locked
     ? <Lock size={11} className="ml-auto shrink-0" />
     : <ChevronDown size={12} className="ml-auto shrink-0" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />;
@@ -13221,7 +13267,7 @@ function StockDocumentsView({ movements, loading, products, warehouses, account,
   function exportCsv() {
     const rows = [["Document", "Type", "Date", "Entrepôt", "Produit", "Quantité", "Motif / référence", "Auteur"]];
     docs.forEach((d) => d.lines.forEach((l) => rows.push([d.ref, STOCK_KINDS[d.kind]?.label || d.kind, new Date(l.moved_at).toLocaleString("fr-FR"), warehouseName(warehouses, l.warehouse_id), productName(l.product_id), Number(l.quantity), l.reason || "", members[l.created_by] || ""])));
-    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\n");
+    const csv = rows.map((r) => r.map(csvCell).join(";")).join("\n"); // cellules neutralisées contre les formules (motif, nom de produit…)
     downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `documents-de-stock-${toIsoDate(new Date())}.csv`);
   }
   const kindColor = (k) => (k === "entree" ? colors.moss : k === "sortie" ? colors.brick : colors.slate);
@@ -13482,7 +13528,7 @@ function ComptabiliteView({ documents, products, movements, movementsLoading, co
 }
 
 // Page Produits : filtres, table triable, sélection multiple, actions.
-function ProductsView({ products, stockByProduct, stockDetail = {}, warehouses, warehousePrices = {}, loading, error, importInfo, isLocked, isViewer, account, siteSettings, onSave, onDelete, onDuplicate, onToggleActive, onGoToPricing }) {
+function ProductsView({ products, stockByProduct, stockDetail = {}, warehouses, warehousePrices = {}, loading, error, importInfo, isLocked, isViewer, account, onSave, onDelete, onDuplicate, onToggleActive, onGoToPricing }) {
   const surface = colors.surface;
   const canEdit = !isLocked && !isViewer;
   const emptyFilters = { q: "", warehouse: "", kind: "", nature: "", accountSales: "", accountPurchases: "", tag: "", vat: "", includeInactive: false };
@@ -13834,6 +13880,8 @@ function ReferralCard({ account }) {
   const link = code && typeof window !== "undefined" ? `${window.location.origin}/?parrain=${code}` : "";
   const [referrals, setReferrals] = useState(null);
   const [copied, setCopied] = useState("");
+  const copiedTimer = useRef(null);
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
   useEffect(() => {
     let cancelled = false;
     Promise.resolve()
@@ -13847,7 +13895,7 @@ function ReferralCard({ account }) {
     return () => { cancelled = true; };
   }, [account?.id]);
   async function copy(text, what) {
-    try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(""), 2000); } catch { setCopied(""); }
+    try { await navigator.clipboard.writeText(text); setCopied(what); clearTimeout(copiedTimer.current); copiedTimer.current = setTimeout(() => setCopied(""), 2000); } catch { setCopied(""); }
   }
   return (
     <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }} data-testid="referral-card">
@@ -13872,7 +13920,7 @@ function ReferralCard({ account }) {
         ) : (
           <ul className="mt-1 space-y-1" data-testid="referral-list">
             {referrals.map((r, i) => (
-              <li key={i} className="flex justify-between gap-3 text-sm"><span>{r.label || "Un nouvel artisan"}</span><span className="df-mono text-xs" style={{ color: colors.inkSoft }}>inscrit le {fr(String(r.created_at || "").slice(0, 10))}</span></li>
+              <li key={i} className="flex justify-between gap-3 text-sm"><span>{r.label || "Un nouvel artisan"}</span><span className="df-mono text-xs" style={{ color: colors.inkSoft }}>inscrit le {r.created_at ? fr(new Date(r.created_at)) : "—"}</span></li>
             ))}
           </ul>
         )}
@@ -14181,10 +14229,13 @@ function TeamView({ account }) {
   const [staffError, setStaffError] = useState("");
   const [convertingStaffId, setConvertingStaffId] = useState(null); // « Inviter avec un accès » en cours
   const inviteEmailRef = useRef(null);
+  const loadSeqRef = useRef(0); // dernier chargement demandé : une réponse plus ancienne est ignorée
 
   async function loadMembers() {
     if (!account?.organizationId) { setMembers([]); return; }
+    const seq = ++loadSeqRef.current;
     const { data, error: loadError } = await db.rpc("get_organization_members_with_profiles", { org_id: account.organizationId });
+    if (seq !== loadSeqRef.current) return; // une autre organisation a été chargée entre-temps
     if (loadError) {
       console.error("Erreur de chargement de l'équipe", loadError);
       setMembersError(`Impossible de charger la liste des membres (${loadError.message || "erreur inconnue"}). Réessaie dans un instant.`);
@@ -14313,7 +14364,7 @@ function TeamView({ account }) {
           <div className="flex flex-wrap items-end gap-2">
             <label className="grow basis-48 text-xs" style={{ color: colors.inkSoft }}>
               Email
-              <input type="text" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} ref={inviteEmailRef} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="collegue@entreprise.fr" onKeyDown={(e) => { if (e.key === "Enter") handleInvite(); }} />
+              <input type="text" className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} ref={inviteEmailRef} value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="collegue@entreprise.fr" onKeyDown={(e) => { if (e.key === "Enter" && !inviting) handleInvite(); }} />
             </label>
             <label className="text-xs" style={{ color: colors.inkSoft }}>
               Rôle
@@ -14730,8 +14781,9 @@ function AttestationsCard({ profile, account, isLocked, isViewer, saving, onSave
     finally { setBusy(false); }
   }
   async function open(a) {
-    try { window.open(await signCompanyFile(a.path), "_blank", "noopener"); }
-    catch (err) { console.error("Attestation indisponible", err); alert("Fichier indisponible pour le moment."); }
+    const w = openBlankTab();
+    try { const url = await signCompanyFile(a.path); if (w) w.location.href = url; else window.open(url, "_blank", "noopener"); }
+    catch (err) { if (w) w.close(); console.error("Attestation indisponible", err); alert("Fichier indisponible pour le moment."); }
   }
   return (
     <div className="mt-8 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }} data-testid="attestations-card">
@@ -14747,7 +14799,7 @@ function AttestationsCard({ profile, account, isLocked, isViewer, saving, onSave
             <div key={a.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5 text-sm" style={{ borderTop: i ? `1px solid ${colors.line}` : "none" }} data-testid="attestation-row">
               <span className="min-w-0 flex-1">
                 <span className="block font-medium">{a.label}{a.organism ? <span className="font-normal" style={{ color: colors.inkSoft }}> · {a.organism}</span> : null}{a.number ? <span className="df-mono font-normal" style={{ color: colors.inkSoft }}> · n° {a.number}</span> : null}</span>
-                <span className="block text-xs" style={{ color: colors.inkSoft }}>Valide jusqu'au {fr(a.expiresAt)}{a.fileName ? ` · ${a.fileName}` : ""}</span>
+                <span className="block text-xs" style={{ color: colors.inkSoft }}>{a.expiresAt ? `Valide jusqu'au ${fr(a.expiresAt)}` : "Date de validité à renseigner"}{a.fileName ? ` · ${a.fileName}` : ""}</span>
               </span>
               <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold" style={stateStyle(a)}>{attestationStateLabel(a)}</span>
               <span className="flex shrink-0 items-center gap-1">
@@ -14838,7 +14890,7 @@ function AccountingExportCard({ profile, account, isLocked, isViewer, saving, on
     setNotice(null);
     try {
       const { data, error } = await db.functions.invoke("send-accounting-exports", { body: { organizationId: orgId } });
-      if (error || data?.error) {
+      if (error || !data || data.error) {
         let message = data?.error;
         if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
         throw new Error(message || "Envoi impossible pour l'instant.");
@@ -16736,7 +16788,8 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
   const undo = (row) => run(row, async () => {
     const doc = docById(row.document_id);
     if (doc) {
-      const patch = revertBankPayment(doc, row.id, documentAmountDue(doc, documents));
+      // Reste NON plafonné : un trop-perçu par ailleurs doit laisser la facture « payée ».
+      const patch = revertBankPayment(doc, row.id, Math.round((documentSettledTotal(doc) - creditNotesTotalFor(doc, documents) - documentPaidTotal(doc)) * 100) / 100);
       if (patch) onPatchDocument(doc.id, patch);
     }
     await setRowStatus(row, "a_traiter");
@@ -16770,7 +16823,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
       }
       // Correspondances sûres : paiement enregistré tout de suite.
       const working = [...docsRef.current];
-      let cands = openInvoiceCandidates(working, documentAmountDue);
+      let cands = openInvoiceCandidates(working, (d) => documentAmountDue(d, working));
       let matched = 0;
       for (const row of inserted) {
         if (!(Number(row.amount) > 0)) continue;
@@ -16778,7 +16831,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
         if (best?.level !== "sur") continue;
         await reconcile(row, best.id, "auto", working);
         matched += 1;
-        cands = openInvoiceCandidates(working, documentAmountDue);
+        cands = openInvoiceCandidates(working, (d) => documentAmountDue(d, working));
       }
       const credits = inserted.filter((r) => Number(r.amount) > 0).length;
       setReport({ files: files.length, imported: inserted.length, duplicates: all.length - inserted.length, matched, toReview: credits - matched, warnings });
@@ -16831,7 +16884,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
               {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Rapprocher avec {best.docNumber}
               <span className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase" style={{ background: "rgba(255,255,255,0.25)" }}>{best.level === "sur" ? "sûr" : "probable"}</span>
             </button>
-            <span className="text-xs" style={{ color: colors.inkSoft }}>{best.clientName} · reste {formatMoney(best.due, row.currency)} · {best.reasons.join(", ")}</span>
+            <span className="text-xs" style={{ color: colors.inkSoft }}>{best.clientName} · reste {formatMoney(best.due, docById(best.id)?.currency || row.currency)} · {best.reasons.join(", ")}</span>
           </>
         ) : (
           <span className="text-xs" style={{ color: colors.inkSoft }}>Aucune facture correspondante trouvée.</span>
@@ -17091,12 +17144,12 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       if (!prev || prev.id !== doc.id) return prev;
       const pending = pendingPatchRef.current || {};
       let next = prev;
-      for (const key of ["status", "paidAt", "paidTotal", "payments", "workStage"]) {
+      for (const key of ["status", "paidAt", "paidTotal", "payments", "workStage", "items", "signature"]) {
         if (!(key in pending) && prev[key] !== doc[key]) next = { ...next, [key]: doc[key] };
       }
       return next;
     });
-  }, [doc.id, doc.status, doc.paidAt, doc.paidTotal, doc.payments, doc.workStage]);
+  }, [doc.id, doc.status, doc.paidAt, doc.paidTotal, doc.payments, doc.workStage, doc.items, doc.signature]);
 
   // Le focus automatique sur un champ nouvellement ajouté ne doit jouer
   // qu'une fois — sinon il "vole" le focus en continu à chaque frappe
@@ -17394,8 +17447,9 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   const hasPro = hasAccess(account, "pro");
   const currentPlanData = plans.find((p) => p.id === (account?.plan || "gratuit"));
   const watermarkEnabled = currentPlanData?.watermarkEnabled !== false;
-  const validityDate = new Date(localDateOf(localDoc.issueDate).getTime() + (Number(localDoc.validityDays) || 0) * 86400000);
-  const dueDate = new Date(localDateOf(localDoc.issueDate).getTime() + (Number(localDoc.dueDays) || 0) * 86400000);
+  const signatureView = localDoc.signature || EMPTY_SIGNATURE;
+  const validityDate = addDaysLocal(localDoc.issueDate, localDoc.validityDays);
+  const dueDate = addDaysLocal(localDoc.issueDate, localDoc.dueDays);
 
   function getPos(e) {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -17619,7 +17673,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       });
     } else {
       rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT", "TVA %", "Remise %", "Total HT"]);
-      const proposedOptionLines = localDoc.type === "devis" ? proposedOptionsOf(localDoc).map((l) => ({ ...l, designation: `${l.designation || ""} (option non comprise dans le total)`, totalHT: lineBaseHT(l) * (1 - (Number(l.discount) || 0) / 100) })) : [];
+      const proposedOptionLines = localDoc.type === "devis" ? proposedOptionsOf(localDoc).map((l) => ({ ...l, designation: `${l.designation || ""} (option non comprise dans le total)`, totalHT: lineBaseHT(l) * (1 - (Number(l.discount) || 0) / 100) * (1 - (totals.globalDiscountPct || 0) / 100) })) : [];
       [...computedLines, ...proposedOptionLines].forEach((l) => {
         rows.push([localDoc.type === "bpu" && (l.productRef || "").trim() ? `${l.productRef.trim()} — ${l.designation}` : l.designation, "", l.qty, l.unit, Number(l.unitPrice) || 0, l.tva, l.discount, Number((l.totalHT || 0).toFixed(2))]);
         (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
@@ -17642,7 +17696,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         rows.push(["", "", "", "", "", "", `Acompte (${localDoc.acompte}%)`, Number(acompteAmount.toFixed(2))]);
         rows.push(["", "", "", "", "", "", "Reste à payer", Number(resteAPayer.toFixed(2))]);
       }
-      if (localDoc.type === "facture" && totals.totalPaid > 0) {
+      if (invoiceLikeXls && totals.totalPaid > 0) {
         if (totals.acompteVerse > 0) rows.push(["", "", "", "", "", "", "Acompte déjà versé", -Number(totals.acompteVerse.toFixed(2))]);
         (localDoc.payments || []).filter((p) => p && (Number(p.amount) || 0) > 0).forEach((p) => rows.push(["", "", "", "", "", "", `Paiement reçu${p.date ? ` le ${paymentDateLabel(p.date)}` : ""}${p.method ? ` (${p.method})` : ""}`, -Number((Number(p.amount) || 0).toFixed(2))]));
         rows.push(["", "", "", "", "", "", "Montant TTC à régler", Number(totals.montantARegler.toFixed(2))]);
@@ -17743,7 +17797,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 
       <div className="no-print mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
-        <QrCodeDialog qr={qrDialog} title={localDoc.type === "devis" ? "QR code du lien de signature" : "QR code du lien de paiement"} onClose={() => setQrDialog(null)} />
+        <QrCodeDialog key={qrDialog?.url || "closed"} qr={qrDialog} title={localDoc.type === "devis" ? "QR code du lien de signature" : "QR code du lien de paiement"} onClose={() => setQrDialog(null)} />
         <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />
         {!isViewer && <AcompteSuggestionNotice suggestion={acompteSuggestion} currency={localDoc.currency} onApply={(amount) => patch({ acompteVerse: amount })} onDismiss={() => patch({ acompteSuggestionDismissed: true })} />}
         {splitNotice && (
@@ -17820,7 +17874,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                 </>
               )}
               <div className="col-span-2 text-right text-xs" style={{ color: colors.inkSoft }}>
-                {localDoc.type !== "facture" ? (localDoc.showValidity !== false ? `Valable jusqu'au ${frLong(validityDate)}` : null) : `Paiement attendu avant le ${frLong(dueDate)}`}
+                {localDoc.type === "facture" || localDoc.type === "acompte" ? `Paiement attendu avant le ${frLong(dueDate)}` : (localDoc.type === "avoir" || localDoc.type === "livraison" || localDoc.showValidity === false ? null : `Valable jusqu'au ${frLong(validityDate)}`)}
               </div>
             </div>
             {localDoc.type === "facture" && (
@@ -17832,7 +17886,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     onChange={(e) => {
                       const checked = e.target.checked;
                       if (checked && !localDoc.nextRecurrenceDate) {
-                        const next = new Date(localDoc.issueDate || Date.now());
+                        const next = localDateOf(localDoc.issueDate || Date.now());
                         if (localDoc.recurrenceInterval === "annuel") next.setFullYear(next.getFullYear() + 1);
                         else if (localDoc.recurrenceInterval === "trimestriel") next.setMonth(next.getMonth() + 3);
                         else next.setMonth(next.getMonth() + 1);
@@ -18587,7 +18641,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     <div className="flex justify-between gap-8 font-semibold" style={{ color: colors.moss }}><span>Reste à payer</span><span>{formatMoney(resteAPayer, localDoc.currency)}</span></div>
                   </>
                 )}
-                {localDoc.type === "facture" && totals.totalPaid > 0 && (
+                {(localDoc.type === "facture" || localDoc.type === "acompte") && totals.totalPaid > 0 && (
                   <>
                     <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Total TTC</span><span>{formatMoney(totalTTC, localDoc.currency)}</span></div>
                     {totals.acompteVerse > 0 && <div className="flex justify-between gap-8"><span style={{ color: colors.inkSoft }}>Acompte déjà versé</span><span>- {formatMoney(totals.acompteVerse, localDoc.currency)}</span></div>}
@@ -18630,21 +18684,21 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     { id: "dessin", label: "Dessin à main levée", icon: PenTool },
                     { id: "image", label: "Uploader une image", icon: Upload },
                   ].map(({ id, label, icon: Icon }) => (
-                    <button key={id} onClick={() => patchDeep("signature", { mode: id })} className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: localDoc.signature.mode === id ? colors.ink : "transparent", color: localDoc.signature.mode === id ? "white" : colors.inkSoft, border: `1px solid ${localDoc.signature.mode === id ? colors.ink : colors.line}` }}>
+                    <button key={id} onClick={() => patchDeep("signature", { mode: id })} className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium" style={{ background: signatureView.mode === id ? colors.ink : "transparent", color: signatureView.mode === id ? "white" : colors.inkSoft, border: `1px solid ${signatureView.mode === id ? colors.ink : colors.line}` }}>
                       <Icon size={13} /> {label}
                     </button>
                   ))}
                 </div>
                 <div className="rounded-xl p-4" style={{ border: `1px dashed ${colors.line}` }}>
-                  {localDoc.signature.mode === "texte" && (
+                  {signatureView.mode === "texte" && (
                     <>
-                      <input className="df-input df-display w-full max-w-sm rounded-md px-3 py-2 text-lg italic" style={inputStyle} placeholder="Tapez votre nom pour signer" value={localDoc.signature.name} onChange={(e) => patchDeep("signature", { name: e.target.value })} />
-                      {localDoc.signature.secondName && (
-                        <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Second signataire : <span className="df-display italic" style={{ color: colors.ink }}>{localDoc.signature.secondName}</span></p>
+                      <input className="df-input df-display w-full max-w-sm rounded-md px-3 py-2 text-lg italic" style={inputStyle} placeholder="Tapez votre nom pour signer" value={signatureView.name} onChange={(e) => patchDeep("signature", { name: e.target.value })} />
+                      {signatureView.secondName && (
+                        <p className="mt-2 text-xs" style={{ color: colors.inkSoft }}>Second signataire : <span className="df-display italic" style={{ color: colors.ink }}>{signatureView.secondName}</span></p>
                       )}
                     </>
                   )}
-                  {localDoc.signature.mode === "dessin" && (
+                  {signatureView.mode === "dessin" && (
                     <div>
                       <canvas
                         ref={canvasRef} width={360} height={130}
@@ -18658,10 +18712,10 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                       </button>
                     </div>
                   )}
-                  {localDoc.signature.mode === "image" && (
+                  {signatureView.mode === "image" && (
                     <div>
                       <input type="file" accept="image/*" onChange={handleImageUpload} className="no-print text-xs" />
-                      {localDoc.signature.image && <img src={localDoc.signature.image} alt="Signature" className="mt-2 h-24 rounded-md object-contain" style={{ border: `1px solid ${colors.line}` }} />}
+                      {signatureView.image && <img src={signatureView.image} alt="Signature" className="mt-2 h-24 rounded-md object-contain" style={{ border: `1px solid ${colors.line}` }} />}
                     </div>
                   )}
                 </div>
@@ -18696,5 +18750,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

@@ -75,7 +75,7 @@ serve(async (req) => {
         const result = await updateKvValue<any[]>(dbAdmin, organizationId, "documents", (list) => {
           const idx = list.findIndex((d: any) => d.id === documentId);
           if (idx === -1) return null;
-          list[idx] = addOnlinePayment(list[idx], session.id, Number(session.amount_total) || 0, new Date().toISOString());
+          list[idx] = addOnlinePayment(list[idx], session.id, Number(session.amount_total) || 0, new Date().toISOString(), list);
           fullyPaid = list[idx].status === "payée";
           return list;
         });

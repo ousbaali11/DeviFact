@@ -12,7 +12,6 @@ const USER = { id: "u1", email: "test@exemple.fr" };
 const ORG = "252f0e0f-437c-4c98-bdde-aa2d39672dd7";
 const P1 = "11111111-2222-4333-8444-555555555555";
 const P2 = "22222222-2222-4333-8444-555555555555";
-const state = { landingPageVersion: "classique" };
 
 const kv = {
   documents: [],
@@ -22,7 +21,7 @@ const kv = {
 const fixtures = {
   profiles: () => [{ id: USER.id, email: USER.email, first_name: "Test", last_name: "T", is_admin: false, company_name: "" }],
   organization_members: () => [{ role: "owner", organization_id: ORG, organizations: { id: ORG, name: "Test SARL", plan: "pro", billing_cycle: "mensuel", payment_status: "payé", activated_via_free_button: false, expires_at: null, subscription_cancelled: false } }],
-  site_settings: () => [{ id: 1, name: "Chantiflow", landing_page_version: state.landingPageVersion, theme: "classique" }],
+  site_settings: () => [{ id: 1, name: "Chantiflow", theme: "classique" }],
   kv_store: (f) => (f.key in kv ? [{ value: kv[f.key] }] : []),
   products: () => [
     { id: P1, organization_id: ORG, name: "Carrelage 60x60", reference: "CAR-60", unit: "m²", kind: "produit", is_active: true, quantity_restricted: false, sale_price_ht: 25, sale_vat_rate: 20, sale_price_ttc: 30, purchase_price_ht: 10, purchase_vat_rate: 20, tags: [] },
@@ -92,9 +91,8 @@ async function openApp() {
 }
 
 describe("application complète → Documents de stock", () => {
-  for (const version of ["classique", "avancee", "atelier"]) {
-    it(`version ${version} : le document est listé avec ses lignes visibles, un clic les replie`, async () => {
-      state.landingPageVersion = version;
+  {
+    it("le document est listé avec ses lignes visibles, un clic les replie", async () => {
       const { container, unmount } = await openApp();
       const listed = await waitFor(() => container.textContent.includes("ENT-2026-001"));
       expect(listed, `document non listé ; écran : ${container.textContent.slice(0, 400)}`).toBe(true);

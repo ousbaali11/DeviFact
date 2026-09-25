@@ -72,7 +72,7 @@ serve(async (req) => {
     // Reste à régler — calcul partagé avec le site (_shared/totals.ts) :
     // sous-détails, remises, TVA par taux, acompte versé, paiements déjà
     // reçus. Le client peut payer tout le reste ou une partie (au moins 1).
-    const due = round2(amountDueOf(doc));
+    const due = round2(amountDueOf(doc, documents)); // avoirs rattachés déduits, comme sur la page
     if (due <= 0) {
       return new Response(JSON.stringify({ error: "Cette facture est déjà réglée." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }

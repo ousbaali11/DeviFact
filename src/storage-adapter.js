@@ -86,7 +86,42 @@ function mergePayments(winner, l, r, b) {
   return merged;
 }
 
+// Document modifié des deux côtés dont l'autre version vient d'être signée
+// par le client (lien public, pendant que l'artisan retouchait le devis) :
+// la signature, le statut « signé » et les options retenues ne se perdent
+// jamais, quelle que soit la version qui gagne. Le suivi des relances
+// (écrit par le serveur) garde la date la plus récente.
+function mergeSignature(winner, l, r) {
+  const other = winner === l ? r : l;
+  let merged = winner;
+  if (other?.status === "signé" && other.signature && typeof other.signature === "object" && merged.status !== "signé") {
+    const accepted = new Map((Array.isArray(other.items) ? other.items : []).filter((it) => it && it.type === "line" && it.optional === true).map((it) => [it.id, it.optionAccepted]));
+    const items = Array.isArray(merged.items) ? merged.items.map((it) => (it && it.type === "line" && it.optional === true && accepted.has(it.id) ? { ...it, optionAccepted: accepted.get(it.id) } : it)) : merged.items;
+    merged = { ...merged, status: "signé", signature: other.signature, ...(items !== undefined ? { items } : {}) };
+  }
+  const lr = Number(l?.lastReminderSentAt) || 0, rr = Number(r?.lastReminderSentAt) || 0;
+  if (Math.max(lr, rr) > (Number(merged.lastReminderSentAt) || 0)) merged = { ...merged, lastReminderSentAt: Math.max(lr, rr) };
+  return merged;
+}
+const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+// Valeur objet (fiche entreprise…) modifiée des deux côtés : fusion champ
+// par champ — un champ inchangé localement depuis la base prend la version
+// distante (l'IBAN saisi par le propriétaire pendant qu'un éditeur changeait
+// le téléphone n'est plus écrasé) ; un champ modifié ici garde sa valeur ;
+// une liste à identifiants (attestations) est fusionnée comme les documents.
+function mergeObjects(base, local, remote) {
+  const out = { ...remote };
+  for (const key of new Set([...Object.keys(local), ...Object.keys(remote)])) {
+    const lv = local[key], rv = remote[key], bv = base ? base[key] : undefined;
+    if (!(key in local)) { if (key in base) delete out[key]; continue; } // retiré localement (présent en base) ; ajouté à distance sinon
+    if (same(lv, bv)) continue; // inchangé ici : version distante
+    out[key] = isIdList(lv) && isIdList(rv) ? mergeValues(bv, lv, rv) : lv;
+  }
+  return out;
+}
+
 export function mergeValues(base, local, remote) {
+  if (isPlainObject(local) && isPlainObject(remote) && isPlainObject(base)) return mergeObjects(base, local, remote);
   if (!isIdList(local) || !isIdList(remote)) return local;
   const byId = (list) => new Map(list.map((x) => [x.id, x]));
   const B = isIdList(base) ? byId(base) : null;
@@ -100,7 +135,7 @@ export function mergeValues(base, local, remote) {
     if (!B) { out.push(l || r); continue; }
     if (l && r) {
       const lChanged = !b || !same(l, b), rChanged = !b || !same(r, b);
-      if (lChanged && rChanged && !same(l, r)) out.push(mergePayments(stamp(r) > stamp(l) ? r : l, l, r, b));
+      if (lChanged && rChanged && !same(l, r)) out.push(mergeSignature(mergePayments(stamp(r) > stamp(l) ? r : l, l, r, b), l, r));
       else out.push(lChanged ? l : r);
     } else if (l && !r) {
       // absent en base : supprimé à distance, sauf si modifié localement depuis la base

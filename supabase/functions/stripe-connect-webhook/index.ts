@@ -41,7 +41,7 @@ async function markInvoicePaid(organizationId: string, documentId: string, linkI
   const result = await updateKvValue<any[]>(dbAdmin, organizationId, "documents", (list) => {
     const idx = list.findIndex((d: any) => d.id === documentId);
     if (idx === -1) return null;
-    list[idx] = addOnlinePayment(list[idx], sessionId, amountCents, new Date().toISOString());
+    list[idx] = addOnlinePayment(list[idx], sessionId, amountCents, new Date().toISOString(), list);
     fullyPaid = list[idx].status === "payée";
     return list;
   });

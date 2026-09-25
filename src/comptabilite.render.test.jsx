@@ -37,16 +37,16 @@ const movements = [
 const base = { movementsLoading: false, companyProfile: { ...emptyCompanyProfile(), fiscalStartMonth: 1 }, canEdit: true, darkMode: false, onRefreshMovements: noop, onSaveDefaults: noop, onExportXlsx: noop };
 
 describe("onglet Comptabilité", () => {
-  for (const version of ["classique", "avancee", "atelier"]) {
-    it(`s'affiche vide en version ${version}`, async () => {
-      const { text } = await renderOnce(<ComptabiliteView {...base} documents={[]} products={[]} movements={[]} siteSettings={{ landingPageVersion: version }} />);
+  {
+    it("s'affiche vide", async () => {
+      const { text } = await renderOnce(<ComptabiliteView {...base} documents={[]} products={[]} movements={[]} />);
       expect(text).toContain("Comptabilité");
       expect(text).toContain("Aucune écriture sur cette période");
       expect(text).toContain("Aucun compte renseigné");
     });
   }
   it("affiche les comptes utilisés, les écritures de vente et de stock, équilibrées", async () => {
-    const { text, html } = await renderOnce(<ComptabiliteView {...base} documents={[facture]} products={products} movements={movements} siteSettings={{ landingPageVersion: "classique" }} />);
+    const { text, html } = await renderOnce(<ComptabiliteView {...base} documents={[facture]} products={products} movements={movements} />);
     expect(text).toContain("707100");
     expect(text).toContain("1 sans compte : compte par défaut utilisé"); // Pose sans compte de produits
     expect(text).toContain("FAC-2026-001");
@@ -60,7 +60,7 @@ describe("onglet Comptabilité", () => {
     expect(html).toContain("40,00");
   });
   it("brouillons ignorés", async () => {
-    const { text } = await renderOnce(<ComptabiliteView {...base} documents={[{ ...facture, status: "brouillon" }]} products={products} movements={[]} siteSettings={{ landingPageVersion: "classique" }} />);
+    const { text } = await renderOnce(<ComptabiliteView {...base} documents={[{ ...facture, status: "brouillon" }]} products={products} movements={[]} />);
     expect(text).toContain("Aucune écriture sur cette période");
   });
 });

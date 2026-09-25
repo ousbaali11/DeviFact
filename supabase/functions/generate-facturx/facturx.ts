@@ -18,7 +18,7 @@
 
 import { PDFDocument, PDFName, PDFArray, PDFString, PDFHexString, AFRelationship, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 import * as fontkitModule from "https://esm.sh/@pdf-lib/fontkit@1.1.1";
-import { computeDocTotals, isCountedLine } from "../_shared/totals.ts";
+import { computeDocTotals, isCountedLine, round2 } from "../_shared/totals.ts";
 // Le module expose l'objet fontkit en export par défaut à l'exécution,
 // mais ses types ne le déclarent pas — d'où ce petit détour.
 const fontkit = ((fontkitModule as unknown as { default?: unknown }).default ?? fontkitModule) as Parameters<PDFDocument["registerFontkit"]>[0];
@@ -106,7 +106,7 @@ export interface BuildResult {
 // Utilitaires
 // ---------------------------------------------------------------------------
 
-const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+// round2 : celui de _shared/totals.ts (même arrondi que le PDF et le site).
 const round4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 const money = (n: number) => round2(n).toFixed(2);
 const price4 = (n: number) => round4(n).toFixed(4);

@@ -94,7 +94,7 @@ serve(async (req) => {
     // Le client reçoit le document sans ce qui ne le concerne pas :
     // photos de chantier, images de signature, suivi interne des relances,
     // réglages de récurrence.
-    const { photos: _photos, lastReminderSentAt: _lr, remindersEnabled: _re, isRecurring: _ir, recurrenceInterval: _ri, recurrenceEndDate: _rd, nextRecurrenceDate: _nd, ...publicDoc } = doc;
+    const { photos: _photos, lastReminderSentAt: _lr, remindersEnabled: _re, isRecurring: _ir, recurrenceInterval: _ri, recurrenceEndDate: _rd, nextRecurrenceDate: _nd, technicienMemberId: _tm, responsableMemberId: _rm, ...publicDoc } = doc;
     if (publicDoc.signature && typeof publicDoc.signature === "object") {
       const { drawing: _drawing, image: _image, ...sig } = publicDoc.signature;
       publicDoc.signature = sig;
@@ -130,7 +130,9 @@ serve(async (req) => {
     let attachments: Array<{ label: string; organism: string; expiresAt: string; fileName: string; url: string }> = [];
     if (doc.type === "devis" && doc.attachAttestations === true) {
       const { data: profileRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", link.organization_id).eq("key", "company-profile").eq("shared", false).maybeSingle();
-      const valid = validAttestations(profileRow?.value);
+      // Seuls les fichiers de cette organisation (le chemin vient d'une fiche
+      // modifiable par ses membres ; le service role ignore les règles du stockage).
+      const valid = validAttestations(profileRow?.value).filter((a) => String(a.path || "").startsWith(`${link.organization_id}/`));
       if (valid.length) {
         const { data: signed, error: signError } = await dbAdmin.storage.from("company-files").createSignedUrls(valid.map((a) => String(a.path)), 3600);
         if (signError) console.error("Liens des attestations non générés :", signError.message);

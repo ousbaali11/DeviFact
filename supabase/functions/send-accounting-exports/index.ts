@@ -22,7 +22,7 @@ import * as XLSX from "https://esm.sh/xlsx@0.18.5";
 import { buildExportSheets, previousPeriod, exportDueToday, type ExportFrequency } from "../_shared/accounting.ts";
 
 const dbAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const FROM_EMAIL = Deno.env.get("CONFIRMATION_FROM_EMAIL") || "noreply@chantiflow.fr";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -36,8 +36,11 @@ function escapeHtml(s: string) {
 function frequencyOf(v: unknown): ExportFrequency {
   return v === "trimestriel" ? "trimestriel" : "mensuel";
 }
+// Lecture d'une clé ; une erreur est remontée (jamais « aucune donnée » :
+// un export vide serait envoyé à l'expert-comptable et la période marquée).
 async function readKv(organizationId: string, key: string) {
-  const { data } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", key).eq("shared", false).maybeSingle();
+  const { data, error } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", key).eq("shared", false).maybeSingle();
+  if (error) throw new Error(`Lecture de « ${key} » impossible : ${error.message}`);
   return data?.value ?? null;
 }
 async function writeState(organizationId: string, state: Record<string, unknown>) {
@@ -49,15 +52,24 @@ async function writeState(organizationId: string, state: Record<string, unknown>
   if (error) console.error("État de l'export comptable non enregistré :", error.message, organizationId);
 }
 
-// Construit et envoie l'export d'une période. Renvoie { ok, error? }.
-async function sendExport(organizationId: string, profile: any, period: ReturnType<typeof previousPeriod>, siteName: string, trigger: "auto" | "manuel") {
+// Construit et envoie l'export d'une période. Renvoie { ok, error? } — une
+// lecture en échec n'envoie rien (et ne marque pas la période).
+async function sendExport(organizationId: string, profile: any, period: ReturnType<typeof previousPeriod>, siteName: string, trigger: "auto" | "manuel"): Promise<{ ok: boolean; error?: string; documentCount?: number; to?: string; cc?: string[] }> {
+  try {
+    return await sendExportUnsafe(organizationId, profile, period, siteName, trigger);
+  } catch (err) {
+    console.error("Export comptable non construit :", organizationId, err);
+    return { ok: false, error: `Export non envoyé : ${(err as Error)?.message || "lecture des données impossible"}.` };
+  }
+}
+async function sendExportUnsafe(organizationId: string, profile: any, period: ReturnType<typeof previousPeriod>, siteName: string, trigger: "auto" | "manuel") {
   const cfg = profile?.accountingExport || {};
   const to = String(cfg.email || "").trim();
   if (!EMAIL_RE.test(to)) return { ok: false, error: "Adresse de l'expert-comptable manquante ou invalide." };
 
   const [documents, org] = await Promise.all([
     readKv(organizationId, "documents"),
-    dbAdmin.from("organizations").select("name, plan, payment_status").eq("id", organizationId).maybeSingle().then((r) => r.data),
+    dbAdmin.from("organizations").select("name, plan, payment_status").eq("id", organizationId).maybeSingle().then((r) => { if (r.error) throw new Error(`Lecture de l'organisation impossible : ${r.error.message}`); return r.data; }),
   ]);
   // Écritures : forfaits Pro et Entreprise, paiement actif (même règle que hasAccess côté site).
   const includeEntries = ["pro", "entreprise"].includes(org?.plan || "") && org?.payment_status === "payé";
@@ -68,6 +80,8 @@ async function sendExport(organizationId: string, profile: any, period: ReturnTy
       dbAdmin.from("stock_movements").select("*").eq("organization_id", organizationId).gte("moved_at", period.from).lte("moved_at", `${period.to}T23:59:59.999Z`),
       readKv(organizationId, "clients"), // rôle des fiches (sous-traitant → compte 604)
     ]);
+    if (p.error) throw new Error(`Lecture des produits impossible : ${p.error.message}`);
+    if (m.error) throw new Error(`Lecture des mouvements de stock impossible : ${m.error.message}`);
     products = p.data || []; movements = m.data || []; clients = Array.isArray(c) ? c : [];
   }
   const sheets = buildExportSheets(Array.isArray(documents) ? documents : [], period, { includeEntries, products, movements, defaults: profile?.accounting, clients });
@@ -119,6 +133,7 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
   try {
+    if (!RESEND_API_KEY) return json({ error: "Service d'envoi non configuré (RESEND_API_KEY)." }, 500);
     const { data: settingsRow } = await dbAdmin.from("site_settings").select("name").limit(1).maybeSingle();
     const siteName = settingsRow?.name || "Chantiflow";
     const now = new Date();
@@ -134,6 +149,7 @@ serve(async (req) => {
         if (error) { console.error("Erreur de lecture des fiches entreprise", error); break; }
         if (!rows || rows.length === 0) break;
         for (const row of rows) {
+          try { // une organisation en erreur n'interrompt pas les autres
           const cfg = row.value?.accountingExport;
           if (!cfg?.enabled) continue;
           checked += 1;
@@ -149,6 +165,7 @@ serve(async (req) => {
             failed += 1;
             await writeState(row.organization_id, { lastError: result.error, lastErrorAt: now.toISOString() });
           }
+          } catch (err) { failed += 1; console.error("Export comptable en échec pour", row.organization_id, err); }
         }
         if (rows.length < pageSize) break;
         page += 1;
@@ -166,6 +183,13 @@ serve(async (req) => {
     const { data: membership } = await dbAdmin.from("organization_members").select("role").eq("user_id", user.id).eq("organization_id", organizationId).eq("status", "active").maybeSingle();
     if (!membership || !["owner", "editor"].includes(membership.role)) return json({ error: "Accès refusé." }, 403);
 
+    // Envoi manuel borné : 10 minutes entre deux envois, cinq par jour (l'état
+    // n'est modifiable que par le serveur, voir le trigger kv_store_protect_writes).
+    const state = (await readKv(organizationId, STATE_KEY)) || {};
+    const nowMs = now.getTime();
+    const recentManual = (Array.isArray(state.manualSends) ? state.manualSends : []).map(Number).filter((t: number) => Number.isFinite(t) && nowMs - t < 86400000);
+    if (recentManual.some((t: number) => nowMs - t < 10 * 60 * 1000)) return json({ error: "Un export vient d'être envoyé : attends 10 minutes avant d'en renvoyer un." }, 429);
+    if (recentManual.length >= 5) return json({ error: "Cinq exports ont déjà été envoyés manuellement aujourd'hui : réessaie demain." }, 429);
     const profile = await readKv(organizationId, "company-profile");
     const cfg = profile?.accountingExport || {};
     const frequency = frequencyOf(cfg.frequency);
@@ -175,7 +199,7 @@ serve(async (req) => {
       await writeState(organizationId, { lastError: result.error, lastErrorAt: now.toISOString() });
       return json({ error: result.error }, 400);
     }
-    await writeState(organizationId, { lastSentPeriod: period.id, lastSentAt: now.toISOString(), lastSentTo: result.to, lastError: null });
+    await writeState(organizationId, { lastSentPeriod: period.id, lastSentAt: now.toISOString(), lastSentTo: result.to, lastError: null, manualSends: [...recentManual, nowMs] });
     return json({ sent: true, period: period.id, label: period.label, to: result.to, documentCount: result.documentCount });
   } catch (err) {
     console.error("Erreur send-accounting-exports", err);

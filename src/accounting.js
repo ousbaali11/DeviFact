@@ -198,19 +198,20 @@ export function localIsoDate(value) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 // Export CSV (séparateur point-virgule, décimales à la virgule, BOM pour Excel).
+// Cellule CSV : une valeur qui commence par = + @ (ou - suivi d'autre chose
+// qu'un nombre) serait exécutée comme formule par un tableur : neutralisée
+// par une apostrophe, comme le font les tableurs eux-mêmes. Partagée par
+// tous les exports CSV du site (écritures, documents de stock).
+export function csvCell(v) {
+  let s = String(v ?? "");
+  if (/^[=+@\t\r]/.test(s) || (/^-/.test(s) && !/^-?\d[\d\s.,]*$/.test(s))) s = "'" + s;
+  return `"${s.replace(/"/g, '""')}"`;
+}
 export function entriesToCsv(entries) {
   const fmt = (n) => (Number(n) || 0).toFixed(2).replace(".", ",");
-  // Une cellule qui commence par = + @ (ou - suivi d'autre chose qu'un
-  // nombre) serait exécutée comme formule par un tableur : neutralisée par
-  // une apostrophe, comme le font les tableurs eux-mêmes.
-  const esc = (v) => {
-    let s = String(v ?? "");
-    if (/^[=+@\t\r]/.test(s) || (/^-/.test(s) && !/^-?\d[\d\s.,]*$/.test(s))) s = "'" + s;
-    return `"${s.replace(/"/g, '""')}"`;
-  };
   const rows = [["Date", "Journal", "Pièce", "Libellé", "Compte", "Débit", "Crédit", "Code activité", "Source"]];
   for (const e of entries || []) rows.push([e.date, e.journal, e.piece, e.label, e.account, fmt(e.debit), fmt(e.credit), e.activity || "", e.source]);
-  return "﻿" + rows.map((r) => r.map(esc).join(";")).join("\r\n");
+  return "﻿" + rows.map((r) => r.map(csvCell).join(";")).join("\r\n");
 }
 
 // ---------------------------------------------------------------------

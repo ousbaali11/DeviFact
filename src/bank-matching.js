@@ -71,6 +71,8 @@ export function parseDate(raw) {
   function valid(y, mo, d) {
     const year = Number(y), month = Number(mo), day = Number(d);
     if (year < 1990 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const check = new Date(Date.UTC(year, month - 1, day));
+    if (check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null; // 31/02, 31/04…
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 }
@@ -104,13 +106,14 @@ const HEADER_KEYS = {
   counterparty: ["tiers", "contrepartie", "beneficiaire", "emetteur", "counterparty", "name", "payee", "nom"],
   reference: ["reference", "ref", "numero", "id", "identifiant", "fitid", "transaction id"],
 };
-function findColumn(headers, keys) {
+function findColumn(headers, keys, exclude = []) {
+  const ok = (i) => i >= 0 && !exclude.includes(i);
   for (const key of keys) {
-    const exact = headers.findIndex((h) => h === key);
+    const exact = headers.findIndex((h, i) => h === key && ok(i));
     if (exact >= 0) return exact;
   }
   for (const key of keys) {
-    const partial = headers.findIndex((h) => h.includes(key));
+    const partial = headers.findIndex((h, i) => h.includes(key) && ok(i));
     if (partial >= 0) return partial;
   }
   return -1;
@@ -126,7 +129,7 @@ export function parseCsv(text) {
     const d = detectDelimiter(lines[i]);
     const headers = splitCsvLine(lines[i], d).map(normalizeText);
     const date = findColumn(headers, HEADER_KEYS.date);
-    const amount = findColumn(headers, HEADER_KEYS.amount);
+    const amount = findColumn(headers, HEADER_KEYS.amount, [date]); // « Date valeur » n'est pas un montant
     const debit = findColumn(headers, HEADER_KEYS.debit);
     const credit = findColumn(headers, HEADER_KEYS.credit);
     if (date >= 0 && (amount >= 0 || debit >= 0 || credit >= 0)) {

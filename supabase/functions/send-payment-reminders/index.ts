@@ -11,6 +11,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { amountDueOf, formatAmount } from "../_shared/totals.ts";
+import { parisTodayIso } from "../_shared/dates.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 
 const dbAdmin = createClient(
@@ -18,7 +19,7 @@ const dbAdmin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const FROM_EMAIL = Deno.env.get("CONFIRMATION_FROM_EMAIL") || "noreply@chantiflow.fr";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, content-type" };
 
@@ -36,8 +37,8 @@ serve(async (req) => {
   }
 
   try {
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
+    if (!RESEND_API_KEY) return new Response(JSON.stringify({ error: "Service d'envoi non configuré (RESEND_API_KEY)." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const todayStr = parisTodayIso(); // jour en heure de Paris, comme le tableau de bord
     let remindersSent = 0;
     let page = 0;
     const pageSize = 200;
@@ -58,6 +59,7 @@ serve(async (req) => {
       if (!rows || rows.length === 0) break;
 
       for (const row of rows) {
+        try { // une organisation en erreur n'empêche pas les suivantes
         const documents = Array.isArray(row.value) ? row.value : [];
         let changed = false;
 
@@ -82,7 +84,9 @@ serve(async (req) => {
           const due = amountDueOf(doc, documents); // acompte, paiements et avoirs rattachés déduits
           if (due <= 0.005) continue;
           const amount = formatAmount(due, doc.currency);
-          const emailResp = await fetch("https://api.resend.com/emails", {
+          let emailResp: Response;
+          try {
+          emailResp = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -99,6 +103,7 @@ serve(async (req) => {
               `,
             }),
           });
+          } catch (err) { console.error(`Relance non envoyée pour ${doc.docNumber} (réseau)`, err); continue; } // les relances déjà parties restent enregistrées
 
           if (emailResp.ok) {
             doc.lastReminderSentAt = Date.now();
@@ -116,6 +121,7 @@ serve(async (req) => {
           const result = await updateKvValue<any[]>(dbAdmin, row.organization_id, "documents", (list) => list.map((d: any) => (sentAt.has(d.id) ? { ...d, lastReminderSentAt: sentAt.get(d.id), updatedAt: Date.now() } : d)));
           if (!result.ok) console.error(`Dates de relance non enregistrées pour ${row.organization_id} : ${result.reason}`);
         }
+        } catch (err) { console.error("Relances en échec pour", row.organization_id, err); }
       }
 
       if (rows.length < pageSize) break;

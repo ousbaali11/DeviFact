@@ -5,6 +5,8 @@
 // jointe à un devis (lien public) tant qu'elle a un fichier et une date
 // d'expiration non dépassée (le jour même compris).
 
+import { parisTodayIso } from "./dates.ts";
+
 const KIND_LABELS: Record<string, string> = {
   decennale: "Assurance décennale",
   rc_pro: "Responsabilité civile professionnelle",
@@ -25,7 +27,7 @@ export function attestationLabel(a: Attestation | null | undefined): string {
 
 export function validAttestations(profile: any, today = new Date()): Array<Attestation & { label: string }> {
   const list: Attestation[] = Array.isArray(profile?.attestations) ? profile.attestations : [];
-  const todayIso = today.toISOString().slice(0, 10);
+  const todayIso = parisTodayIso(today); // borne du jour en heure de Paris, comme le site
   return list
     .filter((a) => a && typeof a === "object" && !!a.path && /^\d{4}-\d{2}-\d{2}$/.test(String(a.expiresAt || "")) && String(a.expiresAt) >= todayIso)
     .map((a) => ({ ...a, label: attestationLabel(a) }))

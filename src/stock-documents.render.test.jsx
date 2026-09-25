@@ -35,10 +35,10 @@ const click = (el) => act(async () => { el.dispatchEvent(new MouseEvent("click",
 const rowOf = (container, ref) => [...container.querySelectorAll("button")].find((b) => b.textContent.includes(ref));
 
 describe("Documents de stock : détail des lignes", () => {
-  for (const version of ["classique", "avancee", "atelier"]) {
-    it(`version ${version} : produits et quantités visibles sans aucun clic`, async () => {
+  {
+    it("produits et quantités visibles sans aucun clic", async () => {
       const { container, unmount } = await mount(
-        <StockDocumentsView movements={movements} loading={false} products={products} warehouses={warehouses} account={{ organizationId: "" }} siteSettings={{ landingPageVersion: version }} darkMode={false} onRefresh={noop} onGoToEntry={noop} onGoToExit={noop} />,
+        <StockDocumentsView movements={movements} loading={false} products={products} warehouses={warehouses} account={{ organizationId: "" }} onRefresh={noop} onGoToEntry={noop} onGoToExit={noop} />,
       );
       const text = container.textContent;
       expect(text).toContain("ENT-2026-001");
@@ -57,7 +57,7 @@ describe("Documents de stock : détail des lignes", () => {
   }
   it("un clic sur l'en-tête replie le détail de ce document seulement, un second clic le rouvre", async () => {
     const { container, unmount } = await mount(
-      <StockDocumentsView movements={movements} loading={false} products={products} warehouses={warehouses} account={{ organizationId: "" }} siteSettings={{ landingPageVersion: "classique" }} darkMode={false} onRefresh={noop} onGoToEntry={noop} onGoToExit={noop} />,
+      <StockDocumentsView movements={movements} loading={false} products={products} warehouses={warehouses} account={{ organizationId: "" }} onRefresh={noop} onGoToEntry={noop} onGoToExit={noop} />,
     );
     await click(rowOf(container, "ENT-2026-001"));
     expect(container.textContent).not.toContain("Colle");

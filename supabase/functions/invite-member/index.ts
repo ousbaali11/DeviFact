@@ -45,7 +45,11 @@ serve(async (req) => {
     const cleanFullName = cleanText(fullName, 120);
     const cleanJobTitle = cleanText(jobTitle, 120);
     const cleanPhone = cleanText(phone, 40);
-    const cleanRole = ["owner", "editor", "viewer", "comptable"].includes(role) ? role : "editor";
+    const ROLES = ["owner", "editor", "viewer", "comptable"];
+    if (role !== undefined && role !== null && role !== "" && !ROLES.includes(role)) {
+      return new Response(JSON.stringify({ error: "Rôle invalide" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const cleanRole = ROLES.includes(role) ? role : "editor";
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return new Response(JSON.stringify({ error: "Email invalide" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -89,8 +93,15 @@ serve(async (req) => {
         // n'avait pas (ou plus) de ligne dans "profiles" — on va le
         // retrouver directement, et on répare le profil manquant au passage.
         if (inviteError.message?.toLowerCase().includes("already been registered")) {
-          const { data: userList, error: listError } = await dbAdmin.auth.admin.listUsers({ perPage: 1000 });
-          const found = listError ? null : userList?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+          // Page par page : au-delà de 1 000 comptes, la première page ne suffit plus.
+          let found: { id: string } | null = null;
+          for (let pageNo = 1; pageNo <= 50 && !found; pageNo++) {
+            const { data: userList, error: listError } = await dbAdmin.auth.admin.listUsers({ page: pageNo, perPage: 1000 });
+            if (listError) { console.error("Liste des comptes illisible :", listError.message); break; }
+            const users = userList?.users || [];
+            found = users.find((u) => u.email?.toLowerCase() === cleanEmail) || null;
+            if (users.length < 1000) break;
+          }
           if (!found) {
             console.error("Compte introuvable malgré 'already registered' :", cleanEmail);
             return new Response(JSON.stringify({ error: "Ce compte existe déjà mais n'a pas pu être retrouvé. Contacte le support." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });

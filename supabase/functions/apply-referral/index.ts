@@ -5,10 +5,11 @@
 // puis avertit le parrain par e-mail — sans jamais lui révéler l'adresse du
 // filleul. Pas de récompense automatique.
 //
-// Sécurité : comme auto-confirm-user, pas de session exigée (elle peut ne
-// pas être établie à cet instant), mais uniquement pour un compte créé il y
-// a moins de 10 minutes, sans parrain déjà enregistré, avec un code qui
-// existe et qui n'est pas le sien. Un code faux ne bloque jamais
+// Sécurité : le compte lui-même doit être connecté (le site appelle cette
+// fonction après la mise en place de l'espace, session établie) — personne
+// d'autre ne peut poser un parrain sur un compte ; uniquement pour un compte
+// créé il y a moins de 10 minutes, sans parrain déjà enregistré, avec un
+// code qui existe et qui n'est pas le sien. Un code faux ne bloque jamais
 // l'inscription : le site l'affiche simplement.
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
@@ -45,6 +46,9 @@ serve(async (req) => {
     if (typeof userId !== "string" || !userId || !/^[A-Z0-9]{6,12}$/.test(cleanCode)) {
       return json({ error: "Code de parrainage invalide." }, 400);
     }
+    const authClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } } });
+    const { data: { user: caller } } = await authClient.auth.getUser();
+    if (!caller || caller.id !== userId) return json({ error: "Session non établie : le code de parrainage n'a pas pu être appliqué." }, 401);
 
     // Compte tout neuf seulement.
     const { data: targetUser, error: getUserError } = await dbAdmin.auth.admin.getUserById(userId);
@@ -59,15 +63,18 @@ serve(async (req) => {
     if (!profile) return json({ error: "Compte introuvable." }, 404);
     if (profile.referred_by) return json({ error: "Un parrain est déjà enregistré pour ce compte." }, 409);
 
-    const { data: sponsor } = await dbAdmin.from("profiles").select("id, email, first_name, company_name").eq("referral_code", cleanCode).maybeSingle();
+    const { data: sponsor, error: sponsorError } = await dbAdmin.from("profiles").select("id, email, first_name, company_name").eq("referral_code", cleanCode).maybeSingle();
+    if (sponsorError) { console.error("Lecture du parrain impossible :", sponsorError.message); return json({ error: "Parrainage impossible pour le moment." }, 500); }
     if (!sponsor) return json({ error: "Code de parrainage inconnu : ton compte est créé sans parrain." }, 400);
     if (sponsor.id === userId) return json({ error: "Tu ne peux pas utiliser ton propre code de parrainage." }, 400);
 
-    const { error: updateError } = await dbAdmin.from("profiles").update({ referred_by: sponsor.id, referred_at: new Date().toISOString() }).eq("id", userId).is("referred_by", null);
+    const { data: updated, error: updateError } = await dbAdmin.from("profiles").update({ referred_by: sponsor.id, referred_at: new Date().toISOString() }).eq("id", userId).is("referred_by", null).select("id");
     if (updateError) {
       console.error("Parrainage non enregistré :", updateError.message);
       return json({ error: "Parrainage impossible pour le moment." }, 500);
     }
+    // Aucune ligne modifiée : un parrain a été posé entre-temps (double envoi) — pas d'e-mail.
+    if (!updated || updated.length === 0) return json({ error: "Un parrain est déjà enregistré pour ce compte." }, 409);
 
     // Le parrain est prévenu par e-mail — jamais l'adresse du filleul.
     if (RESEND_API_KEY && sponsor.email) {

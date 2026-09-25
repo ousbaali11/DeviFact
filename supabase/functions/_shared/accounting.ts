@@ -7,6 +7,7 @@
 // Utilisé par send-accounting-exports (envoi programmé à l'expert-comptable).
 
 import { computeDocTotals, computeSituationTotals } from "./totals.ts";
+import { parisDateParts } from "./dates.ts";
 
 const num = (v: unknown) => (Number(v) || 0);
 const r2 = (n: unknown) => Math.round((Number(n) || 0) * 100) / 100;
@@ -168,9 +169,10 @@ export const ENTRIES_HEADER = ["Date", "Journal", "Pièce", "Libellé", "Compte"
 export function accountingLinesOf(d: any): Array<{ productId?: string; totalHT: number; tva: number }> {
   if (d.type === "situation") {
     return (Array.isArray(d.items) ? d.items : []).filter((l: any) => l && l.type === "line").map((l: any) => {
-      const montantMarche = num(l.qty) * num(l.unitPrice);
-      const montantCumuleActuel = (montantMarche * num(l.avancementPct)) / 100;
-      return { productId: l.productId, totalHT: montantCumuleActuel - num(l.montantCumulePrecedent), tva: num(l.tva) };
+      // Arrondi à chaque étape, comme computeSituationLine côté site.
+      const montantMarche = r2(num(l.qty) * num(l.unitPrice));
+      const montantCumuleActuel = r2((montantMarche * num(l.avancementPct)) / 100);
+      return { productId: l.productId, totalHT: r2(montantCumuleActuel - r2(num(l.montantCumulePrecedent))), tva: num(l.tva) };
     });
   }
   return computeDocTotals(d).lines.map((l) => ({ productId: l.item?.productId, totalHT: l.totalHT, tva: l.rate }));
@@ -306,9 +308,11 @@ const MONTHS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juill
 const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 const lastDay = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate(); // m : 1-12
 
-// Période précédente (mois ou trimestre civil) par rapport à une date.
+// Période précédente (mois ou trimestre civil) par rapport à une date, en
+// heure de Paris (le 1er du mois entre 0 h et 2 h, l'UTC est encore au mois
+// précédent : la période d'avant serait envoyée et marquée à tort).
 export function previousPeriod(now: Date, frequency: ExportFrequency): ExportPeriod {
-  const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1; // 1-12
+  const { year: y, month: m } = parisDateParts(now); // m : 1-12
   if (frequency === "trimestriel") {
     const currentQuarter = Math.ceil(m / 3);
     const q = currentQuarter === 1 ? 4 : currentQuarter - 1;
@@ -323,7 +327,7 @@ export function previousPeriod(now: Date, frequency: ExportFrequency): ExportPer
 // Envoi dû : à partir du jour choisi du mois (3 par défaut), une seule fois
 // par période.
 export function exportDueToday(now: Date, frequency: ExportFrequency, lastSentPeriod: string | null | undefined, sendDay = 3): boolean {
-  if (now.getUTCDate() < sendDay) return false;
+  if (parisDateParts(now).day < sendDay) return false;
   return previousPeriod(now, frequency).id !== (lastSentPeriod || "");
 }
 export function documentsInPeriod(documents: any[], period: { from: string; to: string }): any[] {

@@ -44,13 +44,14 @@ export function paymentsTotalOf(doc: any): number {
 // Paiement reçu en ligne (Stripe) ajouté à la liste des paiements de la
 // facture ; idempotent (même session = même identifiant). Renvoie la
 // facture mise à jour : « payée » si le total est couvert.
-export function addOnlinePayment(doc: any, sessionId: string, amountCents: number, dateIso: string): any {
+export function addOnlinePayment(doc: any, sessionId: string, amountCents: number, dateIso: string, documents: any[] | null = null): any {
   const payments = Array.isArray(doc?.payments) ? doc.payments : [];
   const id = `pay_stripe_${sessionId}`;
   const amount = Math.round(Math.max(0, num(amountCents))) / 100;
   const next = payments.some((p: any) => p?.id === id) ? payments : [...payments, { id, date: dateIso.slice(0, 10), amount, method: "Carte bancaire (en ligne)", note: "" }];
   const updated = { ...doc, payments: next, updatedAt: Date.now() };
-  if (amountDueOf(updated) <= 0.005) { updated.status = "payée"; updated.paidAt = dateIso; updated.paidTotal = settledTotalOf(updated); }
+  // Avoirs rattachés déduits, et paidTotal net de ces avoirs (même règle que le site).
+  if (amountDueOf(updated, documents) <= 0.005) { updated.status = "payée"; updated.paidAt = dateIso; updated.paidTotal = round2(Math.max(0, settledTotalOf(updated) - creditNotesTotalFor(updated, documents))); }
   return updated;
 }
 // Total « à régler » mémorisé au passage en « payée » (paidTotal) — même
