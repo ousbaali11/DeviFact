@@ -38,6 +38,28 @@ export function pdpLocksContent(pdp) {
 export function pdpBlockedKeys(patch) {
   return Object.keys(patch || {}).filter((k) => !PDP_EDITABLE_KEYS.includes(k));
 }
+// Événements Super PDP (identifiants strictement croissants) : dernier
+// événement par facture, et plus grand identifiant lu.
+export function applyPdpEvents(events) {
+  const byInvoice = new Map();
+  let lastEventId = 0;
+  for (const e of [...(events || [])].sort((a, b) => Number(a.id) - Number(b.id))) {
+    const id = Number(e?.id), invoiceId = Number(e?.invoice_id);
+    if (!Number.isFinite(id) || !Number.isFinite(invoiceId) || !e?.status_code) continue;
+    lastEventId = Math.max(lastEventId, id);
+    const status = String(e.status_code);
+    byInvoice.set(invoiceId, { invoiceId, status, statusText: PDP_STATUS_LABELS[status] || String(e.status_text || status), lastEventId: id, lastEventAt: e.created_at ? String(e.created_at) : null });
+  }
+  return { updates: [...byInvoice.values()], lastEventId };
+}
+// Encaissement (fr:212) : une seule fois, pour une facture transmise (non en
+// échec) passée « payée » — jamais pour un acompte ni un paiement partiel.
+export function shouldSendPaidEvent(doc) {
+  if (!doc || doc.type !== "facture" || doc.status !== "payée") return false;
+  const pdp = doc.pdp;
+  if (!pdp || !pdp.invoiceId || pdp.paidEventAt) return false;
+  return !PDP_FINAL_FAILURES.includes(String(pdp.status || ""));
+}
 export function pdpEligibility(doc, ctx) {
   const no = (code, reason) => ({ ok: false, code, reason });
   if (!doc || doc.type !== "facture") return no("type", "Seules les factures sont transmises via Super PDP pour l'instant (ni acomptes, ni situations).");

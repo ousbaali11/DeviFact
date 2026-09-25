@@ -10,7 +10,7 @@ const USER = { id: "u1", email: "test@exemple.fr" };
 const ORG = "252f0e0f-437c-4c98-bdde-aa2d39672dd7";
 // Comportement simulé de la table site_settings : liste de réponses
 // successives ("fail" ou "ok"), avec un délai optionnel.
-const state = { responses: ["ok"], delayMs: 0, calls: 0, visibleServices: null };
+const state = { responses: ["ok"], gate: null, calls: 0, visibleServices: null }; // gate : promesse que le test libère lui-même (réponse « lente » sans dépendre du chronomètre)
 const kv = { documents: [], clients: [], "company-profile": { type: "entreprise", name: "Test SARL" } };
 const fixtures = {
   profiles: () => [{ id: USER.id, email: USER.email, first_name: "Thomas", last_name: "T", is_admin: false, company_name: "" }],
@@ -26,7 +26,7 @@ function builder(table) {
     if (table === "site_settings") {
       const mode = state.responses[Math.min(state.calls, state.responses.length - 1)];
       state.calls += 1;
-      if (state.delayMs) await new Promise((r) => setTimeout(r, state.delayMs));
+      if (state.gate) await state.gate;
       if (mode === "fail") return { data: null, error: { message: "réseau indisponible (test)" } };
       return { data: [{ id: 1, name: "Chantiflow", visible_services: state.visibleServices || null }], error: null };
     }
@@ -57,7 +57,7 @@ beforeAll(() => {
   window.matchMedia = window.matchMedia || (() => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
   if (!window.HTMLCanvasElement.prototype.getContext) window.HTMLCanvasElement.prototype.getContext = () => null;
 });
-beforeEach(() => { localStorage.clear(); state.calls = 0; state.delayMs = 0; state.responses = ["ok"]; state.visibleServices = null; localStorage.setItem("devifact_lastView", "dashboard"); });
+beforeEach(() => { localStorage.clear(); state.calls = 0; state.gate = null; state.responses = ["ok"]; state.visibleServices = null; localStorage.setItem("devifact_lastView", "dashboard"); });
 
 const isAppShown = (c) => !!c.querySelector('button[title="Menu"]');
 const isSpinnerOnly = (c) => !!c.querySelector(".animate-spin") && c.querySelectorAll("button").length === 0;
@@ -78,11 +78,13 @@ async function openApp() {
 
 describe("démarrage de l'application", () => {
   it("première visite, réponse lente : uniquement l'écran de chargement jusqu'à la réponse, puis l'application, et les réglages sont mémorisés", async () => {
-    state.delayMs = 400;
+    let release;
+    state.gate = new Promise((r) => { release = r; });
     const { container, unmount } = await openApp();
     expect(isSpinnerOnly(container)).toBe(true);
     await act(async () => { await new Promise((r) => setTimeout(r, 200)); });
-    expect(isSpinnerOnly(container)).toBe(true); // toujours rien d'autre que le chargement
+    expect(isSpinnerOnly(container)).toBe(true); // toujours rien d'autre que le chargement tant que le serveur n'a pas répondu
+    release();
     expect(await waitFor(() => isAppShown(container))).toBe(true);
     expect(JSON.parse(localStorage.getItem("devifact_site_settings")).name).toBe("Chantiflow"); // réglages mémorisés
     await unmount();

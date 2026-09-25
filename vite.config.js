@@ -7,7 +7,9 @@ import { defineConfig } from 'vite'
      // Tests (Vitest) : les rendus complets des éditeurs dépassent parfois les
      // 5 s par défaut sur une machine chargée ; même délai que les tests qui le
      // précisaient déjà un par un.
-     test: { testTimeout: 30000 },
+     // Tests Vitest : dossier src seulement (les tests Deno des fonctions, ex.
+     // generate-facturx/exemple/mise-en-page.test.ts, se lancent avec deno test).
+     test: { testTimeout: 30000, include: ["src/**/*.test.{js,jsx,ts,tsx}"] },
      // Production : plus aucun console.* dans le code livré (les journaux de
      // développement peuvent contenir des données personnelles ou des jetons).
      esbuild: mode === "production" ? { drop: ["console", "debugger"] } : {},

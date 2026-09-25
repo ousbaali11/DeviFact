@@ -5,7 +5,7 @@ import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
 import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument, buildPurchaseEntries, factureRecueTotals, csvCell } from "./accounting.js";
-import { pdpEligibility, pdpLocksContent, pdpStatusLabel, pdpBlockedKeys } from "./pdp-rules.js";
+import { pdpEligibility, pdpLocksContent, pdpStatusLabel, pdpBlockedKeys, shouldSendPaidEvent } from "./pdp-rules.js";
 import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
@@ -4647,6 +4647,9 @@ function DeviFactAppInner() {
         }
       }
       let nextList = documents.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d));
+      // Facture transmise via Super PDP qui passe « payée » (à la main, par la
+      // banque ou en ligne) : encaissement signalé après l'enregistrement.
+      const paidNow = original && patch.status === "payée" && original.status !== "payée" && shouldSendPaidEvent(nextList.find((d) => d.id === id));
       // Avoir modifié (montant, statut, rattachement) : la facture d'origine
       // suit — retour en « envoyée » si un reste réapparaît, « payée » si
       // l'avoir la solde. L'éditeur de l'avoir l'annonce.
@@ -4656,7 +4659,7 @@ function DeviFactAppInner() {
         nextList = r.list;
         if (r.notices.length) setPaymentRevertNotice({ ...r.notices[0], docId: id });
       }
-      persist(nextList);
+      persist(nextList).then((ok) => { if (ok && paidNow) notifyPdpPaid(id); });
       return;
     }
     // Sinon, c'est le document "en attente" (voir openNew) — tant
@@ -4716,6 +4719,35 @@ function DeviFactAppInner() {
     }
     if (data.pdp) applyServerDocPatch(docId, { pdp: data.pdp, updatedAt: Date.now() });
     return data;
+  }
+  // Appel de la fonction superpdp-sync-events (suivi des factures transmises).
+  async function callPdpSync(action, extra = {}) {
+    const { data: { session } } = await db.auth.getSession();
+    const { data, error } = await db.functions.invoke("superpdp-sync-events", {
+      body: { organizationId: account?.organizationId, action, ...extra },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    });
+    if (error || !data || data.error) {
+      let message = data?.error;
+      if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
+      throw new Error(message || error?.message || "Suivi Super PDP indisponible pour l'instant.");
+    }
+    return data;
+  }
+  // « Actualiser » : relit les événements Super PDP et reprend les statuts
+  // (le serveur a déjà écrit les documents).
+  async function refreshPdpStatus() {
+    const res = await callPdpSync("sync");
+    for (const u of res.updated || []) applyServerDocPatch(u.documentId, { pdp: { ...(documentsRef.current.find((d) => d.id === u.documentId)?.pdp || {}), ...u.pdp }, updatedAt: Date.now() });
+    return res;
+  }
+  // Facture transmise passée « payée » : événement d'encaissement (fr:212),
+  // une seule fois ; en cas d'échec, la tâche quotidienne réessaie.
+  async function notifyPdpPaid(docId) {
+    try {
+      const res = await callPdpSync("paid", { documentId: docId });
+      if (res?.pdp) applyServerDocPatch(docId, { pdp: { ...(documentsRef.current.find((d) => d.id === docId)?.pdp || {}), ...res.pdp } });
+    } catch (err) { console.error("Encaissement non transmis à Super PDP (réessai automatique)", err); }
   }
   // Liste kv (planning, tâches) relue puis réécrite avec une transformation ;
   // absente : rien à faire.
@@ -5264,6 +5296,7 @@ function DeviFactAppInner() {
         acompteSuggestion={acompteSuggestionFor(activeDoc, documents)}
         pdpStatus={pdpStatus}
         onSendPdp={sendInvoiceToPdp}
+        onRefreshPdp={refreshPdpStatus}
       />
     );
   }
@@ -17333,7 +17366,7 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false, creditTotal = 
   );
 }
 
-function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, creditNotes = [], pdpStatus = null, onSendPdp = null, acompteSuggestion = null }) {
+function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, creditNotes = [], pdpStatus = null, onSendPdp = null, onRefreshPdp = null, acompteSuggestion = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const [clientQuery, setClientQuery] = useState("");
@@ -17988,6 +18021,19 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   const pdpLocked = pdpLocksContent(localDoc.pdp);
   const [pdpSending, setPdpSending] = useState(false);
   const [pdpLockNotice, setPdpLockNotice] = useState(false);
+  const [pdpRefreshing, setPdpRefreshing] = useState(false);
+  async function refreshPdp() {
+    if (pdpRefreshing || !onRefreshPdp) return;
+    setPdpRefreshing(true);
+    try {
+      const res = await onRefreshPdp();
+      const mine = (res?.updated || []).find((u) => u.documentId === localDoc.id);
+      if (mine?.pdp) setLocalDoc((prev) => ({ ...prev, pdp: { ...(prev.pdp || {}), ...mine.pdp } }));
+    } catch (err) {
+      console.error("Actualisation Super PDP impossible", err);
+      alert(err?.message || "Actualisation impossible pour l'instant.");
+    } finally { setPdpRefreshing(false); }
+  }
   async function sendToPdp() {
     if (pdpSending) return;
     const env = pdpStatus?.env === "production" ? "production" : "bac à sable";
@@ -18054,7 +18100,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           >
             {statuses.map((s) => <option key={s} value={s} style={{ color: colors.ink }}>{s}</option>)}
           </select>
-          {localDoc.pdp?.status && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} title={localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}</span>}
+          {localDoc.pdp?.status && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</span>}
+          {localDoc.pdp?.invoiceId && onRefreshPdp && <button onClick={refreshPdp} disabled={pdpRefreshing} className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white" style={{ border: "1px solid rgba(255,255,255,0.35)", opacity: pdpRefreshing ? 0.6 : 1 }} title="Relire les événements Super PDP" data-testid="pdp-refresh">{pdpRefreshing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Actualiser</button>}
           {saving ? (
             <span className="flex items-center gap-1 text-xs text-white"><Loader2 size={12} className="animate-spin" /> Enregistrement</span>
           ) : (

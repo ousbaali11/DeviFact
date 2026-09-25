@@ -158,3 +158,23 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
   par les membres, écriture par les fonctions serveur.
 - Étape 3 à venir : lecture des événements (`GET /invoice_events`), statuts
   officiels, événement `fr:212` quand la facture passe « payée ».
+
+## 8. Réalisé — étape 3 (26/09/2026) : suivi des statuts et encaissement
+
+- Fonction `superpdp-sync-events` : tâche planifiée quotidienne
+  (`superpdp-sync-events-quotidien`, 07:00 UTC, script
+  `2026-09-26_super-pdp-etape3.sql`) et action `sync` pour tout membre actif
+  (bouton « Actualiser » de l'éditeur) : lecture de
+  `GET /invoice_events?starting_after_id=<pdp_connections.last_event_id>`
+  page par page, dernier événement par facture (`applyPdpEvents`, règles
+  partagées), mise à jour de `pdp_invoices` et du champ `pdp` des documents
+  en une écriture par organisation ; une organisation en erreur n'arrête pas
+  les autres. Statut affiché = dernier événement reçu.
+- Encaissement : quand une facture transmise passe « payée » dans Chantiflow
+  (à la main, par la banque ou en ligne), le site appelle l'action `paid`
+  (propriétaire, éditeur) → `POST /invoice_events { invoice_id, status_code:
+  "fr:212" }`, noté dans `pdp.paidEventAt` et `pdp_invoices.paid_event_at`
+  (`shouldSendPaidEvent` : une seule fois, jamais pour un acompte ni un
+  paiement partiel). En cas d'échec, `pdp.paidEventError` et la tâche
+  quotidienne réessaie.
+- Bac à sable seulement tant que `SUPERPDP_ALLOW_PRODUCTION` ≠ `true`.

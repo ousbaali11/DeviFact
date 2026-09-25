@@ -51,6 +51,31 @@ export function pdpLocksContent(pdp: PdpState): boolean {
 export function pdpBlockedKeys(patch: Record<string, unknown> | null | undefined): string[] {
   return Object.keys(patch || {}).filter((k) => !PDP_EDITABLE_KEYS.includes(k));
 }
+// Événements Super PDP (identifiants strictement croissants) : dernier
+// événement par facture. Renvoie les mises à jour par identifiant de facture
+// Super PDP et le plus grand identifiant d'événement lu.
+export type PdpEvent = { id: number; invoice_id: number; status_code: string; status_text?: string | null; created_at?: string | null };
+export type PdpEventUpdate = { invoiceId: number; status: string; statusText: string; lastEventId: number; lastEventAt: string | null };
+export function applyPdpEvents(events: PdpEvent[]): { updates: PdpEventUpdate[]; lastEventId: number } {
+  const byInvoice = new Map<number, PdpEventUpdate>();
+  let lastEventId = 0;
+  for (const e of [...(events || [])].sort((a, b) => Number(a.id) - Number(b.id))) {
+    const id = Number(e?.id), invoiceId = Number(e?.invoice_id);
+    if (!Number.isFinite(id) || !Number.isFinite(invoiceId) || !e?.status_code) continue;
+    lastEventId = Math.max(lastEventId, id);
+    const status = String(e.status_code);
+    byInvoice.set(invoiceId, { invoiceId, status, statusText: PDP_STATUS_LABELS[status] || String(e.status_text || status), lastEventId: id, lastEventAt: e.created_at ? String(e.created_at) : null });
+  }
+  return { updates: [...byInvoice.values()], lastEventId };
+}
+// Encaissement (fr:212) : une seule fois, pour une facture transmise (non en
+// échec) passée « payée » — jamais pour un acompte ni un paiement partiel.
+export function shouldSendPaidEvent(doc: any): boolean {
+  if (!doc || doc.type !== "facture" || doc.status !== "payée") return false;
+  const pdp = doc.pdp;
+  if (!pdp || !pdp.invoiceId || pdp.paidEventAt) return false;
+  return !PDP_FINAL_FAILURES.includes(String(pdp.status || ""));
+}
 export function pdpEligibility(doc: any, ctx: PdpContext): PdpEligibility {
   const no = (code: string, reason: string): PdpEligibility => ({ ok: false, code, reason });
   if (!doc || doc.type !== "facture") return no("type", "Seules les factures sont transmises via Super PDP pour l'instant (ni acomptes, ni situations).");
