@@ -1528,7 +1528,7 @@ function newPvReceptionDocument(documents) {
 function computePvGaranties(doc) {
   if (!doc.dateReceptionEffective) return null;
   if (doc.typeReception === "refusee") return null; // réception refusée : aucune garantie ne court
-  const base = new Date(doc.dateReceptionEffective);
+  const base = localDateOf(doc.dateReceptionEffective);
   if (isNaN(base.getTime())) return null;
   const addTime = (months) => { const d = new Date(base); d.setMonth(d.getMonth() + months); return d; };
   return {
@@ -1537,6 +1537,56 @@ function computePvGaranties(doc) {
     decennale: addTime(120),
   };
 }
+// Suivi des garanties (priorité 4 de la feuille de route) : un PV
+// enregistré (« Terminé »), réception non refusée, fait courir les trois
+// garanties légales ; chacune est « en cours », « expire bientôt » (30 jours
+// ou moins, alerte) ou « expirée ». Le chantier du PV (champ « Chantier »)
+// les rattache à la fiche chantier.
+const WARRANTY_KINDS = [
+  { key: "parfaitAchevement", label: "Garantie de parfait achèvement", short: "Parfait achèvement (1 an)" },
+  { key: "biennale", label: "Garantie biennale", short: "Biennale (2 ans)" },
+  { key: "decennale", label: "Garantie décennale", short: "Décennale (10 ans)" },
+];
+const WARRANTY_ALERT_DAYS = 30;
+function pvWarrantiesOf(doc, today = new Date()) {
+  if (!doc || doc.type !== "pv_reception" || doc.workStage !== "termine") return null;
+  const g = computePvGaranties(doc);
+  if (!g) return null;
+  const day0 = new Date(today); day0.setHours(0, 0, 0, 0);
+  const items = WARRANTY_KINDS.map((k) => {
+    const end = new Date(g[k.key]); end.setHours(0, 0, 0, 0);
+    const daysLeft = Math.round((end - day0) / 86400000);
+    const state = daysLeft < 0 ? "expiree" : daysLeft <= WARRANTY_ALERT_DAYS ? "expire_bientot" : "en_cours";
+    return { ...k, endIso: toIsoDate(end), daysLeft, state };
+  });
+  return { docId: doc.id, docNumber: doc.docNumber || "", chantier: String(doc.chantier || "").trim(), dateReception: doc.dateReceptionEffective, items };
+}
+// Garanties d'un chantier (PV rattachés), réception la plus ancienne d'abord.
+function chantierWarranties(documents, chantierName, today = new Date()) {
+  const key = String(chantierName || "").trim().toLowerCase();
+  if (!key) return [];
+  return (documents || [])
+    .filter((d) => d?.type === "pv_reception" && String(d.chantier || "").trim().toLowerCase() === key)
+    .map((d) => pvWarrantiesOf(d, today))
+    .filter(Boolean)
+    .sort((a, b) => String(a.dateReception || "").localeCompare(String(b.dateReception || "")));
+}
+// Alertes du tableau de bord : garanties qui expirent dans les 30 jours (ou
+// aujourd'hui), les plus proches d'abord — tous forfaits (information
+// légale, pas une relance commerciale). Un PV sans chantier alerte aussi.
+function warrantyAlerts(documents, today = new Date()) {
+  const out = [];
+  for (const d of documents || []) {
+    if (d?.type !== "pv_reception") continue;
+    const w = pvWarrantiesOf(d, today);
+    if (!w) continue;
+    for (const it of w.items) {
+      if (it.state === "expire_bientot") out.push({ chantier: w.chantier, docId: w.docId, docNumber: w.docNumber, key: it.key, label: it.label, daysLeft: it.daysLeft, endIso: it.endIso });
+    }
+  }
+  return out.sort((a, b) => a.daysLeft - b.daysLeft || a.chantier.localeCompare(b.chantier) || a.docNumber.localeCompare(b.docNumber));
+}
+const warrantyStateLabel = (it) => (it.state === "expiree" ? `Expirée le ${fr(it.endIso)}` : it.daysLeft === 0 ? "Expire aujourd'hui" : it.state === "expire_bientot" ? `Expire dans ${it.daysLeft} j` : "En cours");
 // ================= fin PV de réception =================
 
 // ===================== Rapport d'intervention =====================
@@ -4674,6 +4724,7 @@ function DeviFactAppInner() {
           rows.push(["PV DE RÉCEPTION", doc.docNumber]);
           rows.push(["Date de réception", doc.dateReceptionEffective ? fr(doc.dateReceptionEffective) : ""]);
           rows.push(["Marché N°", doc.marcheNumero || ""]);
+          if (doc.chantier) rows.push(["Chantier", doc.chantier]);
           if (doc.lieuChantier) rows.push(["Lieu du chantier", doc.lieuChantier]);
           rows.push(["Client", doc.client?.name || ""]);
           rows.push(["Type de réception", (PV_TYPES[doc.typeReception] || {}).label || ""]);
@@ -5060,6 +5111,7 @@ function DeviFactAppInner() {
       <PvReceptionEditor
         doc={activeDoc}
         clients={clients}
+        chantierNames={[...new Set(documents.map((d) => String(d.chantier || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))}
         saving={saving}
         account={account}
         plans={plans}
@@ -5321,6 +5373,7 @@ function DeviFactAppInner() {
         onCreate={openNewService}
         onOpenCreate={() => setAtelierCreateOpen(true)}
         onOpenDoc={openDoc}
+        onOpenChantier={(name) => { setAtelierChantier(name); setView("atelier-chantier"); }}
         onGoToDocuments={(preset) => { setAtelierDocsPreset(preset || null); setView("atelier-documents"); }}
         onGoToPricing={goPricing}
         autoFactureNotice={autoFactureNotice}
@@ -8130,6 +8183,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
         {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
       </div>
       {doc.objet && <div style={{ marginTop: "10px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>{doc.objet}</div>}
+      {(doc.chantier || "").trim() && <div style={{ marginTop: "4px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>Chantier : {doc.chantier.trim()}</div>}
       {(doc.lieuChantier || "").trim() && <div style={{ marginTop: "4px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>Lieu du chantier : {doc.lieuChantier.trim()}</div>}
 
       <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
@@ -8220,7 +8274,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
   );
 });
 
-function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [] }) {
+function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [], chantierNames = [] }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -8357,6 +8411,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
     rows.push(["Date de réception", localDoc.dateReceptionEffective ? fr(localDoc.dateReceptionEffective) : ""]);
     rows.push(["Marché N°", localDoc.marcheNumero || ""]);
     rows.push(["Objet", localDoc.objet || ""]);
+    if (localDoc.chantier) rows.push(["Chantier", localDoc.chantier]);
     if (localDoc.lieuChantier) rows.push(["Lieu du chantier", localDoc.lieuChantier]);
     if (localDoc.dateDebutTravaux) rows.push(["Début des travaux", fr(localDoc.dateDebutTravaux)]);
     rows.push(["Entreprise", localDoc.company?.name || ""]);
@@ -8425,6 +8480,12 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Début des travaux (optionnel)</label>
               <input type="date" className="df-input df-mono w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={localDoc.dateDebutTravaux || ""} onChange={(e) => patch({ dateDebutTravaux: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Chantier (optionnel)</label>
+              <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} placeholder="Ex : Rénovation cuisine Dupont" list={`df-chantiers-${localDoc.id}`} value={localDoc.chantier || ""} onChange={(e) => patch({ chantier: e.target.value })} aria-label="Chantier" />
+              <datalist id={`df-chantiers-${localDoc.id}`}>{chantierNames.map((n) => <option key={n} value={n} />)}</datalist>
+              <p className="mt-1 text-xs" style={{ color: colors.inkSoft }}>Rattache le PV et ses garanties légales à la fiche chantier.</p>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Lieu du chantier (optionnel)</label>
@@ -10859,7 +10920,7 @@ function atelierDocDate(d) {
 // Accueil Atelier : ce qu'il y a à faire, créer, reprendre, puis le
 // chiffre d'affaires. Chaque carte « À faire » ouvre la page Documents
 // déjà filtrée.
-function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, reminders, reminderMailto, fiscalStartMonth = 1, onCreate, onOpenCreate, onOpenDoc, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
+function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLimit, freeLimitReached, offlineMode, visibleServices, reminders, reminderMailto, fiscalStartMonth = 1, onCreate, onOpenCreate, onOpenDoc, onOpenChantier = null, onGoToDocuments, onGoToPricing, autoFactureNotice, onOpenAutoFacture, onDismissAutoFacture, reviewNotice, onSendReview, onDismissReview }) {
   const tone = atelierTone(darkMode);
   const firstName = account?.firstName || "";
   const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -10867,6 +10928,9 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
   const recent = [...documents].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 5);
   const card = { background: tone.surface, border: `1px solid ${tone.line}` };
   const hasPro = hasAccess(account, "pro");
+  // Garanties légales qui expirent dans les 30 jours : information légale,
+  // affichée quel que soit le forfait.
+  const garantieAlerts = useMemo(() => warrantyAlerts(documents), [documents]);
 
   const todo = useMemo(() => {
     const devisAttente = documents.filter((d) => d.type === "devis" && ["envoyé", "vu"].includes(d.status));
@@ -11001,6 +11065,21 @@ function AtelierHome({ account, documents, darkMode, isLocked, isViewer, freeLim
 
       <section className="mb-8">
         <h2 className="df-display mb-3 text-base font-semibold">Relances à faire</h2>
+        {garantieAlerts.length > 0 && (
+          <div className="mb-3 overflow-hidden rounded-xl" style={card} data-testid="warranty-alerts">
+            {garantieAlerts.slice(0, 6).map((a, i) => (
+              <button key={`${a.docId}-${a.key}`} onClick={() => (a.chantier && onOpenChantier ? onOpenChantier(a.chantier) : onOpenDoc(a.docId))} className="df-at-tap flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left" style={{ borderTop: i ? `1px solid ${tone.line}` : "none" }}>
+                <Shield size={16} className="shrink-0" style={{ color: tone.warning }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15px] font-semibold">{a.label} · {a.chantier || `PV ${a.docNumber} (chantier non renseigné)`}</span>
+                  <span className="block text-sm" style={{ color: tone.warning }}>{a.daysLeft === 0 ? "Expire aujourd'hui" : `Expire dans ${a.daysLeft} j`} ({fr(a.endIso)})</span>
+                </span>
+                <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+              </button>
+            ))}
+            {garantieAlerts.length > 6 && <p className="px-4 py-2 text-xs" style={{ color: tone.inkSoft }}>+{garantieAlerts.length - 6} autre(s) garantie(s)</p>}
+          </div>
+        )}
         {!hasPro ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3" style={{ ...card, borderStyle: "dashed" }}>
             <span className="flex items-center gap-2 text-sm" style={{ color: tone.inkSoft }}><Lock size={15} /> Les relances automatiques (devis qui expirent, factures en retard) sont réservées aux forfaits Pro et Entreprise.</span>
@@ -11334,6 +11413,12 @@ function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLo
   const [asking, setAsking] = useState(false);
   const { slots } = useAtelierPlanning(account?.organizationId);
   const chantiers = useMemo(() => atelierChantierStats(documents, slots), [documents, slots]);
+  // Garantie qui expire dans les 30 jours, par chantier (la plus proche).
+  const warrantyByChantier = useMemo(() => {
+    const map = new Map();
+    for (const a of warrantyAlerts(documents)) { const k = a.chantier.toLowerCase(); if (k && !map.has(k)) map.set(k, a); }
+    return map;
+  }, [documents]);
   const card = { background: tone.surface, border: `1px solid ${tone.line}` };
   const canEdit = !isLocked && !isViewer;
   const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
@@ -11395,6 +11480,7 @@ function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLo
                     <span><span className="block" style={{ color: tone.inkSoft }}>Écart</span><span className="df-mono font-semibold" style={{ color: c.ecart >= 0 ? tone.success : tone.danger }}>{c.ecart >= 0 ? "+" : ""}{eur(c.ecart)}</span></span>
                   </span>
                   {c.nextSlot && <span className="flex items-center gap-1.5 text-xs" style={{ color: tone.accent }}><Calendar size={13} /> {fr(c.nextSlot.start)} : {c.nextSlot.title}{c.nextSlot.memberLabel ? ` (${c.nextSlot.memberLabel})` : ""}</span>}
+                  {warrantyByChantier.has(c.nom.toLowerCase()) && (() => { const a = warrantyByChantier.get(c.nom.toLowerCase()); return <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: tone.warning }} data-testid="chantier-warranty-badge"><Shield size={13} /> {a.label} : {a.daysLeft === 0 ? "expire aujourd'hui" : `expire dans ${a.daysLeft} j`}</span>; })()}
                 </button>
               ))}
             </div>
@@ -11430,6 +11516,8 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
   }, [pathsKey, tab]);
 
   const todayIso = toIsoDate(new Date());
+  // Garanties légales des PV de réception enregistrés sur ce chantier.
+  const warranties = useMemo(() => chantierWarranties(documents, name), [documents, name]);
   const upcoming = stats.slots.filter((s) => s.end >= todayIso);
   const past = stats.slots.filter((s) => s.end < todayIso).reverse();
   function newSlot() {
@@ -11483,11 +11571,38 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
       </div>
 
       <div className="mb-4 flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
-        {[["documents", `Documents (${stats.docs.length})`], ["planning", `Planning (${stats.slots.length})`], ["photos", `Photos (${allPhotos.length})`]].map(([id, label]) => (
+        {[["documents", `Documents (${stats.docs.length})`], ["planning", `Planning (${stats.slots.length})`], ["photos", `Photos (${allPhotos.length})`], ["garanties", `Garanties (${warranties.length})`]].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)} className="df-at-tap shrink-0 rounded-full px-4 py-2 text-sm font-medium" style={chip(tab === id)}>{label}</button>
         ))}
       </div>
 
+      {tab === "garanties" && (
+        warranties.length === 0 ? (
+          <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }} data-testid="warranties-empty">
+            <p className="text-[15px] font-semibold">Aucune garantie en cours sur ce chantier</p>
+            <p className="mt-1 text-sm" style={{ color: tone.inkSoft }}>Les garanties légales (parfait achèvement 1 an, biennale 2 ans, décennale 10 ans) démarrent à la date de réception d'un PV de réception enregistré et rattaché à ce chantier (champ « Chantier » du PV). Une réception refusée n'en fait courir aucune.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3" data-testid="warranties">
+            {warranties.map((w) => (
+              <div key={w.docId} className="overflow-hidden rounded-xl" style={card}>
+                <button onClick={() => onOpenDoc(w.docId)} className="df-at-tap flex w-full items-center gap-2 px-4 py-3 text-left">
+                  <Shield size={16} className="shrink-0" style={{ color: tone.accent }} />
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">PV de réception <span className="df-mono font-normal" style={{ color: tone.inkSoft }}>{w.docNumber}</span> · réception le {fr(w.dateReception)}</span>
+                  <ChevronRight size={16} className="shrink-0" style={{ color: tone.inkSoft }} />
+                </button>
+                {w.items.map((it) => (
+                  <div key={it.key} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm" style={{ borderTop: `1px solid ${tone.line}` }}>
+                    <span className="min-w-0 flex-1">{it.short}</span>
+                    <span className="df-mono shrink-0" style={{ color: tone.inkSoft }}>jusqu'au {fr(it.endIso)}</span>
+                    <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold" style={{ background: it.state === "expire_bientot" ? `${tone.warning}22` : it.state === "expiree" ? tone.line : `${tone.success}22`, color: it.state === "expire_bientot" ? tone.warning : it.state === "expiree" ? tone.inkSoft : tone.success }}>{warrantyStateLabel(it)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )
+      )}
       {tab === "documents" && (
         families.length === 0 ? (
           <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }}>
@@ -17619,5 +17734,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
