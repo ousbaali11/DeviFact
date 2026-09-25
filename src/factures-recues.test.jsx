@@ -138,7 +138,9 @@ describe("éditeur de facture reçue", () => {
     expect(clean(container.querySelector('[data-testid="facture-recue-totals"]').textContent)).toContain("Total TTC1 200,00 €");
     await act(async () => { setValue(container.querySelector('select[aria-label="Statut"]'), "payée"); });
     await flush();
-    const last = changes[changes.length - 1];
+    // Sous charge, le délai de 400 ms peut scinder les modifications en deux
+    // enregistrements : on les cumule.
+    const last = Object.assign({}, ...changes);
     expect(last.montantHT).toBe("1000");
     expect(last.status).toBe("payée");
     expect(last.paidAt).toBe(iso(new Date()));

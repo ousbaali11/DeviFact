@@ -3517,6 +3517,7 @@ function DeviFactAppInner() {
       companyName: profile.company_name || "",
       firstName: profile.first_name || "",
       lastName: profile.last_name || "",
+      referralCode: profile.referral_code || "", // parrainage (priorité 11)
       isAdmin: profile.is_admin,
       loggedIn: true,
       organizationId: membership?.organization_id || null,
@@ -3564,7 +3565,7 @@ function DeviFactAppInner() {
   const [allUsers, setAllUsers] = useState([]);
   const [allUsersError, setAllUsersError] = useState("");
   async function loadAllUsers() {
-    const { data, error } = await db.from("profiles").select("id, email, first_name, last_name, company_name, is_admin, created_at, confirmed_at, last_confirmation_sent_at").order("created_at", { ascending: false });
+    const { data, error } = await db.from("profiles").select("id, email, first_name, last_name, company_name, is_admin, created_at, confirmed_at, last_confirmation_sent_at, referred_by, referral_code").order("created_at", { ascending: false });
     if (error) {
       console.error("Erreur de chargement de la liste des utilisateurs", error);
       setAllUsersError(error.message || "Erreur inconnue");
@@ -3583,8 +3584,10 @@ function DeviFactAppInner() {
     (ownedOrgs || []).forEach((row) => { orgByUser[row.user_id] = row.organizations; });
 
     setAllUsersError("");
+    const emailById = new Map((data || []).map((p) => [p.id, p.email]));
     setAllUsers((data || []).map((u) => ({
       ...u,
+      referredByEmail: u.referred_by ? emailById.get(u.referred_by) || "" : "", // parrainage
       organizationId: orgByUser[u.id]?.id || null,
       plan: orgByUser[u.id]?.plan || "gratuit",
       paymentStatus: orgByUser[u.id]?.payment_status || "gratuit",
@@ -6611,8 +6614,14 @@ function RegularizationScreen({ account, plans, onLogout, onContact }) {
   );
 }
 
+// Code de parrainage porté par un lien (?parrain=CODE) : lettres et chiffres.
+function referralCodeFromUrl() {
+  try { return String(new URLSearchParams(window.location.search).get("parrain") || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12); } catch { return ""; }
+}
 function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onSignedIn = null, sessionError = null }) {
-  const [mode, setMode] = useState(initialMode);
+  const [mode, setMode] = useState(() => (referralCodeFromUrl() ? "signup" : initialMode));
+  // Parrainage (priorité 11) : code saisi, ou pré-rempli par le lien.
+  const [referralCode, setReferralCode] = useState(referralCodeFromUrl);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [companyName, setCompanyName] = useState("");
@@ -6734,6 +6743,19 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onS
             return;
           }
 
+          // Parrainage : appliqué une fois le compte en place, jamais
+          // bloquant — un code inconnu est simplement signalé.
+          if (referralCode.trim()) {
+            try {
+              const { data: refData, error: refError } = await db.functions.invoke("apply-referral", { body: { userId: data.user.id, code: referralCode.trim() } });
+              let refMessage = refData?.error;
+              if (!refMessage && refError?.context) { try { refMessage = (await new Response(refError.context.body).json())?.error; } catch { /* pas de corps lisible */ } }
+              if (refError || refMessage) alert(refMessage || "Code de parrainage non reconnu : ton compte est créé sans parrain.");
+            } catch (err) {
+              console.error("Parrainage non appliqué", err);
+            }
+          }
+
           // Le compte fonctionne tout de suite (confirmation par email
           // désactivée côté Supabase), mais on envoie quand même un
           // email de confirmation "maison" — 8 semaines pour cliquer,
@@ -6848,6 +6870,12 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onS
                   <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Nom</label>
                   <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={lastName} onChange={(e) => setLastName(e.target.value)} onKeyDown={onEnterKey} placeholder="Martin" />
                 </div>
+              </div>
+            )}
+            {mode === "signup" && (
+              <div>
+                <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Code de parrainage (optionnel)</label>
+                <input className="df-input df-mono w-full rounded-md px-3 py-2 text-sm uppercase" style={{ border: `1px solid ${colors.line}` }} value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12))} onKeyDown={onEnterKey} placeholder="ex : 7KQ2MHT4" aria-label="Code de parrainage" />
               </div>
             )}
             {mode === "signup" && (
@@ -13798,6 +13826,60 @@ function ProductForm({ product, stock, warehouses = [], warehousePrices = {}, ca
 const ROLE_LABELS = { owner: "Propriétaire", editor: "Éditeur", viewer: "Lecteur", comptable: "Expert-comptable", staff: "Sans accès" };
 const ROLE_COLORS = { owner: colors.brassDark, editor: colors.moss, viewer: colors.slate, comptable: colors.brick, staff: colors.inkSoft };
 
+// Parrainage (priorité 11) : code et lien à partager, liste des filleuls
+// (entreprise ou prénom, date — jamais l'e-mail), aucune récompense
+// automatique.
+function ReferralCard({ account }) {
+  const code = String(account?.referralCode || "").trim();
+  const link = code && typeof window !== "undefined" ? `${window.location.origin}/?parrain=${code}` : "";
+  const [referrals, setReferrals] = useState(null);
+  const [copied, setCopied] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => db.rpc("my_referrals"))
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) { console.error("Filleuls non chargés", error); setReferrals([]); return; }
+        setReferrals(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => { console.error("Filleuls non chargés", err); if (!cancelled) setReferrals([]); });
+    return () => { cancelled = true; };
+  }, [account?.id]);
+  async function copy(text, what) {
+    try { await navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(""), 2000); } catch { setCopied(""); }
+  }
+  return (
+    <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }} data-testid="referral-card">
+      <span className="df-display mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Parrainage</span>
+      <p className="mb-3 text-xs" style={{ color: colors.inkSoft }}>Partage ton code ou ton lien : quand quelqu'un s'inscrit avec, tu reçois un e-mail et la personne apparaît ci-dessous. Pas de récompense automatique pour l'instant.</p>
+      {code ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="df-mono rounded-lg px-3 py-2 text-base font-semibold tracking-widest" style={{ background: colors.paper, border: `1px solid ${colors.line}` }} data-testid="referral-code">{code}</span>
+          <button onClick={() => copy(code, "code")} className="rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.ink }}>{copied === "code" ? "Code copié" : "Copier le code"}</button>
+          <button onClick={() => copy(link, "lien")} className="rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.ink }}>{copied === "lien" ? "Lien copié" : "Copier le lien"}</button>
+          <span className="df-mono basis-full break-all text-xs" style={{ color: colors.inkSoft }} data-testid="referral-link">{link}</span>
+        </div>
+      ) : (
+        <p className="text-sm" style={{ color: colors.inkSoft }}>Ton code de parrainage n'est pas encore disponible (mise en place en cours). Reconnecte-toi un peu plus tard.</p>
+      )}
+      <div className="mt-4">
+        <span className="text-xs font-semibold" style={{ color: colors.slate }}>Filleuls{referrals ? ` (${referrals.length})` : ""}</span>
+        {referrals === null ? (
+          <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Chargement…</p>
+        ) : referrals.length === 0 ? (
+          <p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Aucun filleul pour l'instant.</p>
+        ) : (
+          <ul className="mt-1 space-y-1" data-testid="referral-list">
+            {referrals.map((r, i) => (
+              <li key={i} className="flex justify-between gap-3 text-sm"><span>{r.label || "Un nouvel artisan"}</span><span className="df-mono text-xs" style={{ color: colors.inkSoft }}>inscrit le {fr(String(r.created_at || "").slice(0, 10))}</span></li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
 function AccountView({ account }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -13833,6 +13915,8 @@ function AccountView({ account }) {
         <h1 className="df-display text-2xl font-semibold">Mon compte</h1>
         <p className="text-sm" style={{ color: colors.inkSoft }}>Tes informations personnelles, saisies à l'inscription.</p>
       </div>
+
+      <ReferralCard account={account} />
 
       <div className="mb-6 rounded-2xl p-5" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
         <span className="df-display mb-3 block text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>Informations personnelles</span>
@@ -15941,6 +16025,7 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                       </td>
                       <td className="px-4 py-2.5">
                         {u.is_admin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
+                        {u.referredByEmail && <div className="mt-1 text-xs" style={{ color: colors.inkSoft }} title="Parrainage">Parrainé par {u.referredByEmail}</div>}
                         {!u.confirmed_at && (
                           <button
                             onClick={() => onResendConfirmation(u.id)}
@@ -18611,5 +18696,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
