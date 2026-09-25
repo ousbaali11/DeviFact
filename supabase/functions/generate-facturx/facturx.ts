@@ -18,7 +18,7 @@
 
 import { PDFDocument, PDFName, PDFArray, PDFString, PDFHexString, AFRelationship, rgb, StandardFonts } from "https://esm.sh/pdf-lib@1.17.1";
 import * as fontkitModule from "https://esm.sh/@pdf-lib/fontkit@1.1.1";
-import { computeDocTotals } from "../_shared/totals.ts";
+import { computeDocTotals, isCountedLine } from "../_shared/totals.ts";
 // Le module expose l'objet fontkit en export par défaut à l'exécution,
 // mais ses types ne le déclarent pas — d'où ce petit détour.
 const fontkit = ((fontkitModule as unknown as { default?: unknown }).default ?? fontkitModule) as Parameters<PDFDocument["registerFontkit"]>[0];
@@ -236,13 +236,13 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
     const detailsSum = (Array.isArray(it.details) ? it.details : []).filter((d: any) => d?.included).reduce((s: number, d: any) => s + (Number(d.price) || 0), 0);
     return ((Number(it.qty) || 0) * (Number(it.unitPrice) || 0) + detailsSum) * (1 - (Number(it.discount) || 0) / 100);
   };
-  const brutHT = items.filter((it) => it && it.type === "line").reduce((s, it) => s + lineNetOf(it), 0);
+  const brutHT = items.filter(isCountedLine).reduce((s, it) => s + lineNetOf(it), 0);
   const discountValue = Math.max(0, Number(doc.globalDiscount) || 0);
   const globalRate = doc.globalDiscountMode === "amount" ? (brutHT > 0 ? Math.min(1, discountValue / brutHT) : 0) : Math.min(100, discountValue) / 100;
   const lines: FxLine[] = [];
   let lineIndex = 0;
   for (const it of items) {
-    if (!it || it.type !== "line") continue;
+    if (!isCountedLine(it)) continue; // options non retenues exclues, comme partout
     lineIndex++;
     const qty = Number(it.qty) || 0;
     const detailsSum = (Array.isArray(it.details) ? it.details : []).filter((d: any) => d?.included).reduce((s: number, d: any) => s + (Number(d.price) || 0), 0);

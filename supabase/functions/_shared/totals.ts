@@ -60,17 +60,20 @@ export function settledTotalOf(doc: any): number {
   if (doc?.type === "situation") { const s = computeSituationTotals(doc); return round2(s.netAPayer + s.acompteVerse); }
   return round2(computeDocTotals(doc).totalTTC);
 }
+// Devis à options — même règle que le site (isCountedLine dans App.jsx) :
+// une ligne « en option » n'est comptée que si elle a été retenue.
+export const isCountedLine = (it: any): boolean => !!it && it.type === "line" && (it.optional !== true || it.optionAccepted === true);
 export function globalDiscountRate(doc: any): number {
   const value = Math.max(0, num(doc?.globalDiscount));
   const items = Array.isArray(doc?.items) ? doc.items : [];
   if (doc?.globalDiscountMode === "amount") {
-    const brut = items.filter((i: any) => i && i.type === "line").reduce((s: number, l: any) => s + lineNetHT(l), 0);
+    const brut = items.filter(isCountedLine).reduce((s: number, l: any) => s + lineNetHT(l), 0);
     return brut > 0 ? Math.min(1, value / brut) : 0;
   }
   return Math.min(100, value) / 100;
 }
 export function computeDocTotals(doc: any): DocTotals {
-  const items = (Array.isArray(doc?.items) ? doc.items : []).filter((i: any) => i && i.type === "line");
+  const items = (Array.isArray(doc?.items) ? doc.items : []).filter(isCountedLine);
   const rate = globalDiscountRate(doc);
   const lines: DocTotals["lines"] = items.map((item: any) => {
     const baseHT = lineBaseHT(item);

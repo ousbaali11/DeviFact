@@ -8,6 +8,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { updateKvValue } from "../_shared/kv.ts";
+import { computeDocTotals, isCountedLine } from "../_shared/totals.ts";
 
 const dbAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -21,7 +22,13 @@ serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 
   try {
-    const { token, signatureName, signatureDrawing, secondSignatureName } = await req.json();
+    const { token, signatureName, signatureDrawing, secondSignatureName, acceptedOptionIds } = await req.json();
+    // Devis à options : identifiants des lignes en option retenues par le
+    // client (liste bornée de chaînes ; vérifiés contre le devis plus bas).
+    if (acceptedOptionIds !== undefined && (!Array.isArray(acceptedOptionIds) || acceptedOptionIds.length > 200 || acceptedOptionIds.some((id: unknown) => typeof id !== "string"))) {
+      return new Response(JSON.stringify({ error: "Options invalides." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const accepted = new Set<string>(Array.isArray(acceptedOptionIds) ? acceptedOptionIds : []);
     if (!token || (!signatureName?.trim() && !signatureDrawing)) {
       return new Response(JSON.stringify({ error: "Signature manquante." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -81,6 +88,12 @@ serve(async (req) => {
     if (docIndex === -1) {
       return new Response(JSON.stringify({ error: "Ce document n'existe plus." }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    const optionalIds = new Set<string>((documents[docIndex].items || []).filter((it: any) => it?.type === "line" && it.optional === true).map((it: any) => String(it.id)));
+    for (const id of accepted) {
+      if (!optionalIds.has(id)) {
+        return new Response(JSON.stringify({ error: "Option inconnue sur ce devis." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
 
     // La modification est rejouée sur la version fraîche de la liste
     // (écriture conditionnelle, voir _shared/kv.ts) : un artisan qui
@@ -90,10 +103,15 @@ serve(async (req) => {
       if (idx === -1) return null;
       const original = list[idx];
       if (original.type !== "devis" || ["signé", "refusé", "expiré"].includes(String(original.status || ""))) return null;
+      // Options : retenues ou non selon les cases cochées par le client ;
+      // le montant accepté est celui affiché au moment de la signature.
+      const items = (original.items || []).map((it: any) => (it?.type === "line" && it.optional === true ? { ...it, optionAccepted: accepted.has(String(it.id)) } : it));
+      const signedDoc = { ...original, items };
+      const acceptedTotalTTC = computeDocTotals(signedDoc).totalTTC;
       list[idx] = {
-        ...original,
+        ...signedDoc,
         status: "signé",
-        signature: { mode: signatureDrawing ? "dessin" : "texte", name: signerName, drawing: signatureDrawing || null, ...(secondName ? { secondName } : {}) },
+        signature: { mode: signatureDrawing ? "dessin" : "texte", name: signerName, drawing: signatureDrawing || null, ...(secondName ? { secondName } : {}), acceptedOptionIds: [...accepted], acceptedTotalTTC },
         updatedAt: Date.now(),
       };
       // Même règle qu'à l'intérieur du site : un devis qui vient de
@@ -113,6 +131,8 @@ serve(async (req) => {
           workStage: "brouillon",
           linkedDevisId: list[idx].id,
           sourceDevisNumber: list[idx].docNumber || "",
+          // Options non retenues écartées de la facture, marquage effacé.
+          items: (list[idx].items || []).filter((it: any) => it?.type !== "line" || isCountedLine(it)).map((it: any) => (it?.optional ? { ...it, optional: false, optionAccepted: undefined } : it)),
           // Même modèle que la conversion côté site : version courante des
           // champs, acompte demandé (notion de devis) remis à zéro, aucun
           // paiement ni signature hérités.

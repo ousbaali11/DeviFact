@@ -787,6 +787,13 @@ function detailsSum(details) {
 function lineBaseHT(l) {
   return (Number(l.qty) || 0) * (Number(l.unitPrice) || 0) + detailsSum(l.details);
 }
+// Devis à options (priorité 9) : une ligne « en option » (optional) n'est
+// comptée que si elle a été retenue (optionAccepted) — par le client sur le
+// lien de signature, ou par l'artisan dans l'éditeur. Même règle sur le
+// serveur (_shared/totals.ts), Factur-X et la comptabilité.
+const isCountedLine = (it) => !!it && it.type === "line" && (it.optional !== true || it.optionAccepted === true);
+const optionState = (it) => (it?.type !== "line" || it.optional !== true ? "" : it.optionAccepted === true ? "retenue" : "proposee");
+const proposedOptionsOf = (doc) => (doc?.items || []).filter((it) => optionState(it) === "proposee");
 function emptySection() {
   return { id: nextId("s"), type: "section", title: "", subtitle: "" };
 }
@@ -2383,7 +2390,7 @@ function newDocument(type, documents) {
 function globalDiscountRate(doc) {
   const value = Math.max(0, Number(doc?.globalDiscount) || 0);
   if (doc?.globalDiscountMode === "amount") {
-    const brut = (doc.items || []).filter((i) => i.type === "line").reduce((sum, l) => sum + lineBaseHT(l) * (1 - (Number(l.discount) || 0) / 100), 0);
+    const brut = (doc.items || []).filter(isCountedLine).reduce((sum, l) => sum + lineBaseHT(l) * (1 - (Number(l.discount) || 0) / 100), 0);
     return brut > 0 ? Math.min(1, value / brut) : 0;
   }
   return Math.min(100, value) / 100;
@@ -2476,7 +2483,7 @@ function paymentDateLabel(d) {
 }
 function computeTotals(doc) {
   const r2 = (n) => Math.round(n * 100) / 100;
-  const lineItems = (doc.items || []).filter((i) => i.type === "line");
+  const lineItems = (doc.items || []).filter(isCountedLine); // options non retenues exclues
   const globalRate = globalDiscountRate(doc);
   const globalDiscountPct = globalRate * 100;
   const computedLines = lineItems.map((l) => {
@@ -2941,10 +2948,14 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
           ) : (() => {
             const lineHT = lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - (totals.globalDiscountPct || 0) / 100);
             const lineTVA = (lineHT * (Number(it.tva) || 0)) / 100;
+            // Devis à options : option proposée (hors total), retenue ou, une
+            // fois le devis signé, non retenue (gardée pour mémoire).
+            const opt = doc.type === "devis" ? optionState(it) : "";
+            const optLabel = opt === "retenue" ? "Option retenue" : opt === "proposee" ? (doc.status === "signé" ? "Option non retenue" : "Option") : "";
             return (
-              <tr key={it.id} style={{ pageBreakInside: "avoid", borderBottom: `1px solid ${line}`, background: idx % 2 ? "transparent" : "rgba(27,42,51,0.02)" }}>
+              <tr key={it.id} style={{ pageBreakInside: "avoid", borderBottom: `1px solid ${line}`, background: idx % 2 ? "transparent" : "rgba(27,42,51,0.02)", color: opt === "proposee" ? inkSoft : undefined, fontStyle: opt === "proposee" ? "italic" : "normal" }}>
                 <td style={{ padding: "6px 6px", verticalAlign: "top" }}>
-                  <div>{doc.type === "bpu" && (it.productRef || "").trim() ? <><span style={{ ...mono, fontSize: "8.5pt", color: inkSoft }}>{it.productRef.trim()}</span> — </> : null}{it.designation || "—"}</div>
+                  <div>{doc.type === "bpu" && (it.productRef || "").trim() ? <><span style={{ ...mono, fontSize: "8.5pt", color: inkSoft }}>{it.productRef.trim()}</span> — </> : null}{it.designation || "—"}{optLabel && <span style={{ marginLeft: "6px", fontSize: "8pt", fontWeight: 600, fontStyle: "normal", color: opt === "retenue" ? brassDark : inkSoft }}>{optLabel}</span>}</div>
                   {(it.details || []).filter((d) => d.included && (d.text || d.price)).map((d) => (
                     <div key={d.id} style={{ fontSize: "8.5pt", color: inkSoft, marginLeft: `${8 + (d.level - 1) * 14}px`, display: "flex", justifyContent: "space-between", gap: "8px" }}>
                       <span>{d.marker || defaultMarker(d.level)} {renderMarkup(d.text)}</span>
@@ -3020,6 +3031,17 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
             <div style={{ display: "flex", justifyContent: "space-between", background: band, color: "white", padding: "9px 10px", fontWeight: 700, fontSize: "12.5pt", marginTop: "2px" }}>
               <span>{doc.type === "bpu" ? "Montant total estimatif" : "Total TTC"}</span><span style={mono}>{formatMoney(totalTTC, doc.currency)}</span>
             </div>
+            {doc.type === "devis" && (() => {
+              const proposed = proposedOptionsOf(doc).length;
+              const retained = (doc.items || []).filter((it) => optionState(it) === "retenue").length;
+              if (!proposed && !retained) return null;
+              return (
+                <div style={{ padding: "6px 10px", fontSize: "8.5pt", color: inkSoft }}>
+                  {proposed > 0 && <div>{doc.status === "signé" ? `Options non retenues, hors total : ${proposed}` : `Options proposées, non comprises dans le total : ${proposed}`}</div>}
+                  {retained > 0 && <div>Options retenues, comprises dans le total : {retained}</div>}
+                </div>
+              );
+            })()}
             {showAcompteDemande && (
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", fontWeight: 700, color: brassDark }}>
                 <span>Reste à payer</span><span style={mono}>{formatMoney(resteAPayer, doc.currency)}</span>
@@ -4542,6 +4564,7 @@ function DeviFactAppInner() {
           ...updatedOriginal,
           id: nextId("doc"),
           type: "facture",
+          items: (updatedOriginal.items || []).filter((it) => it?.type !== "line" || isCountedLine(it)).map((it) => (it?.optional ? { ...it, optional: false, optionAccepted: undefined } : it)),
           docNumber: nextNumber(documents, "facture"),
           issueDate: toIsoDate(new Date()),
           status: "brouillon",
@@ -4670,6 +4693,7 @@ function DeviFactAppInner() {
       ...original,
       id: nextId("doc"),
       type: "facture",
+      items: (original.items || []).filter((it) => it?.type !== "line" || isCountedLine(it)).map((it) => (it?.optional ? { ...it, optional: false, optionAccepted: undefined } : it)),
       docNumber: nextNumber(documents, "facture"),
       issueDate: toIsoDate(new Date()),
       status: "brouillon",
@@ -5601,6 +5625,7 @@ function PublicDocumentView({ token }) {
   const [secondSignatureName, setSecondSignatureName] = useState("");
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState(null);
+  const [acceptedOptions, setAcceptedOptions] = useState([]); // options retenues par le client (identifiants de lignes)
   const [signed, setSigned] = useState(false);
   const [payLoading, setPayLoading] = useState(false);
   const [payError, setPayError] = useState(null);
@@ -5623,7 +5648,14 @@ function PublicDocumentView({ token }) {
   const payable = isPayableDoc(state.document);
   const isSituationDoc = state.document?.type === "situation";
   const sit = isSituationDoc ? computeSituation(state.document) : null;
-  const totals = state.document && !isSituationDoc ? computeTotals(state.document) : null;
+  // Devis à options : le client coche les options qu'il retient (décochées
+  // d'office) ; le total se recalcule sur ses choix, jusqu'à la signature.
+  const optionLines = state.document?.type === "devis" ? (state.document.items || []).filter((it) => it?.type === "line" && it.optional === true) : [];
+  const alreadySigned = state.document?.status === "signé" || !!state.signedAt || signed;
+  const effectiveDocument = state.document && optionLines.length && !alreadySigned
+    ? { ...state.document, items: state.document.items.map((it) => (it?.type === "line" && it.optional === true ? { ...it, optionAccepted: acceptedOptions.includes(it.id) } : it)) }
+    : state.document;
+  const totals = state.document && !isSituationDoc ? computeTotals(effectiveDocument) : null;
   const creditTotal = Math.max(0, Number(state.creditTotal) || 0); // avoirs rattachés (serveur)
   const amountDue = Math.max(0, Math.round(((isSituationDoc ? sit.montantARegler : totals ? (payable ? totals.montantARegler : totals.totalTTC) : 0) - creditTotal) * 100) / 100);
   const totalPaid = isSituationDoc ? sit.totalPaid : totals ? totals.totalPaid : 0;
@@ -5723,12 +5755,15 @@ function PublicDocumentView({ token }) {
     setSignError(null);
     try {
       const body = { token, signatureName: signatureName.trim() };
+      if (optionLines.length) body.acceptedOptionIds = acceptedOptions; // options retenues par le client
       if (signMode === "dessin") body.signatureDrawing = drawing;
       else if (secondSigner) body.secondSignatureName = secondSignatureName.trim();
       const { data, error } = await db.functions.invoke("sign-public-document", { body });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       setSigned(true);
+      // Le devis affiché reflète les options retenues à la signature.
+      if (optionLines.length) setState((s) => ({ ...s, document: { ...s.document, status: "signé", items: (s.document.items || []).map((it) => (it?.type === "line" && it.optional === true ? { ...it, optionAccepted: acceptedOptions.includes(it.id) } : it)) } }));
     } catch (err) {
       setSignError(err.message || "Impossible d'enregistrer la signature pour l'instant.");
     } finally {
@@ -5794,12 +5829,26 @@ function PublicDocumentView({ token }) {
             </div>
 
             <div className="mb-4 space-y-1">
-              {summaryLines.map((it) => (
+              {summaryLines.filter((it) => it.optional !== true).map((it) => (
                 <div key={it.id} className="flex justify-between gap-3 text-sm">
                   <span>{it.designation || "—"}</span>
                   <span className="df-mono shrink-0" style={{ color: colors.inkSoft }}>{formatMoney(it.totalHT, state.document.currency)} HT</span>
                 </div>
               ))}
+              {optionLines.map((it) => {
+                const checked = alreadySigned ? it.optionAccepted === true : acceptedOptions.includes(it.id);
+                const ht = lineBaseHT(it) * (1 - (Number(it.discount) || 0) / 100) * (1 - ((totals?.globalDiscountPct || 0) / 100));
+                return (
+                  <label key={it.id} className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm" style={{ background: checked ? `${colors.moss}14` : "rgba(27,42,51,0.04)", cursor: alreadySigned ? "default" : "pointer" }} data-testid="public-option">
+                    <span className="flex items-center gap-2">
+                      <input type="checkbox" checked={checked} disabled={alreadySigned} onChange={(e) => setAcceptedOptions((prev) => (e.target.checked ? [...prev, it.id] : prev.filter((id) => id !== it.id)))} style={{ accentColor: colors.moss }} aria-label={`Option : ${it.designation || ""}`} />
+                      <span>{it.designation || "—"} <span className="text-xs" style={{ color: checked ? colors.moss : colors.inkSoft }}>{alreadySigned ? (checked ? "option retenue" : "option non retenue") : "option"}</span></span>
+                    </span>
+                    <span className="df-mono shrink-0" style={{ color: colors.inkSoft }}>{formatMoney(ht, state.document.currency)} HT</span>
+                  </label>
+                );
+              })}
+              {optionLines.length > 0 && !alreadySigned && <p className="text-xs" style={{ color: colors.inkSoft }}>Coche les options que tu retiens : le total se met à jour avant la signature.</p>}
               {totals && totals.globalDiscountAmount > 0 && (
                 <div className="flex justify-between gap-3 text-sm" style={{ color: colors.inkSoft }}>
                   <span>{globalDiscountLabel(state.document, totals.globalDiscountPct)}</span>
@@ -5885,7 +5934,7 @@ function PublicDocumentView({ token }) {
                 )}
                 {signError && <p className="mb-2 text-xs" style={{ color: colors.brick }}>{signError}</p>}
                 <button onClick={handleSign} disabled={signing} className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: colors.brassDark, opacity: signing ? 0.7 : 1 }}>
-                  {signing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {signing ? "Signature en cours..." : "Signer et accepter le devis"}
+                  {signing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} {signing ? "Signature en cours..." : optionLines.length ? `Signer pour ${formatMoney(totals?.totalTTC || 0, state.document.currency)} TTC` : "Signer et accepter le devis"}
                 </button>
               </div>
             )}
@@ -17393,7 +17442,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       });
     } else {
       rows.push(["Désignation", "Description", "Qté", "Unité", "PU HT", "TVA %", "Remise %", "Total HT"]);
-      computedLines.forEach((l) => {
+      const proposedOptionLines = localDoc.type === "devis" ? proposedOptionsOf(localDoc).map((l) => ({ ...l, designation: `${l.designation || ""} (option non comprise dans le total)`, totalHT: lineBaseHT(l) * (1 - (Number(l.discount) || 0) / 100) })) : [];
+      [...computedLines, ...proposedOptionLines].forEach((l) => {
         rows.push([localDoc.type === "bpu" && (l.productRef || "").trim() ? `${l.productRef.trim()} — ${l.designation}` : l.designation, "", l.qty, l.unit, Number(l.unitPrice) || 0, l.tva, l.discount, Number((l.totalHT || 0).toFixed(2))]);
         (l.details || []).filter((d) => d.included && (d.text || d.price)).forEach((d) => {
           rows.push(["", "  ".repeat(d.level) + (d.marker || defaultMarker(d.level)) + " " + stripMarkup(d.text), "", "", "", "", "", Number(d.price) > 0 ? Number(d.price) : ""]);
@@ -18218,6 +18268,18 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
                     <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Remise %</span>
                     <input type="number" className="df-input df-mono w-16 rounded-md px-1 py-1.5 text-right text-sm" style={inputStyle} value={it.discount} onChange={(e) => updateItem(it.id, { discount: e.target.value })} />
                   </label>
+                  {localDoc.type === "devis" && (
+                    <div className="flex w-20 flex-col gap-0.5 text-xs" data-testid="line-option">
+                      <label className="flex items-center gap-1" title="Ligne en option : proposée au client, comptée seulement si elle est retenue (sur le lien de signature, ou ici)">
+                        <input type="checkbox" checked={it.optional === true} onChange={(e) => updateItem(it.id, e.target.checked ? { optional: true } : { optional: false, optionAccepted: false })} style={{ accentColor: colors.brass }} /> Option
+                      </label>
+                      {it.optional === true && (
+                        <label className="flex items-center gap-1" title="Option retenue par le client : comptée dans le total" style={{ color: it.optionAccepted === true ? colors.moss : colors.inkSoft }}>
+                          <input type="checkbox" checked={it.optionAccepted === true} onChange={(e) => updateItem(it.id, { optionAccepted: e.target.checked })} style={{ accentColor: colors.moss }} /> Retenue
+                        </label>
+                      )}
+                    </div>
+                  )}
                   <div className="w-24 text-xs">
                     <span className="mb-0.5 block" style={{ color: colors.inkSoft }}>Total HT</span>
                     <div className="df-mono py-1.5 text-right text-sm font-medium">
@@ -18457,5 +18519,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
