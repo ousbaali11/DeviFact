@@ -22,7 +22,7 @@ import {
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
   Maximize2, Minimize2, Camera, ImagePlus,
   Home, HardHat, Files, ChevronRight,
-  Filter, MoreHorizontal, Paperclip, Warehouse, Archive, ArrowDownToLine, ArrowUpFromLine,
+  Filter, MoreHorizontal, Paperclip, QrCode, Warehouse, Archive, ArrowDownToLine, ArrowUpFromLine,
 } from "lucide-react";
 
 // Chaque couleur pointe vers une variable CSS (définie par le thème
@@ -7368,12 +7368,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
-            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
-          </button>
-          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
-            <Download size={15} /> Excel
-          </button>
+          <ExportMenu items={[{ id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating }, { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel }]} />
         </div>
       </div>
 
@@ -8048,12 +8043,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
               <ArrowRight size={15} /> Situation suivante
             </button>
           )}
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
-            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
-          </button>
-          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
-            <Download size={15} /> Excel
-          </button>
+          <ExportMenu items={[{ id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating }, { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel }]} />
         </div>
       </div>
 
@@ -8540,12 +8530,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
-            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
-          </button>
-          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
-            <Download size={15} /> Excel
-          </button>
+          <ExportMenu items={[{ id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating }, { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel }]} />
         </div>
       </div>
 
@@ -9061,12 +9046,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
-            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
-          </button>
-          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
-            <Download size={15} /> Excel
-          </button>
+          <ExportMenu items={[{ id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating }, { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel }]} />
         </div>
       </div>
 
@@ -9428,12 +9408,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
-            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
-          </button>
-          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
-            <Download size={15} /> Excel
-          </button>
+          <ExportMenu items={[{ id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating }, { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel }]} />
         </div>
       </div>
 
@@ -10001,12 +9976,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
-            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
-          </button>
-          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
-            <Download size={15} /> Excel
-          </button>
+          <ExportMenu items={[{ id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating }, { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel }]} />
         </div>
       </div>
 
@@ -10362,12 +10332,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
-            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
-          </button>
-          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>
-            <Download size={15} /> Excel
-          </button>
+          <ExportMenu items={[{ id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating }, { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel }]} />
         </div>
       </div>
 
@@ -16213,6 +16178,65 @@ function AttachAttestationsToggle({ doc, companyProfile, onChange, disabled = fa
   );
   return grid ? <><span></span>{label}</> : label;
 }
+// Menu « Exporter » des éditeurs (priorité 7) : PDF, Excel, Factur-X, lien
+// public, QR code — mêmes actions qu'avant, regroupées derrière un seul
+// bouton. Une entrée en cours (« Génération… ») est reflétée sur le
+// bouton. Fermé par Échap ou un clic à l'extérieur.
+function ExportMenu({ items }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEscapeToClose(open, () => setOpen(false));
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const visible = (items || []).filter(Boolean);
+  if (!visible.length) return null;
+  const busy = visible.find((it) => it.busy);
+  return (
+    <div ref={ref} className="relative" data-testid="export-menu">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
+        {busy ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} {busy ? busy.busyLabel || "Génération…" : "Exporter"} <ChevronDown size={14} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-30 mt-1 min-w-56 overflow-hidden rounded-xl py-1 shadow-lg" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
+          {visible.map((it) => {
+            const Icon = it.icon;
+            return (
+              <button key={it.id} type="button" role="menuitem" disabled={it.disabled || it.busy} onClick={() => { setOpen(false); it.onClick(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm" style={{ color: colors.ink, opacity: it.disabled || it.busy ? 0.5 : 1 }}>
+                {it.busy ? <Loader2 size={15} className="animate-spin" /> : Icon ? <Icon size={15} style={{ color: colors.slate }} /> : null} {it.busy ? it.busyLabel || "Génération…" : it.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+// QR code du lien public en grand (écran, impression à part), avec le lien
+// copiable et l'image téléchargeable.
+function QrCodeDialog({ qr, title, onClose }) {
+  const [copied, setCopied] = useState(false);
+  useEscapeToClose(!!qr, onClose);
+  if (!qr) return null;
+  return (
+    <div className="no-print fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(27,42,51,0.6)" }} onClick={onClose} data-testid="qr-dialog">
+      <div className="w-full max-w-sm rounded-2xl p-6 text-center" style={{ background: colors.surface, color: colors.ink }} onClick={(e) => e.stopPropagation()}>
+        <h2 className="df-display mb-1 text-lg font-semibold">{title}</h2>
+        <p className="mb-4 text-xs" style={{ color: colors.inkSoft }}>Le client scanne ce code pour ouvrir le lien public du document.</p>
+        <img src={qr.dataUrl} alt="QR code du lien public" className="mx-auto h-56 w-56" style={{ imageRendering: "pixelated" }} />
+        <p className="df-mono mt-3 break-all text-xs" style={{ color: colors.inkSoft }}>{qr.url}</p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <button onClick={async () => { try { await navigator.clipboard.writeText(qr.url); setCopied(true); } catch { setCopied(false); } }} className="rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.slate }}>{copied ? "Lien copié" : "Copier le lien"}</button>
+          <a href={qr.dataUrl} download="qr-code.png" className="rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.ink }}>Télécharger l'image</a>
+          <button onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.inkSoft }}>Fermer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function PaymentRevertNotice({ notice, onDismiss }) {
   if (!notice) return null;
   return (
@@ -17107,6 +17131,21 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     };
   }, [presentationMode]);
 
+  // Entrée « QR code » du menu Exporter : même lien public que le PDF.
+  const [qrDialog, setQrDialog] = useState(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  async function showQrCode() {
+    if (qrLoading) return;
+    setQrLoading(true);
+    try {
+      const qr = await ensurePublicQr();
+      if (qr) setQrDialog(qr);
+      else alert("Impossible de générer le lien public pour ce document.");
+    } catch (err) {
+      console.error("QR code indisponible", err);
+      alert("Impossible de générer le QR code pour le moment.");
+    } finally { setQrLoading(false); }
+  }
   async function downloadPdf() {
     const el = printRef.current;
     if (!el || pdfGenerating) return;
@@ -17317,22 +17356,13 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               <ArrowRightLeft size={15} /> Convertir en facture
             </button>
           )}
-          <button onClick={downloadPdf} disabled={pdfGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink, opacity: pdfGenerating ? 0.7 : 1 }}>
-            {pdfGenerating ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />} {pdfGenerating ? "Génération…" : "PDF"}
-          </button>
-          {localDoc.type === "facture" && (
-            <button onClick={downloadFacturX} disabled={facturxGenerating} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: facturxGenerating ? 0.7 : 1 }} title="Facture électronique : PDF/A-3 avec les données structurées (XML EN 16931) intégrées — format de la réforme 2026-2027">
-              {facturxGenerating ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />} {facturxGenerating ? "Génération…" : "Télécharger au format Factur-X"}
-            </button>
-          )}
-          <button onClick={exportExcel} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}>
-            <FileSpreadsheet size={15} /> Excel
-          </button>
-          {!isViewer && (localDoc.type === "devis" || localDoc.type === "facture" || localDoc.type === "acompte") && (
-            <button onClick={generatePublicLink} disabled={publicLinkState.loading} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: publicLinkState.loading ? 0.7 : 1 }} title={localDoc.type === "devis" ? "Créer un lien pour que le client signe en ligne, sans compte" : "Créer un lien pour que le client consulte la facture en ligne, sans compte"}>
-              {publicLinkState.loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />} {publicLinkState.loading ? "Génération…" : localDoc.type === "devis" ? "Lien de signature" : "Lien de la facture"}
-            </button>
-          )}
+          <ExportMenu items={[
+            { id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating },
+            { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel },
+            localDoc.type === "facture" ? { id: "facturx", label: "Factur-X (facture électronique)", icon: FileText, onClick: downloadFacturX, busy: facturxGenerating } : null,
+            !isViewer && hasPublicLinkType ? { id: "link", label: localDoc.type === "devis" ? "Lien de signature" : "Lien de paiement", icon: Link2, onClick: generatePublicLink, busy: publicLinkState.loading } : null,
+            !isViewer && hasPublicLinkType ? { id: "qr", label: "QR code du lien", icon: QrCode, onClick: showQrCode, busy: qrLoading } : null,
+          ]} />
           <button onClick={enterPresentation} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }} title="Afficher le document seul en plein écran, pour le présenter au client (Échap pour quitter)">
             <Maximize2 size={15} /> Présentation
           </button>
@@ -17347,6 +17377,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 
       <div className="no-print mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
+        <QrCodeDialog qr={qrDialog} title={localDoc.type === "devis" ? "QR code du lien de signature" : "QR code du lien de paiement"} onClose={() => setQrDialog(null)} />
         <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />
         {!isViewer && <AcompteSuggestionNotice suggestion={acompteSuggestion} currency={localDoc.currency} onApply={(amount) => patch({ acompteVerse: amount })} onDismiss={() => patch({ acompteSuggestionDismissed: true })} />}
         {splitNotice && (
@@ -18287,5 +18318,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
