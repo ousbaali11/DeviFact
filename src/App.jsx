@@ -2172,6 +2172,8 @@ function isDocumentEmpty(doc) {
   // Une photo de chantier ajoutée est un vrai contenu (le fichier existe
   // déjà dans le stockage) : le document doit être conservé.
   if (Array.isArray(doc.photos) && doc.photos.length) return false;
+  // Même chose pour le scan d'une facture reçue : le fichier est déjà envoyé.
+  if (doc.attachment && typeof doc.attachment === "object" && doc.attachment.path) return false;
 
   // Champs propres à certains types, en plus de client/items déjà
   // vérifiés ci-dessus pour tous les types.
@@ -4216,17 +4218,21 @@ function DeviFactAppInner() {
       setSavingClients(false);
     }
   }
+  // Renvoie true si la fiche est bien enregistrée (comme persist pour les
+  // documents) : la carte Attestations n'efface l'ancien fichier qu'alors.
   async function persistCompanyProfile(next) {
-    if (isLocked) return;
+    if (isLocked) return false;
     setCompanyProfile(next);
     setSavingCompany(true);
     try {
       const res = await window.storage.set("company-profile", JSON.stringify(next), false);
       if (res?.merged) setCompanyProfile(JSON.parse(res.value)); // fusion champ par champ avec la fiche modifiée par un autre membre
       clearSaveError("Mon entreprise");
+      return true;
     } catch (e) {
       console.error("Erreur d'enregistrement profil entreprise", e);
       saveFailure("Mon entreprise", () => persistCompanyProfile(next));
+      return false;
     } finally {
       setSavingCompany(false);
     }
@@ -9494,7 +9500,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
       pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight);
       heightLeft -= pageHeight;
       while (heightLeft > 3) { position -= pageHeight; pdf.addPage(); pdf.addImage(imgData, "JPEG", 0, position, pageWidth, imgHeight); heightLeft -= pageHeight; }
-      await savePdfWithAttachments(`${(localDoc.docNumber || "contrat").replace(/[\\/:*?"<>|]/g, "-")}.pdf`, localDoc.attachAttestations === true ? validAttestations(companyProfile) : []);
+      await savePdfWithAttachments(pdf, `${(localDoc.docNumber || "contrat").replace(/[\\/:*?"<>|]/g, "-")}.pdf`, localDoc.attachAttestations === true ? validAttestations(companyProfile) : []);
     } catch (err) {
       console.error("Erreur de génération du PDF", err);
       alert("Impossible de générer le PDF. Réessaie, et préviens-moi si ça persiste.");
@@ -11788,6 +11794,8 @@ function useChantierTasks(organizationId) {
     return () => { cancelled = true; };
   }, [organizationId]);
   async function persist(next) {
+    if (tasks === null) return; // liste pas encore chargée : rien à enregistrer par-dessus
+    const previous = tasks;
     setTasks(next);
     setSaving(true);
     try {
@@ -11795,6 +11803,7 @@ function useChantierTasks(organizationId) {
       if (res?.merged) setTasks(JSON.parse(res.value)); // fusion avec les tâches d'un autre membre
     } catch (err) {
       console.error("Erreur d'enregistrement des tâches", err);
+      setTasks(previous); // l'écran ne montre pas une tâche qui n'est pas enregistrée
       alert("Impossible d'enregistrer les tâches pour l'instant. Réessaie dans un instant.");
     } finally {
       setSaving(false);
@@ -12018,7 +12027,7 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
   const canEdit = !isLocked && !isViewer;
   function addTask() {
     const text = taskDraft.text.trim();
-    if (!text || !canEdit) return;
+    if (!text || !canEdit || tasksStore.tasks === null) return;
     const now = Date.now();
     tasksStore.persist([...(tasksStore.tasks || []), { id: nextId("tk"), chantier: name, text, done: false, dueDate: taskDraft.dueDate || "", createdAt: now, updatedAt: now, doneAt: null }]);
     setTaskDraft({ text: "", dueDate: "" });
@@ -12142,7 +12151,7 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
               <label className="text-xs" style={{ color: tone.inkSoft }}>Échéance (optionnel)
                 <input type="date" className="df-input df-mono mt-1 block rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${tone.line}` }} value={taskDraft.dueDate} onChange={(e) => setTaskDraft((d) => ({ ...d, dueDate: e.target.value }))} aria-label="Échéance de la nouvelle tâche" />
               </label>
-              <button type="submit" disabled={!taskDraft.text.trim() || tasksStore.saving} className="df-at-tap flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: tone.accent, opacity: taskDraft.text.trim() ? 1 : 0.5 }}><Plus size={15} /> Ajouter</button>
+              <button type="submit" disabled={!taskDraft.text.trim() || tasksStore.saving || tasksStore.tasks === null} className="df-at-tap flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: tone.accent, opacity: taskDraft.text.trim() ? 1 : 0.5 }}><Plus size={15} /> Ajouter</button>
             </form>
           )}
           {tasksStore.tasks === null ? (
@@ -14828,7 +14837,8 @@ function AttestationsCard({ profile, account, isLocked, isViewer, saving, onSave
       let stored = existing ? { path: existing.path, fileName: existing.fileName, size: existing.size, mime: existing.mime } : null;
       if (file) { const up = await uploadCompanyFile(orgId, file); stored = { path: up.path, fileName: up.name, size: up.size, mime: up.mime }; }
       const entry = { id: existing?.id || nextId("att"), kind: draft.kind, label: draft.kind === "autre" ? draft.label.trim() : "", organism: draft.organism.trim(), number: draft.number.trim(), issuedAt: draft.issuedAt || "", expiresAt: draft.expiresAt, ...stored, addedAt: existing?.addedAt || Date.now(), updatedAt: Date.now() };
-      await onSave(existing ? current.map((a) => (a.id === existing.id ? entry : a)) : [...current, entry]);
+      const ok = await onSave(existing ? current.map((a) => (a.id === existing.id ? entry : a)) : [...current, entry]);
+      if (ok !== true) { if (file) removeCompanyFile(stored.path); throw new Error("La fiche n'a pas pu être enregistrée : rien n'a été modifié, réessaie dans un instant."); }
       if (file && existing?.path && existing.path !== stored.path) await removeCompanyFile(existing.path);
       setDraft(null); setFile(null);
     } catch (err) {
@@ -14839,7 +14849,8 @@ function AttestationsCard({ profile, account, isLocked, isViewer, saving, onSave
     if (!window.confirm(`Supprimer « ${a.label} » ? Le fichier sera effacé.`)) return;
     setBusy(true); setError("");
     try {
-      await onSave((Array.isArray(profile?.attestations) ? profile.attestations : []).filter((x) => x.id !== a.id));
+      const ok = await onSave((Array.isArray(profile?.attestations) ? profile.attestations : []).filter((x) => x.id !== a.id));
+      if (ok !== true) throw new Error("La fiche n'a pas pu être enregistrée : l'attestation est conservée, réessaie dans un instant.");
       await removeCompanyFile(a.path);
     } catch (err) { setError(err?.message || "Suppression impossible."); }
     finally { setBusy(false); }
@@ -16835,6 +16846,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
   async function importFiles(fileList) {
     const files = [...(fileList || [])];
     if (!files.length || !orgId) return;
+    let insertedCount = 0, totalParsed = 0, matchedCount = 0, creditCount = 0; // état connu en cas d'échec en cours de route
     setImporting(true);
     setReport(null);
     setActionError("");
@@ -16858,6 +16870,7 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
         if (error) throw error;
         inserted = data || [];
       }
+      insertedCount = inserted.length; totalParsed = all.length; creditCount = inserted.filter((r) => Number(r.amount) > 0).length;
       // Correspondances sûres : paiement enregistré tout de suite.
       const working = [...docsRef.current];
       let cands = openInvoiceCandidates(working, (d) => documentAmountDue(d, working));
@@ -16867,18 +16880,23 @@ function BankView({ documents, account, isLocked, isViewer, onPatchDocument }) {
         const [best] = suggestMatches(bankTx(row), cands);
         if (best?.level !== "sur") continue;
         await reconcile(row, best.id, "auto", working);
-        matched += 1;
+        matched += 1; matchedCount = matched;
         cands = openInvoiceCandidates(working, (d) => documentAmountDue(d, working));
       }
       const credits = inserted.filter((r) => Number(r.amount) > 0).length;
       setReport({ files: files.length, imported: inserted.length, duplicates: all.length - inserted.length, matched, toReview: credits - matched, warnings });
       setTab("a_traiter");
-      reload();
     } catch (err) {
       console.error("Erreur d'import du relevé", err);
-      setReport({ error: err?.message ? `Import impossible : ${err.message}` : "Import impossible pour l'instant." });
+      // Lignes déjà insérées : l'import a eu lieu, seul le rapprochement s'est arrêté.
+      const message = err?.message ? `${err.message}` : "erreur inconnue";
+      setReport(insertedCount > 0
+        ? { files: files.length, imported: insertedCount, duplicates: totalParsed - insertedCount, matched: matchedCount, toReview: creditCount - matchedCount, warnings: [`Rapprochement automatique interrompu : ${message}. Les opérations importées sont à vérifier à la main.`] }
+        : { error: `Import impossible : ${message}` });
+      if (insertedCount > 0) setTab("a_traiter");
     } finally {
       setImporting(false);
+      reload(); // la liste reflète toujours ce qui est en base, succès ou échec
     }
   }
 

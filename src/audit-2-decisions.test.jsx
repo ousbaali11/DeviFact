@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   newDocument, newSituationDocument, emptyCompanyProfile, computeTotals, computeSituation, accountingExportRow, accountingExportRows, accountingLinesOf,
   acompteDeduitSplit, atelierChantierStats, computePvGaranties, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange,
-  PrintDocument, RevenueChart, localDateOf,
+  PrintDocument, RevenueChart, localDateOf, isDocumentEmpty,
 } from "./App.jsx";
 import { buildSalesEntries, acompteSplitOf, DEFAULT_ACCOUNTS } from "./accounting.js";
 import * as shared from "../supabase/functions/_shared/accounting.ts";
@@ -254,6 +254,15 @@ describe("17. export programmé : fenêtre, compléments et corrections, jamais 
     expect(shared.periodEndOf("2026-02")).toBe("2026-02-28");
     expect(shared.exportWindow(aout, { sentThrough: "2026-08-31" })).toBeNull();
     expect(shared.exportWindow(aout, null)).toEqual({ from: "2026-08-01", to: "2026-08-31" });
+  });
+});
+
+describe("N2. facture reçue « en attente » avec un scan : un vrai contenu", () => {
+  it("le document est conservé dès qu'un scan est joint, comme avec une photo", () => {
+    const vide = { ...newDocument("facture_recue", []), client: { name: "" }, items: [] };
+    expect(isDocumentEmpty(vide)).toBe(true);
+    expect(isDocumentEmpty({ ...vide, attachment: { path: "org/doc/scan.pdf", fileName: "scan.pdf" } })).toBe(false);
+    expect(isDocumentEmpty({ ...vide, attachment: null })).toBe(true);
   });
 });
 
