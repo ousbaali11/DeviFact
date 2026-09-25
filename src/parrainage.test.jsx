@@ -60,6 +60,9 @@ describe("inscription", () => {
     const password = inputs.find((i) => i.type === "password");
     await act(async () => { setValue(email, "nouveau@exemple.fr"); });
     await act(async () => { setValue(password, "motdepasse-solide-12"); });
+    // Pays obligatoire : ouverture du sélecteur, choix de la France.
+    await click([...container.querySelectorAll('[data-testid="signup-country"] button')].find((b) => b.textContent.includes("Choisir le pays")));
+    await click([...container.querySelectorAll('[data-testid="signup-country"] button')].find((b) => b.textContent.trim() === "🇫🇷 FR"));
     if (code !== undefined) await act(async () => { setValue(byLabel(container, "Code de parrainage"), code); });
     await click([...container.querySelectorAll("button")].find((b) => b.textContent.trim().startsWith("Créer mon compte")));
     await settle();

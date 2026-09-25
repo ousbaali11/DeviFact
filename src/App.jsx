@@ -22,7 +22,7 @@ import {
   Ship, Package, MapPinned, ShoppingCart, Truck, BarChart3, ClipboardCheck, List, Wrench, FileSignature, Calendar, Wallet,
   Maximize2, Minimize2, Camera, ImagePlus,
   Home, HardHat, Files, ChevronRight,
-  Filter, MoreHorizontal, Paperclip, QrCode, Warehouse, Archive, ArrowDownToLine, ArrowUpFromLine,
+  Filter, MoreHorizontal, Paperclip, QrCode, Warehouse, Archive, ArrowDownToLine, ArrowUpFromLine, Globe,
 } from "lucide-react";
 
 // Chaque couleur pointe vers une variable CSS (posée sur body par
@@ -605,6 +605,21 @@ const GEO_TIMEZONE_COUNTRIES = {
 function lsGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
 function lsSet(key, value) { try { localStorage.setItem(key, value); } catch { /* stockage local indisponible */ } }
 function lsRemove(key) { try { localStorage.removeItem(key); } catch { /* stockage local indisponible */ } }
+// Pays choisi à l'inscription (obligatoire) : mémorisé sur l'appareil puis
+// appliqué à la fiche Mon entreprise au premier chargement du compte, sans
+// nouvelle saisie — Factur-X est alors proposé ou non selon ce pays.
+const SIGNUP_COUNTRY_KEY = "devifact_signup_country";
+function rememberSignupCountry(userId, country) {
+  if (userId && country) lsSet(SIGNUP_COUNTRY_KEY, JSON.stringify({ userId, country }));
+}
+function takeSignupCountry(userId) {
+  try {
+    const rec = JSON.parse(lsGet(SIGNUP_COUNTRY_KEY) || "null");
+    if (!rec || !userId || rec.userId !== userId || !rec.country) return "";
+    lsRemove(SIGNUP_COUNTRY_KEY);
+    return String(rec.country);
+  } catch { return ""; }
+}
 // Date « AAAA-MM-JJ » lue en heure LOCALE : new Date("2026-09-25") la lit à
 // minuit UTC, soit la veille au soir sur un fuseau à l'ouest (Antilles,
 // Guyane, Canada) — la date imprimée ou comparée était décalée d'un jour.
@@ -3714,7 +3729,19 @@ function DeviFactAppInner() {
     setOfflineMode(false);
     const docs = docsRes.status === "fulfilled" && docsRes.value ? JSON.parse(docsRes.value.value) : [];
     const cls = clientsRes.status === "fulfilled" && clientsRes.value ? JSON.parse(clientsRes.value.value) : [];
-    const comp = companyRes.status === "fulfilled" && companyRes.value ? JSON.parse(companyRes.value.value) : emptyCompanyProfile();
+    let comp = companyRes.status === "fulfilled" && companyRes.value ? JSON.parse(companyRes.value.value) : emptyCompanyProfile();
+    // Compte tout neuf (aucune fiche) : le pays choisi à l'inscription devient
+    // celui de Mon entreprise, enregistré tout de suite.
+    if (!(companyRes.status === "fulfilled" && companyRes.value)) {
+      try {
+        const { data: { session } } = await db.auth.getSession();
+        const signupCountry = takeSignupCountry(session?.user?.id);
+        if (signupCountry) {
+          comp = { ...comp, country: signupCountry };
+          window.storage.set("company-profile", JSON.stringify(comp), false).catch((err) => console.error("Pays de l'inscription non enregistré dans Mon entreprise", err));
+        }
+      } catch (err) { console.error("Pays de l'inscription non appliqué", err); }
+    }
     const prest = prestationsRes.status === "fulfilled" && prestationsRes.value ? JSON.parse(prestationsRes.value.value) : [];
     setDocuments(docs);
     setClients(cls);
@@ -6683,6 +6710,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onS
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [country, setCountry] = useState(""); // pays de l'entreprise, obligatoire à l'inscription
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -6727,6 +6755,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onS
     if (!cleanEmail) { setError("Merci de renseigner un email."); return; }
     if (!emailOk) { setError("Cet email ne semble pas valide (ex : toi@entreprise.fr)."); return; }
     if (!password) { setError("Merci de renseigner un mot de passe."); return; }
+    if (mode === "signup" && !country) { setError("Merci d'indiquer le pays de ton entreprise."); return; }
 
     setBusy(true);
     try {
@@ -6749,6 +6778,7 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onS
         }
 
         if (data.user) {
+          rememberSignupCountry(data.user.id, country); // appliqué à Mon entreprise au premier chargement
           if (companyName.trim() || firstName.trim() || lastName.trim()) {
             const { error: profileError } = await db.from("profiles").update({ company_name: companyName.trim(), first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", data.user.id);
             if (profileError) console.error("Profil (nom, entreprise) non enregistré à l'inscription", profileError);
@@ -6941,6 +6971,12 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onS
               <div>
                 <label className="mb-1 flex items-center gap-1.5 text-xs font-medium" style={{ color: colors.inkSoft }}><Building2 size={13} /> Nom de l'entreprise</label>
                 <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={companyName} onChange={(e) => setCompanyName(e.target.value)} onKeyDown={onEnterKey} placeholder="Martin Rénovation" />
+              </div>
+            )}
+            {mode === "signup" && (
+              <div data-testid="signup-country">
+                <label className="mb-1 flex items-center gap-1.5 text-xs font-medium" style={{ color: colors.inkSoft }}><Globe size={13} /> Pays de l'entreprise <span style={{ color: colors.brick }}>*</span></label>
+                <CountrySelect value={country} onChange={setCountry} placeholder="Choisir le pays" showEmpty={false} />
               </div>
             )}
             <div>
@@ -18817,5 +18853,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, isFranceCompany, accountingExportRows, acompteDeduitSplit, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange, RevenueChart, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, isFranceCompany, rememberSignupCountry, takeSignupCountry, SIGNUP_COUNTRY_KEY, accountingExportRows, acompteDeduitSplit, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange, RevenueChart, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
