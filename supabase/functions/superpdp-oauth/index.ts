@@ -46,9 +46,11 @@ serve(async (req) => {
     if (!organizationId) return json({ error: "Organisation manquante" }, 400);
     if (!["start", "callback", "status", "disconnect"].includes(action)) return json({ error: "Action inconnue" }, 400);
 
-    // Propriétaire PRÉCISÉMENT de cette organisation.
+    // Membre actif de cette organisation ; propriétaire pour tout sauf
+    // l'état (qui ne contient aucun jeton et sert aux éditeurs pour l'envoi).
     const { data: membership } = await dbAdmin.from("organization_members").select("role").eq("user_id", user.id).eq("organization_id", organizationId).eq("status", "active").maybeSingle();
-    if (!membership || membership.role !== "owner") return json({ error: "Seul le propriétaire de l'organisation peut connecter le compte Super PDP." }, 403);
+    if (!membership) return json({ error: "Accès refusé." }, 403);
+    if (action !== "status" && membership.role !== "owner") return json({ error: "Seul le propriétaire de l'organisation peut connecter le compte Super PDP." }, 403);
 
     if (action === "status") {
       const conn = await readConnection(dbAdmin, organizationId);

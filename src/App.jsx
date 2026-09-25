@@ -5,6 +5,7 @@ import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
 import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument, buildPurchaseEntries, factureRecueTotals, csvCell } from "./accounting.js";
+import { pdpEligibility, pdpLocksContent, pdpStatusLabel, pdpBlockedKeys } from "./pdp-rules.js";
 import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
@@ -3290,6 +3291,17 @@ function DeviFactAppInner() {
   // Facture « payée » modifiée jusqu'à faire réapparaître un reste à payer :
   // { docId, docNumber, amount }, annoncé dans l'éditeur.
   const [paymentRevertNotice, setPaymentRevertNotice] = useState(null);
+  // Super PDP : état de la connexion (jamais un jeton), pour proposer
+  // l'envoi d'une facture ; relu quand l'organisation ou le pays change.
+  const [pdpStatus, setPdpStatus] = useState(null);
+  const companyCountry = companyProfile?.country;
+  useEffect(() => {
+    const orgId = account?.organizationId;
+    if (!SUPERPDP_ENABLED || !orgId || !isFranceCompany({ country: companyCountry })) { setPdpStatus(null); return undefined; }
+    let cancelled = false;
+    callSuperPdp(orgId, "status").then((res) => { if (!cancelled) setPdpStatus(res); }).catch((err) => { console.error("État Super PDP indisponible", err); if (!cancelled) setPdpStatus(null); });
+    return () => { cancelled = true; };
+  }, [account?.organizationId, companyCountry]);
   async function sendReviewRequest() {
     if (!reviewNotice || reviewNotice.sending || reviewNotice.sent) return;
     setReviewNotice((n) => ({ ...n, sending: true, error: null }));
@@ -4546,6 +4558,16 @@ function DeviFactAppInner() {
     // contenu à un moment donné) — mise à jour habituelle.
     if (documents.some((d) => d.id === id)) {
       const original = documents.find((d) => d.id === id);
+      // Facture transmise via Super PDP : contenu figé (un avoir corrige) ;
+      // seuls le statut, les paiements et le suivi restent modifiables.
+      if (original && pdpLocksContent(original.pdp)) {
+        const blocked = pdpBlockedKeys(patch);
+        if (blocked.length) {
+          console.warn(`Facture ${original.docNumber || id} transmise via Super PDP : champs ignorés (${blocked.join(", ")})`);
+          patch = Object.fromEntries(Object.entries(patch).filter(([k]) => !blocked.includes(k)));
+          if (!Object.keys(patch).length) return;
+        }
+      }
       // Devis qui vient tout juste de passer à "signé" (jamais si déjà
       // signé avant, pour ne pas créer une facture à chaque petite
       // modification ultérieure) : génère automatiquement la facture
@@ -4671,6 +4693,29 @@ function DeviFactAppInner() {
       return;
     }
     updateDoc(id, { workStage: "termine" });
+  }
+  // Réponse d'une fonction serveur qui a déjà écrit le document (Super PDP) :
+  // reprise en mémoire, sans nouvel enregistrement.
+  function applyServerDocPatch(id, patch) {
+    const next = documentsRef.current.map((d) => (d.id === id ? { ...d, ...patch } : d));
+    documentsRef.current = next;
+    setDocuments(next);
+  }
+  // Transmission d'une facture via Super PDP (fonction superpdp-send-invoice :
+  // éligibilité, Factur-X, validation, annuaire, envoi, tout côté serveur).
+  async function sendInvoiceToPdp(docId) {
+    const { data: { session } } = await db.auth.getSession();
+    const { data, error } = await db.functions.invoke("superpdp-send-invoice", {
+      body: { organizationId: account?.organizationId, documentId: docId },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    });
+    if (error || !data || data.error) {
+      let message = data?.error;
+      if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
+      throw new Error(message || error?.message || "Envoi impossible pour l'instant.");
+    }
+    if (data.pdp) applyServerDocPatch(docId, { pdp: data.pdp, updatedAt: Date.now() });
+    return data;
   }
   // Liste kv (planning, tâches) relue puis réécrite avec une transformation ;
   // absente : rien à faire.
@@ -5217,6 +5262,8 @@ function DeviFactAppInner() {
         creditTotal={creditNotesTotalFor(activeDoc, documents)}
         creditNotes={documents.filter((d) => d.type === "avoir" && d.factureOrigineId === activeDoc.id && d.status !== "brouillon").map((d) => d.docNumber || "")}
         acompteSuggestion={acompteSuggestionFor(activeDoc, documents)}
+        pdpStatus={pdpStatus}
+        onSendPdp={sendInvoiceToPdp}
       />
     );
   }
@@ -11738,6 +11785,7 @@ function AtelierDocumentsView({ documents, darkMode, isLocked, isViewer, preset,
                 ) : (
                   <span className="shrink-0 rounded-full px-2 py-1 text-xs font-medium" style={{ background: d.workStage === "termine" ? `${tone.success}1A` : tone.paper, color: d.workStage === "termine" ? tone.success : tone.inkSoft }}>{d.workStage === "termine" ? "Terminé" : "En cours"}</span>
                 )}
+                {d.pdp?.status && <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${tone.inkSoft}1A`, color: tone.inkSoft }} data-testid="pdp-list-badge">Super PDP : {pdpStatusLabel(d.pdp)}</span>}
                 {canEdit && (
                   <span className="flex shrink-0 items-center">
                     <button onClick={() => onDuplicate(d.id)} className="df-at-tap flex h-11 w-9 items-center justify-center" style={{ color: tone.inkSoft }} title="Dupliquer" aria-label="Dupliquer"><Copy size={16} /></button>
@@ -17285,7 +17333,7 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false, creditTotal = 
   );
 }
 
-function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, creditNotes = [], acompteSuggestion = null }) {
+function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, creditNotes = [], pdpStatus = null, onSendPdp = null, acompteSuggestion = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const [clientQuery, setClientQuery] = useState("");
@@ -17378,6 +17426,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   }, [lastAddedDetailId]);
 
   function patch(p) {
+    // Facture transmise via Super PDP : le contenu ne bouge plus (bandeau).
+    if (pdpLocked && pdpBlockedKeys(p).length) { setPdpLockNotice(true); return; }
     setLocalDoc((prev) => ({ ...prev, ...p }));
     // Toutes les modifications faites pendant le délai de 400ms sont
     // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
@@ -17931,6 +17981,28 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   // inchangé. Ne transmet rien à une Plateforme Agréée.
   const [facturxGenerating, setFacturxGenerating] = useState(false);
   const facturxAvailable = isFranceCompany(companyProfile); // réservé aux entreprises françaises
+  // Super PDP : « Envoyer via Super PDP » quand la facture est éligible
+  // (mêmes règles que le serveur, qui reste juge) ; contenu figé une fois transmise.
+  const pdpCtx = { connected: !!pdpStatus?.connected, env: pdpStatus?.env || null, verificationStatus: pdpStatus?.verificationStatus || null, companyCountryCode: (countryCodeOf(companyProfile?.country) || "").toUpperCase() || null };
+  const pdpEligible = SUPERPDP_ENABLED && !!onSendPdp && !isViewer && !isLocked && pdpEligibility(localDoc, pdpCtx).ok;
+  const pdpLocked = pdpLocksContent(localDoc.pdp);
+  const [pdpSending, setPdpSending] = useState(false);
+  const [pdpLockNotice, setPdpLockNotice] = useState(false);
+  async function sendToPdp() {
+    if (pdpSending) return;
+    const env = pdpStatus?.env === "production" ? "production" : "bac à sable";
+    if (!window.confirm(`Envoyer la facture ${localDoc.docNumber || ""} à ${localDoc.client?.name || "ce client"} via Super PDP (${env}) ?\n\nLe fichier Factur-X sera validé puis transmis. Cet envoi ne s'annule pas et le contenu de la facture sera figé.`)) return;
+    flushPendingPatch();
+    setPdpSending(true);
+    try {
+      const res = await onSendPdp(localDoc.id);
+      if (res?.pdp) setLocalDoc((prev) => ({ ...prev, pdp: res.pdp }));
+      alert(`Facture ${localDoc.docNumber || ""} déposée chez Super PDP (${env}).${Array.isArray(res?.warnings) && res.warnings.length ? `\n\nPoints d'attention :\n- ${res.warnings.join("\n- ")}` : ""}`);
+    } catch (err) {
+      console.error("Envoi Super PDP impossible", err);
+      alert(err?.message || "Envoi impossible pour l'instant.");
+    } finally { setPdpSending(false); }
+  }
   async function downloadFacturX() {
     if (facturxGenerating) return;
     setFacturxGenerating(true);
@@ -17982,6 +18054,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           >
             {statuses.map((s) => <option key={s} value={s} style={{ color: colors.ink }}>{s}</option>)}
           </select>
+          {localDoc.pdp?.status && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} title={localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}</span>}
           {saving ? (
             <span className="flex items-center gap-1 text-xs text-white"><Loader2 size={12} className="animate-spin" /> Enregistrement</span>
           ) : (
@@ -17998,6 +18071,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             { id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating },
             { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel },
             localDoc.type === "facture" && facturxAvailable ? { id: "facturx", label: "Factur-X (facture électronique)", icon: FileText, onClick: downloadFacturX, busy: facturxGenerating } : null,
+            pdpEligible ? { id: "pdp", label: "Envoyer via Super PDP", icon: Upload, onClick: sendToPdp, busy: pdpSending } : null,
             !isViewer && hasPublicLinkType ? { id: "link", label: localDoc.type === "devis" ? "Lien de signature" : "Lien de paiement", icon: Link2, onClick: generatePublicLink, busy: publicLinkState.loading } : null,
             !isViewer && hasPublicLinkType ? { id: "qr", label: "QR code du lien", icon: QrCode, onClick: showQrCode, busy: qrLoading } : null,
           ]} />
@@ -18017,6 +18091,12 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
         <QrCodeDialog key={qrDialog?.url || "closed"} qr={qrDialog} title={localDoc.type === "devis" ? "QR code du lien de signature" : "QR code du lien de paiement"} onClose={() => setQrDialog(null)} />
         <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />
+        {pdpLocked && (
+          <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="pdp-lock-banner">
+            <Lock size={15} className="mt-0.5 shrink-0" />
+            <span>Facture transmise via Super PDP{localDoc.pdp?.sentAt ? ` le ${fr(new Date(localDoc.pdp.sentAt))}` : ""} ({pdpStatusLabel(localDoc.pdp)}) : son contenu est figé. Statut, paiements et relances restent modifiables ; pour corriger, établis un avoir puis une nouvelle facture.{pdpLockNotice ? " La dernière modification a été ignorée." : ""}</span>
+          </div>
+        )}
         {localDoc.type === "devis" && localDoc.status === "signé" && Number.isFinite(Number(localDoc.signature?.acceptedTotalTTC)) && localDoc.signature?.acceptedTotalTTC !== null && Math.abs(totals.totalTTC - Number(localDoc.signature.acceptedTotalTTC)) > 0.005 && (
           <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brassDark}14`, border: `1px solid ${colors.brassDark}55`, color: colors.brassDark }} data-testid="accepted-total-notice">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />

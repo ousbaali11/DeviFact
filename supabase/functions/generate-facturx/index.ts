@@ -61,11 +61,15 @@ serve(async (req) => {
     const raw = await req.text();
     if (raw.length > MAX_BODY_BYTES) return json({ error: "Facture trop volumineuse pour être exportée." }, 413);
 
-    let body: { document?: unknown; companyProfile?: unknown; siteName?: unknown };
+    let body: { document?: unknown; companyProfile?: unknown; siteName?: unknown; sandboxIds?: unknown };
     try { body = JSON.parse(raw); } catch { return json({ error: "Requête illisible." }, 400); }
 
     const siteName = typeof body.siteName === "string" && body.siteName.trim() ? body.siteName.trim().slice(0, 80) : "Chantiflow";
-    const { model, missing, warnings } = buildInvoiceModel(body.document, body.companyProfile, siteName);
+    // Identifiants du bac à sable Super PDP (superpdp-send-invoice) : ne
+    // changent que les adresses électroniques du XML d'un fichier de test.
+    const sb: any = body.sandboxIds && typeof body.sandboxIds === "object" ? body.sandboxIds : null;
+    const sandboxIds = sb ? { seller: typeof sb.seller === "string" ? sb.seller : null, buyer: typeof sb.buyer === "string" ? sb.buyer : null } : null;
+    const { model, missing, warnings } = buildInvoiceModel(body.document, body.companyProfile, siteName, { sandboxIds });
     if (!model) {
       return json({ error: "Des informations obligatoires manquent pour produire une facture électronique conforme.", missing, warnings }, 400);
     }

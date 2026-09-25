@@ -30,6 +30,7 @@ const fontkit = ((fontkitModule as unknown as { default?: unknown }).default ?? 
 export interface FxParty {
   name: string;
   siren: string | null;      // 9 chiffres (BT-30 / BT-47, schéma 0002)
+  electronicId?: string | null; // adresse électronique (schéma 0225) quand elle diffère du SIREN : bac à sable Super PDP
   siret: string | null;      // 14 chiffres (BT-29 / BT-46, schéma 0009)
   vatId: string | null;      // FRxx999999999 (BT-31 / BT-48)
   street: string;            // BT-35 / BT-50
@@ -189,7 +190,18 @@ function buildParty(raw: any, fallback: any, label: string, missing: string[], w
  * figée dans le document (code postal, ville, IBAN, option TVA...).
  */
 // deno-lint-ignore no-explicit-any
-export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Chantiflow"): BuildResult {
+// options.sandboxIds : identifiants d'entreprises du bac à sable Super PDP
+// (« 315143296_106843 ») posés à la place du SIREN dans les adresses
+// électroniques (émetteur, destinataire) — jamais utilisés en production.
+export type BuildOptions = { sandboxIds?: { seller?: string | null; buyer?: string | null } | null };
+function applySandboxId(party: FxParty, id: string | null | undefined, missing: string[], label: string) {
+  const m = /^(\d{9})_\d{1,12}$/.exec(String(id || ""));
+  if (!m) return;
+  party.siren = m[1];
+  party.electronicId = m[0];
+  for (let i = missing.length - 1; i >= 0; i--) if (missing[i].startsWith(`${label} : SIRET`)) missing.splice(i, 1);
+}
+export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Chantiflow", options: BuildOptions = {}): BuildResult {
   const missing: string[] = [];
   const warnings: string[] = [];
 
@@ -211,6 +223,7 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   const seller = buildParty(doc.company, companyProfile, "Émetteur", missing, warnings, true);
   const buyerIsBusiness = (doc.client?.type || "entreprise") !== "particulier";
   const buyer = buildParty(doc.client, null, "Client", missing, warnings, false);
+  if (options.sandboxIds) { applySandboxId(seller, options.sandboxIds.seller, missing, "Émetteur"); applySandboxId(buyer, options.sandboxIds.buyer, missing, "Client"); }
   // Le SIREN du client n'est exigé que pour un professionnel établi en
   // France (cadre B2B de la réforme). Un client étranger relève du cadre
   // B2BINT (e-reporting), un particulier du cadre B2C.
@@ -392,7 +405,7 @@ function partyXml(tag: string, p: FxParty, withContact: boolean): string {
     // Adresse électronique (BT-34 / BT-49) exigée par les règles
     // françaises : le SIREN, avec le schéma 0225 de l'annuaire national
     // (règles BR-FR-12, BR-FR-13 et BR-FR-21 du référentiel XP Z12-012).
-    opt(p.siren, el("ram:URIUniversalCommunication", el("ram:URIID", esc(p.siren), ' schemeID="0225"'))) +
+    opt(p.electronicId || p.siren, el("ram:URIUniversalCommunication", el("ram:URIID", esc(p.electronicId || p.siren), ' schemeID="0225"'))) +
     opt(p.vatId, el("ram:SpecifiedTaxRegistration", el("ram:ID", esc(p.vatId), ' schemeID="VA"'))),
   );
 }

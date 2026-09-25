@@ -132,3 +132,29 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
   (`openssl rand -base64 32`), `SUPERPDP_API_BASE` (facultatif), `SITE_URL`.
   Adresse de retour à déclarer dans l'application Super PDP :
   `https://www.chantiflow.fr/?superpdp=retour`.
+
+## 7. Réalisé — étape 2 (26/09/2026) : envoi d'une facture
+
+- Fonction `superpdp-send-invoice` (propriétaire ou éditeur) : relit la
+  facture et la fiche entreprise en base, applique les règles
+  d'éligibilité de `_shared/superpdp-rules.ts` (facture émise, client
+  professionnel français avec SIRET, compte connecté et vérifié, bac à
+  sable tant que `SUPERPDP_ALLOW_PRODUCTION` ≠ `true`, pas d'envoi en cours
+  ou abouti), pose un verrou dans `pdp_invoices`, produit le Factur-X par
+  `generate-facturx`, valide (`POST /validation_reports`), vérifie
+  l'annuaire (`GET /french_directory/entries`, bloquant en production,
+  avertissement en bac à sable), envoie (`POST /invoices` avec
+  `processing_rule=B2B` et `external_id` = identifiant du document), puis
+  enregistre la ligne `pdp_invoices` et le champ `pdp` du document.
+- Bac à sable : les identifiants d'entreprise Super PDP
+  (`0225:315143296_106843`, `315143296_106842`) remplacent le SIREN dans
+  les adresses électroniques du XML (`sandboxIds` de `generate-facturx`) ;
+  celui du client se saisit dans le champ SIRET de sa fiche.
+- Site : entrée « Envoyer via Super PDP » du menu Exporter (confirmation),
+  badge de statut sur la facture et dans la liste, contenu figé une fois
+  transmise (statut, paiements, relances restent modifiables ; un avoir
+  corrige). `src/pdp-rules.js` reprend les règles serveur (test de parité).
+- Table `pdp_invoices` (script `2026-09-26_super-pdp-etape2.sql`) : lecture
+  par les membres, écriture par les fonctions serveur.
+- Étape 3 à venir : lecture des événements (`GET /invoice_events`), statuts
+  officiels, événement `fr:212` quand la facture passe « payée ».
