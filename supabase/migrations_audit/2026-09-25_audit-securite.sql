@@ -113,6 +113,7 @@ $$;
 -- 5. public_document_links : seuls les membres qui peuvent modifier
 --    (owner, editor) créent des liens publics — un lecteur ne publie rien.
 drop policy if exists "Les membres créent des liens pour leurs documents" on public.public_document_links;
+drop policy if exists "Les membres éditeurs créent des liens pour leurs documents" on public.public_document_links; -- script rejouable
 create policy "Les membres éditeurs créent des liens pour leurs documents"
 on public.public_document_links for insert to authenticated
 with check (exists (
