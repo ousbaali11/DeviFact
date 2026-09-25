@@ -11619,6 +11619,64 @@ function useAtelierPlanning(organizationId) {
   return { slots, members, saving, persist };
 }
 
+// Tâches par chantier (priorité 8) : pense-bête de la fiche chantier, sans
+// document généré. Liste partagée de l'organisation (clé kv
+// « chantier-tasks »), fusionnée entre membres comme le planning ; une
+// tâche : { id, chantier, text, done, dueDate, createdAt, updatedAt, doneAt }.
+// Attachée au nom du chantier (même règle que le planning).
+const CHANTIER_TASKS_KEY = "chantier-tasks";
+function useChantierTasks(organizationId) {
+  const [tasks, setTasks] = useState(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setTasks(null);
+    if (!organizationId) { setTasks([]); return; }
+    (async () => {
+      try {
+        const res = await window.storage.get(CHANTIER_TASKS_KEY, false);
+        const parsed = JSON.parse(res.value);
+        if (!cancelled) setTasks(Array.isArray(parsed) ? parsed : []);
+      } catch (err) {
+        if (cancelled) return;
+        if (err?.code !== "KEY_NOT_FOUND") console.error("Erreur de chargement des tâches", err);
+        setTasks([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [organizationId]);
+  async function persist(next) {
+    setTasks(next);
+    setSaving(true);
+    try {
+      const res = await window.storage.set(CHANTIER_TASKS_KEY, JSON.stringify(next), false);
+      if (res?.merged) setTasks(JSON.parse(res.value)); // fusion avec les tâches d'un autre membre
+    } catch (err) {
+      console.error("Erreur d'enregistrement des tâches", err);
+      alert("Impossible d'enregistrer les tâches pour l'instant. Réessaie dans un instant.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return { tasks, saving, persist };
+}
+const taskIsOverdue = (t, todayIso) => !t.done && /^\d{4}-\d{2}-\d{2}$/.test(String(t.dueDate || "")) && t.dueDate < todayIso;
+// Tâches d'un chantier : à faire d'abord (échéance la plus proche, puis
+// création), faites ensuite (dernière réalisée en premier).
+function chantierTasksOf(tasks, chantierName) {
+  const key = String(chantierName || "").trim().toLowerCase();
+  if (!key) return [];
+  const mine = (tasks || []).filter((t) => t && String(t.chantier || "").trim().toLowerCase() === key);
+  const open = mine.filter((t) => !t.done).sort((a, b) => (a.dueDate && b.dueDate ? a.dueDate.localeCompare(b.dueDate) : a.dueDate ? -1 : b.dueDate ? 1 : 0) || (a.createdAt || 0) - (b.createdAt || 0));
+  const done = mine.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+  return [...open, ...done];
+}
+function chantierTaskCounts(tasks, chantierName, todayIso = toIsoDate(new Date())) {
+  const mine = chantierTasksOf(tasks, chantierName);
+  return { open: mine.filter((t) => !t.done).length, overdue: mine.filter((t) => taskIsOverdue(t, todayIso)).length, done: mine.filter((t) => t.done).length };
+}
+const taskCountsLabel = (c) => (c.open === 0 ? "" : `${c.open} tâche${c.open > 1 ? "s" : ""} à faire${c.overdue ? `, dont ${c.overdue} en retard` : ""}`);
+
 // Regroupe les documents par chantier, avec les montants, le client, les
 // photos et le prochain créneau planifié.
 function atelierChantierStats(documents, slots) {
@@ -11714,6 +11772,7 @@ function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLo
   const [newName, setNewName] = useState("");
   const [asking, setAsking] = useState(false);
   const { slots } = useAtelierPlanning(account?.organizationId);
+  const { tasks } = useChantierTasks(account?.organizationId);
   const chantiers = useMemo(() => atelierChantierStats(documents, slots), [documents, slots]);
   // Garantie qui expire dans les 30 jours, par chantier (la plus proche).
   const warrantyByChantier = useMemo(() => {
@@ -11783,6 +11842,7 @@ function AtelierChantiersView({ documents, account, siteSettings, darkMode, isLo
                     <span><span className="block" style={{ color: tone.inkSoft }}>Marge HT</span><span className="df-mono font-semibold" style={{ color: c.marge >= 0 ? tone.success : tone.danger }}>{c.marge >= 0 ? "+" : ""}{eur(c.marge)}</span></span>
                   </span>
                   {c.nextSlot && <span className="flex items-center gap-1.5 text-xs" style={{ color: tone.accent }}><Calendar size={13} /> {fr(c.nextSlot.start)} : {c.nextSlot.title}{c.nextSlot.memberLabel ? ` (${c.nextSlot.memberLabel})` : ""}</span>}
+                  {(() => { const label = taskCountsLabel(chantierTaskCounts(tasks, c.nom)); return label ? <span className="flex items-center gap-1.5 text-xs" style={{ color: label.includes("retard") ? tone.danger : tone.inkSoft }} data-testid="chantier-tasks-line"><ClipboardCheck size={13} /> {label}</span> : null; })()}
                   {warrantyByChantier.has(c.nom.toLowerCase()) && (() => { const a = warrantyByChantier.get(c.nom.toLowerCase()); return <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: tone.warning }} data-testid="chantier-warranty-badge"><Shield size={13} /> {a.label} : {a.daysLeft === 0 ? "expire aujourd'hui" : `expire dans ${a.daysLeft} j`}</span>; })()}
                 </button>
               ))}
@@ -11802,7 +11862,35 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
   const [editing, setEditing] = useState(null);
   const [photoUrls, setPhotoUrls] = useState({});
   const { slots, members, saving, persist } = useAtelierPlanning(account?.organizationId);
+  const tasksStore = useChantierTasks(account?.organizationId);
+  const chantierTasks = useMemo(() => chantierTasksOf(tasksStore.tasks, name), [tasksStore.tasks, name]);
+  const taskCounts = useMemo(() => chantierTaskCounts(tasksStore.tasks, name), [tasksStore.tasks, name]);
+  const [taskDraft, setTaskDraft] = useState({ text: "", dueDate: "" });
+  const [taskEditing, setTaskEditing] = useState(null); // { id, text, dueDate }
   const canEdit = !isLocked && !isViewer;
+  function addTask() {
+    const text = taskDraft.text.trim();
+    if (!text || !canEdit) return;
+    const now = Date.now();
+    tasksStore.persist([...(tasksStore.tasks || []), { id: nextId("tk"), chantier: name, text, done: false, dueDate: taskDraft.dueDate || "", createdAt: now, updatedAt: now, doneAt: null }]);
+    setTaskDraft({ text: "", dueDate: "" });
+  }
+  function toggleTask(t) {
+    if (!canEdit) return;
+    const now = Date.now();
+    tasksStore.persist((tasksStore.tasks || []).map((x) => (x.id === t.id ? { ...x, done: !x.done, doneAt: x.done ? null : now, updatedAt: now } : x)));
+  }
+  function saveTaskEdit() {
+    const text = (taskEditing?.text || "").trim();
+    if (!taskEditing || !text) { setTaskEditing(null); return; }
+    tasksStore.persist((tasksStore.tasks || []).map((x) => (x.id === taskEditing.id ? { ...x, text, dueDate: taskEditing.dueDate || "", updatedAt: Date.now() } : x)));
+    setTaskEditing(null);
+  }
+  function deleteTask(t) {
+    if (!canEdit || !window.confirm(`Supprimer la tâche « ${t.text} » ?`)) return;
+    tasksStore.persist((tasksStore.tasks || []).filter((x) => x.id !== t.id));
+    setTaskEditing(null);
+  }
   const card = { background: tone.surface, border: `1px solid ${tone.line}` };
   const chip = (active) => ({ background: active ? tone.accent : tone.surface, color: active ? "white" : tone.ink, border: `1px solid ${active ? tone.accent : tone.line}` });
 
@@ -11874,11 +11962,62 @@ function AtelierChantierView({ name, documents, account, darkMode, isLocked, isV
       </div>
 
       <div className="mb-4 flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
-        {[["documents", `Documents (${stats.docs.length})`], ["planning", `Planning (${stats.slots.length})`], ["photos", `Photos (${allPhotos.length})`], ["garanties", `Garanties (${warranties.length})`]].map(([id, label]) => (
+        {[["documents", `Documents (${stats.docs.length})`], ["planning", `Planning (${stats.slots.length})`], ["photos", `Photos (${allPhotos.length})`], ["garanties", `Garanties (${warranties.length})`], ["taches", `Tâches (${taskCounts.open})`]].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)} className="df-at-tap shrink-0 rounded-full px-4 py-2 text-sm font-medium" style={chip(tab === id)}>{label}</button>
         ))}
       </div>
 
+      {tab === "taches" && (
+        <div data-testid="chantier-tasks">
+          {canEdit && (
+            <form className="mb-3 flex flex-wrap items-end gap-2 rounded-xl p-3" style={card} onSubmit={(e) => { e.preventDefault(); addTask(); }}>
+              <label className="min-w-0 grow basis-56 text-xs" style={{ color: tone.inkSoft }}>Nouvelle tâche
+                <input className="df-input mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${tone.line}` }} placeholder="ex : Commander les tuiles" value={taskDraft.text} onChange={(e) => setTaskDraft((d) => ({ ...d, text: e.target.value }))} aria-label="Nouvelle tâche" />
+              </label>
+              <label className="text-xs" style={{ color: tone.inkSoft }}>Échéance (optionnel)
+                <input type="date" className="df-input df-mono mt-1 block rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${tone.line}` }} value={taskDraft.dueDate} onChange={(e) => setTaskDraft((d) => ({ ...d, dueDate: e.target.value }))} aria-label="Échéance de la nouvelle tâche" />
+              </label>
+              <button type="submit" disabled={!taskDraft.text.trim() || tasksStore.saving} className="df-at-tap flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: tone.accent, opacity: taskDraft.text.trim() ? 1 : 0.5 }}><Plus size={15} /> Ajouter</button>
+            </form>
+          )}
+          {tasksStore.tasks === null ? (
+            <p className="rounded-xl px-4 py-3 text-sm" style={{ ...card, color: tone.inkSoft }}>Chargement des tâches…</p>
+          ) : chantierTasks.length === 0 ? (
+            <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }} data-testid="chantier-tasks-empty">
+              <p className="text-[15px] font-semibold">Aucune tâche sur ce chantier</p>
+              <p className="mt-1 text-sm" style={{ color: tone.inkSoft }}>Un pense-bête propre à ce chantier : matériel à commander, point à vérifier, appel à passer… avec une échéance si besoin.</p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl" style={card}>
+              {chantierTasks.map((t, i) => {
+                const overdue = taskIsOverdue(t, todayIso);
+                const editing = taskEditing?.id === t.id;
+                return (
+                  <div key={t.id} className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderTop: i ? `1px solid ${tone.line}` : "none", opacity: t.done ? 0.7 : 1 }} data-testid="chantier-task" data-done={t.done ? "1" : "0"}>
+                    <input type="checkbox" checked={!!t.done} disabled={!canEdit} onChange={() => toggleTask(t)} className="h-5 w-5 shrink-0 cursor-pointer" aria-label={`${t.done ? "Rouvrir" : "Terminer"} : ${t.text}`} style={{ accentColor: tone.accent }} />
+                    {editing ? (
+                      <form className="flex min-w-0 flex-1 flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); saveTaskEdit(); }}>
+                        <input className="df-input min-w-0 grow rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${tone.line}` }} value={taskEditing.text} onChange={(e) => setTaskEditing((x) => ({ ...x, text: e.target.value }))} aria-label="Texte de la tâche" autoFocus />
+                        <input type="date" className="df-input df-mono rounded-md px-2 py-1 text-sm" style={{ border: `1px solid ${tone.line}` }} value={taskEditing.dueDate} onChange={(e) => setTaskEditing((x) => ({ ...x, dueDate: e.target.value }))} aria-label="Échéance de la tâche" />
+                        <button type="submit" className="rounded-md px-2 py-1 text-xs font-semibold text-white" style={{ background: tone.accent }}>OK</button>
+                        <button type="button" onClick={() => setTaskEditing(null)} className="px-2 py-1 text-xs" style={{ color: tone.inkSoft }}>Annuler</button>
+                      </form>
+                    ) : (
+                      <button type="button" onClick={() => canEdit && !t.done && setTaskEditing({ id: t.id, text: t.text, dueDate: t.dueDate || "" })} className="min-w-0 flex-1 text-left" title={canEdit && !t.done ? "Modifier" : undefined}>
+                        <span className="block text-[15px]" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? tone.inkSoft : tone.ink }}>{t.text}</span>
+                        <span className="block text-xs" style={{ color: overdue ? tone.danger : tone.inkSoft }}>
+                          {t.done ? `Fait le ${t.doneAt ? new Date(t.doneAt).toLocaleDateString("fr-FR") : "—"}` : t.dueDate ? `Échéance ${fr(t.dueDate)}${overdue ? " · en retard" : ""}` : "Sans échéance"}
+                        </span>
+                      </button>
+                    )}
+                    {canEdit && !editing && <button type="button" onClick={() => deleteTask(t)} className="df-at-tap flex h-9 w-9 shrink-0 items-center justify-center" style={{ color: tone.danger }} title="Supprimer" aria-label={`Supprimer : ${t.text}`}><Trash2 size={15} /></button>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       {tab === "garanties" && (
         warranties.length === 0 ? (
           <div className="rounded-xl p-8 text-center" style={{ ...card, borderStyle: "dashed" }} data-testid="warranties-empty">
@@ -18318,5 +18457,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
