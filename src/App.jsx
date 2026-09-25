@@ -3339,6 +3339,12 @@ function DeviFactAppInner() {
   const [savingClients, setSavingClients] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
   const [activeId, setActiveId] = useState(() => (typeof window !== "undefined" && lsGet("devifact_lastActiveId")) || null);
+  // Enregistrements concurrents : membres de l'organisation (noms des
+  // auteurs d'un conflit) et présence sur le document ouvert.
+  const orgMembers = useOrgMembers(account?.organizationId);
+  const presenceName = [account?.firstName, account?.lastName].filter(Boolean).join(" ") || account?.companyName || account?.email || "Un membre";
+  const presenceOthers = useDocPresence(account?.organizationId, { id: account?.id, name: presenceName }, activeId);
+  const memberLabelOf = (userId) => orgMembers.find((m) => m.userId === userId)?.label || presenceOthers.find((o) => o.userId === userId)?.name || "";
   // Document tout juste ouvert ("Nouveau devis" etc.) mais jamais
   // encore réellement enregistré — reste ici, en mémoire seulement,
   // tant qu'il est vide. Dès qu'il contient un vrai contenu, il
@@ -5297,6 +5303,8 @@ function DeviFactAppInner() {
         pdpStatus={pdpStatus}
         onSendPdp={sendInvoiceToPdp}
         onRefreshPdp={refreshPdpStatus}
+        presence={presenceOthers.filter((o) => o.docId === activeDoc.id)}
+        memberLabelOf={memberLabelOf}
       />
     );
   }
@@ -8130,12 +8138,15 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
       if (!prev || prev.id !== doc.id) return prev;
       const pending = pendingPatchRef.current || {};
       let next = prev;
-      for (const key of ["status", "paidAt", "paidTotal", "payments", "workStage", "items", "signature"]) {
+      // Tout champ changé ailleurs (fusion avec un autre membre, écriture
+      // serveur) est repris, sauf ceux qu'une modification locale attend
+      // encore d'enregistrer.
+      for (const key of Object.keys(doc)) {
         if (!(key in pending) && prev[key] !== doc[key]) next = { ...next, [key]: doc[key] };
       }
       return next;
     });
-  }, [doc.id, doc.status, doc.paidAt, doc.paidTotal, doc.payments, doc.workStage, doc.items, doc.signature]);
+  }, [doc]);
 
   function patch(p) {
     setLocalDoc((prev) => ({ ...prev, ...p }));
@@ -9086,6 +9097,36 @@ const memberKey = (m) => m?.user_id || `${STAFF_ROLE}:${m?.id}`;
 // « technicien » (rapport) et « responsable » (planning). Liste vide tant
 // que la base n'a pas répondu, ou en cas d'erreur : le champ redevient
 // alors un simple texte libre.
+// Présence temps réel (enregistrements concurrents) : chaque membre connecté
+// annonce sur un canal de l'organisation le document qu'il a ouvert ; on
+// obtient la liste des autres membres et de leur document. Aucune écriture
+// en base, rien n'est bloqué : c'est un signal, pas un verrou.
+function useDocPresence(organizationId, me, docId) {
+  const [others, setOthers] = useState([]);
+  const meId = me?.id || null, meName = me?.name || "";
+  useEffect(() => {
+    if (!organizationId || !meId || typeof db.channel !== "function") { setOthers([]); return undefined; }
+    let cancelled = false;
+    let channel = null;
+    try {
+      channel = db.channel(`presence:org:${organizationId}`, { config: { presence: { key: meId } } });
+      const refresh = () => {
+        if (cancelled) return;
+        const list = [];
+        for (const [key, metas] of Object.entries(channel.presenceState() || {})) {
+          if (key === meId) continue;
+          for (const m of metas || []) list.push({ userId: key, name: String(m?.name || ""), docId: m?.docId || null });
+        }
+        setOthers(list);
+      };
+      channel.on("presence", { event: "sync" }, refresh).subscribe(async (status) => {
+        if (status === "SUBSCRIBED" && !cancelled) { try { await channel.track({ name: meName, docId: docId || null, at: Date.now() }); } catch (err) { console.warn("Présence non annoncée", err); } }
+      });
+    } catch (err) { console.warn("Présence temps réel indisponible", err); }
+    return () => { cancelled = true; if (channel) { try { db.removeChannel(channel); } catch { /* canal déjà fermé */ } } };
+  }, [organizationId, meId, meName, docId]);
+  return others;
+}
 function useOrgMembers(organizationId) {
   const [members, setMembers] = useState([]);
   useEffect(() => {
@@ -17366,7 +17407,7 @@ function PaymentsEditor({ doc, totals, onPatch, disabled = false, creditTotal = 
   );
 }
 
-function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, creditNotes = [], pdpStatus = null, onSendPdp = null, onRefreshPdp = null, acompteSuggestion = null }) {
+function Editor({ doc, saving, clients, products = [], stockByProduct = {}, account, plans, siteSettings, companyProfile, isLocked, isViewer, onChange, onFinalize, onBack, onConvert, onSaveClient, onSaveProduct, onSplit, splitNotice, onOpenSplitDoc, onDismissSplitNotice, onGoToPricing, reviewNotice = null, onSendReview, onDismissReview, onSyncOnlinePayments = null, paymentNotice = null, onDismissPaymentNotice = null, linkableInvoices = [], creditTotal = 0, creditNotes = [], pdpStatus = null, onSendPdp = null, onRefreshPdp = null, presence = [], memberLabelOf = null, acompteSuggestion = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   useOnlinePaymentsSync(doc, ONLINE_PAYMENTS_ENABLED ? onSyncOnlinePayments : null, setLocalDoc);
   const [clientQuery, setClientQuery] = useState("");
@@ -17442,12 +17483,15 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
       if (!prev || prev.id !== doc.id) return prev;
       const pending = pendingPatchRef.current || {};
       let next = prev;
-      for (const key of ["status", "paidAt", "paidTotal", "payments", "workStage", "items", "signature"]) {
+      // Tout champ changé ailleurs (fusion avec un autre membre, écriture
+      // serveur) est repris, sauf ceux qu'une modification locale attend
+      // encore d'enregistrer.
+      for (const key of Object.keys(doc)) {
         if (!(key in pending) && prev[key] !== doc[key]) next = { ...next, [key]: doc[key] };
       }
       return next;
     });
-  }, [doc.id, doc.status, doc.paidAt, doc.paidTotal, doc.payments, doc.workStage, doc.items, doc.signature]);
+  }, [doc]);
 
   // Le focus automatique sur un champ nouvellement ajouté ne doit jouer
   // qu'une fois — sinon il "vole" le focus en continu à chaque frappe
@@ -18138,6 +18182,21 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
         <ReviewRequestNotice notice={reviewNotice} onSend={onSendReview} onDismiss={onDismissReview} />
         <QrCodeDialog key={qrDialog?.url || "closed"} qr={qrDialog} title={localDoc.type === "devis" ? "QR code du lien de signature" : "QR code du lien de paiement"} onClose={() => setQrDialog(null)} />
         <PaymentRevertNotice notice={paymentNotice} onDismiss={onDismissPaymentNotice} />
+        {presence.length > 0 && (
+          <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brass}1A`, border: `1px solid ${colors.brass}66`, color: colors.brassDark }} data-testid="presence-banner">
+            <Users size={16} className="mt-0.5 shrink-0" />
+            <span><strong>{presence.map((o) => o.name || "Un membre").join(", ")}</strong> {presence.length > 1 ? "modifient" : "modifie"} aussi ce document en ce moment. Vos modifications seront fusionnées ; si vous touchez au même champ, la plus récente sera gardée et signalée ici.</span>
+          </div>
+        )}
+        {localDoc.conflict && (
+          <div className="no-print mb-4 flex flex-wrap items-start justify-between gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}55`, color: colors.brick }} data-testid="conflict-banner">
+            <span className="flex items-start gap-2">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>Modifié en même temps par {localDoc.conflict.otherWriter && memberLabelOf?.(localDoc.conflict.otherWriter) ? <strong>{memberLabelOf(localDoc.conflict.otherWriter)}</strong> : "un autre membre"}{localDoc.conflict.at ? ` le ${fr(new Date(localDoc.conflict.at))}` : ""} : {(localDoc.conflict.fields || []).join(", ")}. La version la plus récente ({localDoc.conflict.kept === "local" ? "la tienne" : "la sienne"}) a été gardée pour ces champs ; vérifie-les.</span>
+            </span>
+            <button onClick={() => patch({ conflict: null })} className="shrink-0 rounded-md px-3 py-1 text-xs font-medium" style={{ border: `1px solid ${colors.brick}66`, color: colors.brick }} data-testid="conflict-dismiss">Vu, ne plus afficher</button>
+          </div>
+        )}
         {pdpLocked && (
           <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="pdp-lock-banner">
             <Lock size={15} className="mt-0.5 shrink-0" />

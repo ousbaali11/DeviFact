@@ -5,7 +5,7 @@
 // qu'afficher l'entrée du menu quand elle a un sens.
 
 export const PDP_FINAL_FAILURES = ["api:invalid", "api:rejected", "fr:210", "fr:213", "fr:501", "error"];
-export const PDP_EDITABLE_KEYS = ["status", "paidAt", "paidTotal", "payments", "workStage", "lastReminderSentAt", "remindersEnabled", "pdp", "updatedAt"];
+export const PDP_EDITABLE_KEYS = ["status", "paidAt", "paidTotal", "payments", "workStage", "lastReminderSentAt", "remindersEnabled", "pdp", "conflict", "updatedAt"];
 export const PDP_STATUS_LABELS = {
   "api:sending": "Envoi en cours", "api:uploaded": "Déposée chez Super PDP", "api:validated": "Validée", "api:invalid": "Fichier refusé",
   "api:sent": "Transmise", "api:rejected": "Rejetée par la plateforme du client", "api:received": "Reçue", "api:acknowledged": "Accusé de réception", "api:accepted": "Acceptée",
