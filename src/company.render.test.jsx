@@ -38,7 +38,7 @@ describe("Mon entreprise — mentions légales (étape A)", () => {
     expect(companyInsuranceLabel({})).toBe("");
   });
   it("formulaire : les nouveaux champs sont dans le bloc « Mentions légales », entre N° TVA et Factur-X, pour une entreprise", async () => {
-    const profile = { ...emptyCompanyProfile(), name: "" }; // nom vide → mode édition d'emblée
+    const profile = { ...emptyCompanyProfile(), name: "", country: "🇫🇷 FR" }; // nom vide → mode édition d'emblée ; France → section Factur-X
     const { container, unmount } = await mount(<CompanyView profile={profile} saving={false} onSave={noop} onReset={noop} documentCount={0} clientCount={0} account={account} isLocked={false} isViewer={false} onGoToPricing={noop} />);
     const text = container.textContent;
     expect(text).toContain("Mentions légales des devis et factures");

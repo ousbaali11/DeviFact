@@ -21,7 +21,7 @@ beforeAll(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; window.scrollTo = 
 const noop = () => {};
 const account = { id: "u", organizationId: "org", plan: "pro", paymentStatus: "payé", role: "owner", email: "t@e.fr", memberships: [] };
 const line = { id: "l1", type: "line", designation: "Pose", details: [], qty: 1, unitPrice: 100, tva: 20, discount: 0 };
-const props = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow" }, isLocked: false, isViewer: false, onChange: noop, onFinalize: noop, onBack: noop, onGoToPricing: noop, products: [], stockByProduct: {}, companyProfile: { ...emptyCompanyProfile(), name: "Bâti Plus" }, onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, clients: [] };
+const props = { saving: false, account, plans: PLANS, siteSettings: { name: "Chantiflow" }, isLocked: false, isViewer: false, onChange: noop, onFinalize: noop, onBack: noop, onGoToPricing: noop, products: [], stockByProduct: {}, companyProfile: { ...emptyCompanyProfile(), name: "Bâti Plus", country: "🇫🇷 FR" }, onConvert: noop, onSaveClient: noop, onSaveProduct: noop, onSplit: noop, splitNotice: null, onOpenSplitDoc: noop, onDismissSplitNotice: noop, clients: [] };
 async function mount(element) {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -53,7 +53,7 @@ describe("éditeur principal", () => {
     expect(menuItems(container)).toEqual([]);
     await unmount();
   }, 30000);
-  it("facture : Factur-X et Lien de paiement en plus ; lecteur : ni lien ni QR code", async () => {
+  it("facture (entreprise en France) : Factur-X et Lien de paiement en plus ; lecteur : ni lien ni QR code", async () => {
     const facture = { ...newDocument("facture", []), docNumber: "FAC-1", items: [line], client: { type: "particulier", name: "M. Dupont" } };
     const a = await mount(<Editor {...props} doc={facture} />);
     await click(menuButton(a.container));

@@ -10618,6 +10618,11 @@ function countryCodeOf(entry) {
   const m = /([A-Z]{2})\s*$/.exec(entry || "");
   return m ? m[1].toLowerCase() : null;
 }
+// Factur-X (facture électronique française) : proposé seulement quand le pays
+// de la fiche Mon entreprise est la France. Pays absent = pas la France.
+function isFranceCompany(profile) {
+  return countryCodeOf(profile?.country) === "fr";
+}
 
 // Remplace le <select> natif pour le pays : les emojis drapeaux ne
 // s'affichent pas correctement sur Windows (ils retombent sur du texte
@@ -15238,8 +15243,8 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
             </div>
           )}
           <div className="rounded-lg p-3" style={{ background: colors.paper }}>
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>Facturation électronique (Factur-X)</div>
-            <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Coordonnées de paiement reprises dans le bloc « À payer » des factures (PDF) et dans les factures électroniques ; option de TVA pour Factur-X.</p>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: colors.slate }}>{isFranceCompany(local) ? "Facturation électronique (Factur-X)" : "Coordonnées de paiement"}</div>
+            <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>{isFranceCompany(local) ? "Coordonnées de paiement reprises dans le bloc « À payer » des factures (PDF) et dans les factures électroniques ; option de TVA pour Factur-X." : "Coordonnées de paiement reprises dans le bloc « À payer » des factures (PDF)."}</p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium" style={{ color: colors.inkSoft }}>Banque</label>
@@ -17768,6 +17773,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   // facture affichée. Indépendant du bouton PDF classique, qui reste
   // inchangé. Ne transmet rien à une Plateforme Agréée.
   const [facturxGenerating, setFacturxGenerating] = useState(false);
+  const facturxAvailable = isFranceCompany(companyProfile); // réservé aux entreprises françaises
   async function downloadFacturX() {
     if (facturxGenerating) return;
     setFacturxGenerating(true);
@@ -17834,7 +17840,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           <ExportMenu items={[
             { id: "pdf", label: "PDF", icon: Printer, onClick: downloadPdf, busy: pdfGenerating },
             { id: "excel", label: "Excel", icon: FileSpreadsheet, onClick: exportExcel },
-            localDoc.type === "facture" ? { id: "facturx", label: "Factur-X (facture électronique)", icon: FileText, onClick: downloadFacturX, busy: facturxGenerating } : null,
+            localDoc.type === "facture" && facturxAvailable ? { id: "facturx", label: "Factur-X (facture électronique)", icon: FileText, onClick: downloadFacturX, busy: facturxGenerating } : null,
             !isViewer && hasPublicLinkType ? { id: "link", label: localDoc.type === "devis" ? "Lien de signature" : "Lien de paiement", icon: Link2, onClick: generatePublicLink, busy: publicLinkState.loading } : null,
             !isViewer && hasPublicLinkType ? { id: "qr", label: "QR code du lien", icon: QrCode, onClick: showQrCode, busy: qrLoading } : null,
           ]} />
@@ -18102,8 +18108,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <input className="df-input w-full rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="Ex : Rénovation cuisine Dupont" value={localDoc.chantier || ""} onChange={(e) => patch({ chantier: e.target.value })} />
           </div>
 
-          {(localDoc.type === "facture" || localDoc.type === "devis") && (
-            <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }}>
+          {facturxAvailable && (localDoc.type === "facture" || localDoc.type === "devis") && (
+            <div className="no-print mb-8 rounded-xl p-4" style={{ border: `1px solid ${colors.line}` }} data-testid="facturx-block">
               <div className="df-display mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>
                 <FileText size={13} /> Facturation électronique (Factur-X)
               </div>
@@ -18811,5 +18817,5 @@ export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
-  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, accountingExportRows, acompteDeduitSplit, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange, RevenueChart, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
+  PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, isFranceCompany, accountingExportRows, acompteDeduitSplit, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange, RevenueChart, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };
