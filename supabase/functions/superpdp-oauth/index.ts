@@ -54,7 +54,10 @@ serve(async (req) => {
 
     if (action === "status") {
       const conn = await readConnection(dbAdmin, organizationId);
-      return json({ configured: superpdpConfigured(), ...publicStatusOf(conn) });
+      // allowProduction : envois réels autorisés sur le site (garde-fou
+      // SUPERPDP_ALLOW_PRODUCTION) — lecture seule, affichée sur la carte pour
+      // distinguer l'environnement du compte connecté de l'autorisation du site.
+      return json({ configured: superpdpConfigured(), allowProduction: superpdpAllowProduction(), ...publicStatusOf(conn) });
     }
     if (!superpdpConfigured()) return json({ error: "Connexion Super PDP pas encore configurée (secrets SUPERPDP_* absents)." }, 503);
 

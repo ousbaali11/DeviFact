@@ -85,6 +85,14 @@ seulement après un échec final ; verrou « envoi en cours » libéré après
 | « Journal indisponible » | Table `pdp_journal` absente | Appliquer le script étape 4 |
 | Bandeau « Réaligné » au journal | Pièce en retard sur la table des envois (coupure, enregistrement concurrent) | Rien à faire : réalignement automatique à la relecture |
 
+## 4. Passage en production
+
+Décision à part, jamais déclenchée par le code : procédure écrite dans
+`PRODUCTION-SUPER-PDP.md` (prérequis à cocher, bascule pas à pas, première
+facture réelle, retour arrière). La carte de Mon entreprise affiche
+« Envois réels autorisés sur le site : oui / non » (garde-fou
+`SUPERPDP_ALLOW_PRODUCTION`, renvoyé par l'action `status`).
+
 ## Annexe — historique des chantiers
 
 # Super PDP — notes d'intégration (lecture de la documentation, septembre 2026)
@@ -408,3 +416,11 @@ quand l'annuaire le connaît) : identifiant légal = numéro de test, adresse
   page d'autorisation (carte Super PDP). `apiErrorMessage` traduit et garde le
   texte brut dans les logs ; le journal reçoit la liste brute des règles.
 - Tests : `src/superpdp-messages.test.jsx`.
+
+### 17. Étape 4, chantier 5 (30/09/2026) : procédure de production
+
+- Document `PRODUCTION-SUPER-PDP.md` (bascule globale au site, prérequis,
+  bascule, première facture réelle, retour arrière, journal des bascules).
+- Action `status` de `superpdp-oauth` : champ `allowProduction` ; carte de Mon
+  entreprise : ligne `superpdp-allow-production`. Tests :
+  `src/superpdp-production.test.jsx`. Aucun SQL, aucun secret modifié.
