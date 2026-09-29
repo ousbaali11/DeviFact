@@ -45,15 +45,15 @@ describe("en-têtes des PDF", () => {
   it("situation, PV, rapport, contrat, relance, planning : logo au-dessus du nom", () => {
     const company = { ...newDocument("facture", []).company, name: "Stratos consulting EI", logo: "" };
     const cases = [
-      ["situation", <PrintSituation doc={{ ...newSituationDocument([]), docNumber: "SIT-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
-      ["pv", <PrintPvReception doc={{ ...newPvReceptionDocument([]), docNumber: "PV-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
-      ["rapport", <PrintRapportIntervention doc={{ ...newRapportInterventionDocument([]), docNumber: "RAP-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
-      ["contrat", <PrintContrat doc={{ ...newContratChantierDocument([]), docNumber: "CTR-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
-      ["relance", <PrintRelance doc={{ ...newRelanceFormelleDocument([]), docNumber: "REL-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
-      ["planning", <PrintPlanning doc={{ ...newPlanningChantierDocument([]), docNumber: "PLN-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
+      ["situation", () => <PrintSituation doc={{ ...newSituationDocument([]), docNumber: "SIT-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
+      ["pv", () => <PrintPvReception doc={{ ...newPvReceptionDocument([]), docNumber: "PV-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
+      ["rapport", () => <PrintRapportIntervention doc={{ ...newRapportInterventionDocument([]), docNumber: "RAP-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
+      ["contrat", () => <PrintContrat doc={{ ...newContratChantierDocument([]), docNumber: "CTR-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
+      ["relance", () => <PrintRelance doc={{ ...newRelanceFormelleDocument([]), docNumber: "REL-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
+      ["planning", () => <PrintPlanning doc={{ ...newPlanningChantierDocument([]), docNumber: "PLN-1", company }} siteSettings={siteSettings} watermarkEnabled={false} companyProfile={profile} />],
     ];
     for (const [label, element] of cases) {
-      const markup = renderToStaticMarkup(element);
+      const markup = renderToStaticMarkup(element());
       expect(logoImgs(markup), label).toHaveLength(1);
       expect(markup.indexOf("print-company-logo"), label).toBeLessThan(markup.indexOf("Stratos consulting EI"));
       expect(logoImgs(markup)[0], label).toContain("height:1.5cm");
