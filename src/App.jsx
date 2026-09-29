@@ -8412,6 +8412,20 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
       <div className="no-print flex flex-wrap items-center justify-between gap-3 px-6 py-4" style={{ background: colors.ink, borderRadius: 0 }}>
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm font-medium text-white"><ArrowLeft size={16} /> Tableau de bord</button>
         <div className="flex items-center gap-2">
+          {/* Statut : même pastille que l'éditeur principal (avant, une
+              situation ne pouvait changer de statut que depuis la page
+              Documents — impossible de la passer « envoyée » d'ici, donc de
+              l'envoyer via Super PDP). Modifiable même une fois transmise. */}
+          <select
+            value={FACTURE_STATUSES.includes(localDoc.status) ? localDoc.status : "brouillon"}
+            onChange={(e) => patch({ status: e.target.value })}
+            className="df-select rounded-full px-3 py-1.5 text-xs font-medium"
+            style={{ background: `${statusColor(localDoc.status)}22`, color: "white", border: `1px solid ${statusColor(localDoc.status)}` }}
+            title="Statut de la situation"
+            data-testid="situation-status"
+          >
+            {FACTURE_STATUSES.map((st) => <option key={st} value={st} style={{ color: colors.ink }}>{st}</option>)}
+          </select>
           {localDoc.pdp?.status && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</span>}
           {localDoc.pdp?.invoiceId && onRefreshPdp && <button onClick={refreshPdp} disabled={pdpRefreshing} className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white" style={{ border: "1px solid rgba(255,255,255,0.35)", opacity: pdpRefreshing ? 0.6 : 1 }} title="Relire les événements Super PDP" data-testid="pdp-refresh">{pdpRefreshing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Actualiser</button>}
           {!hasNextSituation && !isLocked && (
