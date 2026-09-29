@@ -251,3 +251,15 @@ renseigne (copie en secours, avertissement en cas d'écart) ; nom et adresse
 gardent la copie. Un numéro de TVA sans préfixe pays sur deux lettres est
 bloquant avant tout envoi, émetteur comme client, avec l'endroit où corriger.
 Aucun représentant fiscal (BT-63) n'est jamais produit.
+
+## 13. Correctif du 29/09/2026 : « L'entreprise (000000002) liée à cette session ne correspond pas au vendeur de la facture (315143296) »
+
+En bac à sable, l'adresse d'annuaire d'une entreprise de test est
+`0225:315143296_<suffixe>` : le préfixe 315143296 est le SIREN de Super PDP,
+pas celui de l'entreprise. Le XML mettait ce préfixe en identifiant légal du
+vendeur (BT-30) ; Super PDP le compare au numéro de l'entreprise de la
+session (`000000002`). Désormais `superpdp-send-invoice` transmet à
+`generate-facturx` `sandboxIds.sellerNumber` (numéro de la connexion) et
+`buyerNumber` (lu dans `french_directory/entries?number=<adresse du client>`
+quand l'annuaire le connaît) : identifiant légal = numéro de test, adresse
+électronique = entrée d'annuaire, aucun SIRET réel dans le XML de bac à sable.

@@ -211,11 +211,21 @@ function buildParty(raw: any, fallback: any, label: string, missing: string[], w
 // options.sandboxIds : identifiants d'entreprises du bac à sable Super PDP
 // (« 315143296_106843 ») posés à la place du SIREN dans les adresses
 // électroniques (émetteur, destinataire) — jamais utilisés en production.
-export type BuildOptions = { sandboxIds?: { seller?: string | null; buyer?: string | null } | null };
-function applySandboxId(party: FxParty, id: string | null | undefined, missing: string[], label: string) {
+// Bac à sable Super PDP : `seller` / `buyer` = adresse d'annuaire Peppol
+// (« 315143296_106843 », placée en 0225:…) ; `sellerNumber` / `buyerNumber`
+// = numéro d'entreprise de test (« 000000002 »), placé comme identifiant
+// légal (BT-30 / BT-47). Le préfixe « 315143296 » de l'adresse est le SIREN
+// de Super PDP, pas celui de l'entreprise : Super PDP compare l'identifiant
+// légal du vendeur au numéro de l'entreprise de la session (erreur du
+// 29/09/2026 « ne correspond pas au vendeur de la facture (315143296) »).
+// Sans numéro connu (client), le préfixe reste utilisé faute de mieux.
+export type BuildOptions = { sandboxIds?: { seller?: string | null; buyer?: string | null; sellerNumber?: string | null; buyerNumber?: string | null } | null };
+function applySandboxId(party: FxParty, id: string | null | undefined, number: string | null | undefined, missing: string[], label: string) {
   const m = /^(\d{9})_\d{1,12}$/.exec(String(id || ""));
   if (!m) return;
-  party.siren = m[1];
+  const n = String(number || "").replace(/\s+/g, "");
+  party.siren = /^\d{9}$/.test(n) ? n : m[1];
+  party.siret = null; // aucun SIRET réel dans une facture de bac à sable
   party.electronicId = m[0];
   for (let i = missing.length - 1; i >= 0; i--) if (missing[i].startsWith(`${label} : SIRET`)) missing.splice(i, 1);
 }
@@ -270,7 +280,7 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
   const seller = buildParty(doc.company, companyProfile, "Émetteur", missing, warnings, true, "à corriger dans Mon entreprise");
   const buyerIsBusiness = (doc.client?.type || "entreprise") !== "particulier";
   const buyer = buildParty(doc.client, null, "Client", missing, warnings, false, "à corriger dans le champ TVA du client sur cette facture (et sur sa fiche)");
-  if (options.sandboxIds) { applySandboxId(seller, options.sandboxIds.seller, missing, "Émetteur"); applySandboxId(buyer, options.sandboxIds.buyer, missing, "Client"); }
+  if (options.sandboxIds) { applySandboxId(seller, options.sandboxIds.seller, options.sandboxIds.sellerNumber, missing, "Émetteur"); applySandboxId(buyer, options.sandboxIds.buyer, options.sandboxIds.buyerNumber, missing, "Client"); }
   // Le SIREN du client n'est exigé que pour un professionnel établi en
   // France (cadre B2B de la réforme). Un client étranger relève du cadre
   // B2BINT (e-reporting), un particulier du cadre B2C.

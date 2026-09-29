@@ -74,7 +74,8 @@ serve(async (req) => {
     // Identifiants du bac à sable Super PDP (superpdp-send-invoice) : ne
     // changent que les adresses électroniques du XML d'un fichier de test.
     const sb: any = body.sandboxIds && typeof body.sandboxIds === "object" ? body.sandboxIds : null;
-    const sandboxIds = sb ? { seller: typeof sb.seller === "string" ? sb.seller : null, buyer: typeof sb.buyer === "string" ? sb.buyer : null } : null;
+    const str = (v: unknown) => (typeof v === "string" ? v : null);
+    const sandboxIds = sb ? { seller: str(sb.seller), buyer: str(sb.buyer), sellerNumber: str(sb.sellerNumber), buyerNumber: str(sb.buyerNumber) } : null;
     const { model, missing, warnings } = buildInvoiceModel(body.document, body.companyProfile, siteName, { sandboxIds });
     if (!model) {
       return json({ error: "Des informations obligatoires manquent pour produire une facture électronique conforme.", missing, warnings }, 400);

@@ -92,7 +92,18 @@ serve(async (req) => {
         seller = sandboxSellerFromDirectory((await dir.json().catch(() => null))?.data);
       }
     }
-    const sandboxIds = sandbox ? { seller, buyer: sandboxIdentifierOf(doc.client?.siret)?.id || null } : null;
+    // Numéros d'entreprise de test : le vendeur est l'entreprise connectée
+    // (« 000000002 ») ; celui du client est lu dans l'annuaire à partir de son
+    // adresse de test, quand l'annuaire le connaît.
+    const buyerAddress = sandbox ? sandboxIdentifierOf(doc.client?.siret)?.id || null : null;
+    let buyerNumber: string | null = null;
+    if (sandbox && buyerAddress) {
+      const look = await superpdpFetch(dbAdmin, organizationId, `/v1.beta/french_directory/entries?number=${encodeURIComponent(buyerAddress)}`);
+      const found = look.ok ? ((await look.json().catch(() => null))?.data || []) : [];
+      const n = String(found.find((e: any) => e?.company?.number)?.company?.number || "").trim();
+      if (/^\d{9}$/.test(n)) buyerNumber = n;
+    }
+    const sandboxIds = sandbox ? { seller, buyer: buyerAddress, sellerNumber: conn.company_number_scheme === "sandbox" ? String(conn.company_number || "") : null, buyerNumber } : null;
     if (sandbox && !sandboxIds?.seller) return json({ error: `Bac à sable : aucune adresse d'annuaire Peppol active pour l'entreprise connectée (${conn.company_name || conn.company_number || "vide"}). Chez Super PDP, ouvre la fiche de l'entreprise et vérifie ses lignes d'annuaire (ex. 0225:315143296_106843).` }, 400);
     if (sandbox && !sandboxIds?.buyer && !sirenOfSiret(doc.client?.siret)) return json({ error: "Bac à sable : renseigne l'identifiant de test Super PDP du client (ex. 315143296_106842) dans le champ SIRET de sa fiche." }, 400);
 
