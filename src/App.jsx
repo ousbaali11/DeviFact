@@ -3680,6 +3680,25 @@ function DeviFactAppInner() {
   // règle de sécurité qui permet cette lecture élargie).
   const [allUsers, setAllUsers] = useState([]);
   const [allUsersError, setAllUsersError] = useState("");
+  // Suppression d'un compte depuis l'Admin (01/10/2026) : aperçu par la
+  // fonction delete_account_preview, suppression par la fonction serveur
+  // admin-delete-account (appartenances retirées, organisations vides
+  // supprimées ou conservées, journal, compte d'authentification effacé).
+  async function adminPreviewDeleteUser(userId) {
+    const { data, error } = await db.rpc("delete_account_preview", { target_user_id: userId });
+    if (error) throw new Error(error.message || "Aperçu indisponible.");
+    return data;
+  }
+  async function adminDeleteUser(userId, deleteData) {
+    const { data, error } = await invokeFunction("admin-delete-account", { userId, deleteData: deleteData !== false });
+    if (error || !data || data.error) {
+      let message = data?.error;
+      if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
+      throw new Error(message || error?.message || "Suppression impossible pour l'instant.");
+    }
+    await loadAllUsers();
+    return data;
+  }
   async function loadAllUsers() {
     const { data, error } = await db.from("profiles").select("id, email, first_name, last_name, company_name, is_admin, created_at, confirmed_at, last_confirmation_sent_at, referred_by, referral_code").order("created_at", { ascending: false });
     if (error) {
@@ -5772,6 +5791,8 @@ function DeviFactAppInner() {
         allUsers={allUsers}
         allUsersError={allUsersError}
         onRefreshUsers={loadAllUsers}
+        onPreviewDeleteUser={adminPreviewDeleteUser}
+        onDeleteUser={adminDeleteUser}
         onSetUserPlan={adminSetUserPlan}
         onSetUserPaidAt={adminSetUserPaidAt}
         onSetUserExpiresAt={adminSetUserExpiresAt}
@@ -16594,7 +16615,93 @@ function DesktopAppSettings({ siteSettings, saving, onSave }) {
   );
 }
 
-function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId }) {
+// Suppression d'un compte depuis l'Admin (01/10/2026) : aperçu de ce que la
+// suppression entraîne (organisations dont le compte est le seul membre,
+// avec documents et clients ; autres organisations non touchées), choix de
+// supprimer ou conserver les données des organisations vides, confirmation
+// en tapant l'adresse e-mail. Irréversible : l'adresse redevient utilisable.
+function AdminDeleteUserDialog({ user, onPreview, onConfirm, onClose }) {
+  const [preview, setPreview] = useState(null);
+  const [error, setError] = useState("");
+  const [deleteData, setDeleteData] = useState(true);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);
+  useEscapeToClose(true, onClose);
+  useEffect(() => {
+    let cancelled = false;
+    setPreview(null); setError("");
+    (async () => {
+      try { const p = await onPreview(user.id); if (!cancelled) setPreview(p); }
+      catch (err) { if (!cancelled) setError(err?.message || "Aperçu indisponible (script 2026-10-01_suppression-compte.sql appliqué ?)."); }
+    })();
+    return () => { cancelled = true; };
+  }, [user.id]);
+  const sole = Array.isArray(preview?.soleOrganizations) ? preview.soleOrganizations : [];
+  const others = Array.isArray(preview?.otherOrganizations) ? preview.otherOrganizations : [];
+  const canConfirm = !!preview && !busy && !done && typed.trim().toLowerCase() === String(user.email || "").toLowerCase();
+  async function confirm() {
+    if (!canConfirm) return;
+    setBusy(true); setError("");
+    try { setDone(await onConfirm(user.id, deleteData)); }
+    catch (err) { setError(err?.message || "Suppression impossible pour l'instant."); }
+    finally { setBusy(false); }
+  }
+  const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(27,42,51,0.45)" }} onClick={onClose} data-testid="admin-delete-dialog">
+      <div className="w-full max-w-lg rounded-2xl p-6 shadow-xl" style={{ background: colors.surface, color: colors.ink }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-delete-title">
+        <h2 id="admin-delete-title" className="df-display mb-1 text-lg font-semibold">Supprimer le compte {user.email}</h2>
+        <p className="mb-4 text-sm" style={{ color: colors.inkSoft }}>Irréversible. Le compte, son profil et ses sessions sont effacés ; l'adresse e-mail redevient utilisable pour une nouvelle inscription.</p>
+        {done ? (
+          <div className="space-y-3 text-sm" data-testid="admin-delete-done">
+            <p className="flex items-center gap-2 font-medium" style={{ color: colors.moss }}><Check size={16} /> Compte {done.email || user.email} supprimé.</p>
+            {Array.isArray(done.organizationsDeleted) && done.organizationsDeleted.length > 0 && <p>Organisations supprimées avec leurs données : {done.organizationsDeleted.map((o) => o.name || "sans nom").join(", ")}.</p>}
+            {Array.isArray(done.organizationsKept) && done.organizationsKept.length > 0 && <p>Organisations conservées (vides) : {done.organizationsKept.map((o) => o.name || "sans nom").join(", ")}.</p>}
+            {Array.isArray(done.membershipsRemoved) && done.membershipsRemoved.length > 0 && <p>Retiré de : {done.membershipsRemoved.map((o) => o.name || "sans nom").join(", ")}.</p>}
+            <div className="flex justify-end"><button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ background: colors.ink }}>Fermer</button></div>
+          </div>
+        ) : (
+          <>
+            {!preview && !error && <p className="flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}><Loader2 size={14} className="animate-spin" /> Analyse du compte…</p>}
+            {preview && (
+              <div className="mb-4 space-y-2 rounded-xl p-3 text-sm" style={{ background: colors.paper }} data-testid="admin-delete-preview">
+                {sole.length === 0
+                  ? <p>Ce compte n'est le seul membre d'aucune organisation : aucune donnée d'organisation ne sera supprimée.</p>
+                  : (
+                    <div>
+                      <p className="font-medium">Seul membre de {plural(sole.length, "organisation", "organisations")} :</p>
+                      <ul className="ml-4 list-disc">{sole.map((o) => <li key={o.id}>{o.name || "Sans nom"} — {plural(Number(o.documents) || 0, "document", "documents")}, {plural(Number(o.clients) || 0, "client", "clients")}</li>)}</ul>
+                    </div>
+                  )}
+                {others.length > 0 && <p>Aussi membre de {plural(others.length, "autre organisation", "autres organisations")}, non {others.length > 1 ? "touchées" : "touchée"} : {others.map((o) => o.name || "Sans nom").join(", ")}.</p>}
+              </div>
+            )}
+            {preview && sole.length > 0 && (
+              <label className="mb-4 flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-0.5" checked={deleteData} onChange={(e) => setDeleteData(e.target.checked)} data-testid="admin-delete-data" />
+                <span>Supprimer aussi les données de {sole.length > 1 ? "ces organisations" : "cette organisation"} (documents, clients, fiche entreprise). Décoché : {sole.length > 1 ? "elles sont conservées vides" : "elle est conservée vide"}, sans aucun membre.</span>
+              </label>
+            )}
+            <label className="mb-4 block text-sm">
+              Pour confirmer, tape l'adresse e-mail du compte
+              <input type="text" autoComplete="off" className="df-input df-mono mt-1 block w-full rounded-md px-3 py-2 text-sm" style={{ border: `1px solid ${colors.line}` }} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={user.email} data-testid="admin-delete-confirm-input" />
+            </label>
+            {error && <p className="mb-3 text-sm" style={{ color: colors.brick }} data-testid="admin-delete-error">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <button onClick={onClose} disabled={busy} className="rounded-lg px-4 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.ink }}>Annuler</button>
+              <button onClick={confirm} disabled={!canConfirm} className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ background: colors.brick, opacity: canConfirm ? 1 : 0.5, cursor: canConfirm ? "pointer" : "not-allowed" }} data-testid="admin-delete-confirm">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Supprimer définitivement
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+function AdminView({ account, documents, clients, companyProfile, plans, savingPlanSettings, onTogglePlan, onToggleWatermark, onUpdatePlanPrice, onUpdatePlanLimit, onUpdatePlanPaypalId, onUpdatePlanStripeId, onToggleCardPayment, onTogglePaypalPayment, onTogglePayment, onDeleteAccount, deletingAccount, siteSettings, savingSiteSettings, onUpdateSiteSettings, allUsers = [], allUsersError = "", onResendConfirmation, resendingConfirmationId, onRefreshUsers, onSetUserPlan, onSetUserPaidAt, onSetUserExpiresAt, savingUserPlanId, onPreviewDeleteUser = null, onDeleteUser = null }) {
+  const [deleteTarget, setDeleteTarget] = useState(null); // compte en cours de suppression (boîte de dialogue)
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Chaque carte utilisateur est repliée par défaut (juste l'essentiel
   // visible) — évite une page immense dès qu'il y a beaucoup de
@@ -16701,6 +16808,9 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
       )}
 
 
+      {deleteTarget && onDeleteUser && (
+        <AdminDeleteUserDialog user={deleteTarget} onPreview={onPreviewDeleteUser || (async () => null)} onConfirm={onDeleteUser} onClose={() => setDeleteTarget(null)} />
+      )}
       {tab === "utilisateurs" && (
         <div className="overflow-hidden rounded-2xl" style={{ background: colors.surface, border: `1px solid ${colors.line}` }}>
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: colors.line }}>
@@ -16798,6 +16908,11 @@ function AdminView({ account, documents, clients, companyProfile, plans, savingP
                       <td className="px-4 py-2.5">
                         {u.is_admin && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: `${colors.brassDark}18`, color: colors.brassDark }}>Admin</span>}
                         {u.referredByEmail && <div className="mt-1 text-xs" style={{ color: colors.inkSoft }} title="Parrainage">Parrainé par {u.referredByEmail}</div>}
+                        {onDeleteUser && !u.is_admin && u.id !== account?.id && (
+                          <button onClick={() => setDeleteTarget(u)} className="mt-1 flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium" style={{ border: `1px solid ${colors.brick}55`, color: colors.brick }} title="Supprimer ce compte (aperçu et confirmation)" data-testid={`admin-delete-${u.id}`}>
+                            <Trash2 size={12} /> Supprimer
+                          </button>
+                        )}
                         {!u.confirmed_at && (
                           <button
                             onClick={() => onResendConfirmation(u.id)}
@@ -19560,7 +19675,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 // détecter une erreur de rendu avant la mise en ligne. Aucun effet sur
 // l'application, qui n'utilise que l'export par défaut.
 export {
-  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal, touchWorkStage, parseColorInput, ColorField, ContactView,
+  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal, touchWorkStage, parseColorInput, ColorField, ContactView, AdminDeleteUserDialog, AdminView,
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, groupStockLinesByDay, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
