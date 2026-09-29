@@ -2,7 +2,7 @@
 // (supabase/functions/_shared/superpdp.ts) : SIREN, PKCE, adresse
 // d'autorisation pré-remplie, chiffrement des jetons, état public sans jeton.
 import { describe, it, expect } from "vitest";
-import { sirenOf, pkcePair, buildAuthorizeUrl, encryptSecret, decryptSecret, publicStatusOf, randomToken } from "../supabase/functions/_shared/superpdp.ts";
+import { sirenOf, pkcePair, buildAuthorizeUrl, encryptSecret, decryptSecret, publicStatusOf, randomToken, sandboxSellerFromDirectory } from "../supabase/functions/_shared/superpdp.ts";
 
 const KEY = Buffer.alloc(32, 7).toString("base64");
 const b64url = (buf) => Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -62,5 +62,21 @@ describe("état public", () => {
     expect(st).toEqual({ connected: true, env: "sandbox", companyName: "Burger Queen", companyNumber: "315143296_001", companyNumberScheme: "sandbox", vatRegime: "monthly", verificationStatus: "verified", connectedAt: "2026-09-26T10:00:00Z", lastError: null });
     expect(JSON.stringify(st)).not.toMatch(/token/i);
     expect(publicStatusOf(null)).toEqual({ connected: false });
+  });
+});
+
+describe("bac à sable : adresse du vendeur lue dans l'annuaire (29/09/2026)", () => {
+  it("prend l'entrée Peppol créée, ignore les « reply-to » et les entrées en erreur ; rien si aucune", () => {
+    const entries = [
+      { id: 1, identifier: "0225:315143296_106843_replyto", is_replyto: true, status: "created" },
+      { id: 2, identifier: "0225:315143296_999999", is_replyto: false, status: "error" },
+      { id: 3, identifier: "0225:315143296_106843", is_replyto: false, status: "created" },
+    ];
+    expect(sandboxSellerFromDirectory(entries)).toBe("315143296_106843");
+    expect(sandboxSellerFromDirectory([{ identifier: "0225:315143296_106843", status: "pending" }])).toBe("315143296_106843"); // en attente : à défaut de mieux
+    expect(sandboxSellerFromDirectory([{ identifier: "0225:315143296_2", status: "pending" }, { identifier: "0225:315143296_1", status: "created" }])).toBe("315143296_1");
+    expect(sandboxSellerFromDirectory([{ identifier: "0225:315143296_106843_replyto", is_replyto: true }])).toBeNull();
+    expect(sandboxSellerFromDirectory([{ identifier: "0225:853322915" }])).toBeNull(); // SIREN réel : pas un identifiant de test
+    expect(sandboxSellerFromDirectory(null)).toBeNull();
   });
 });

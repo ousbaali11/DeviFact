@@ -22,7 +22,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPERPDP_ENABLED } from "../_shared/pdp-flags.ts";
 import { updateKvValue } from "../_shared/kv.ts";
-import { superpdpConfigured, superpdpAllowProduction, superpdpApiBase, readConnection, superpdpFetch, apiErrorMessage } from "../_shared/superpdp.ts";
+import { superpdpConfigured, superpdpAllowProduction, superpdpApiBase, readConnection, superpdpFetch, apiErrorMessage, sandboxSellerFromDirectory } from "../_shared/superpdp.ts";
 import { pdpEligibility, pdpCanResend, sandboxIdentifierOf, sirenOfSiret, PDP_STATUS_LABELS } from "../_shared/superpdp-rules.ts";
 
 const dbAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -80,8 +80,20 @@ serve(async (req) => {
     const eligibility = pdpEligibility(doc, { connected: true, env: conn.env, verificationStatus: conn.verification_status, companyCountryCode: countryCode(profile?.country), allowProduction: superpdpAllowProduction() });
     if (!eligibility.ok) return json({ error: eligibility.reason, code: eligibility.code }, 400);
     const sandbox = conn.env !== "production";
-    const sandboxIds = sandbox ? { seller: sandboxIdentifierOf(conn.company_number)?.id || null, buyer: sandboxIdentifierOf(doc.client?.siret)?.id || null } : null;
-    if (sandbox && !sandboxIds?.seller) return json({ error: `Bac à sable : l'entreprise connectée n'a pas d'identifiant de test reconnu (${conn.company_number || "vide"}).` }, 400);
+    // Bac à sable : l'adresse électronique du vendeur est son entrée d'annuaire
+    // Peppol chez Super PDP (ex. 0225:315143296_106843), lue à chaque envoi ;
+    // son numéro d'entreprise de test (« 000000002 ») n'en est pas une.
+    let seller: string | null = null;
+    if (sandbox) {
+      seller = sandboxIdentifierOf(conn.company_number)?.id || null;
+      if (!seller) {
+        const dir = await superpdpFetch(dbAdmin, organizationId, "/v1.beta/directory_entries");
+        if (!dir.ok) return json({ error: `Bac à sable : annuaire de l'entreprise connectée illisible. ${await apiErrorMessage(dir)}` }, 502);
+        seller = sandboxSellerFromDirectory((await dir.json().catch(() => null))?.data);
+      }
+    }
+    const sandboxIds = sandbox ? { seller, buyer: sandboxIdentifierOf(doc.client?.siret)?.id || null } : null;
+    if (sandbox && !sandboxIds?.seller) return json({ error: `Bac à sable : aucune adresse d'annuaire Peppol active pour l'entreprise connectée (${conn.company_name || conn.company_number || "vide"}). Chez Super PDP, ouvre la fiche de l'entreprise et vérifie ses lignes d'annuaire (ex. 0225:315143296_106843).` }, 400);
     if (sandbox && !sandboxIds?.buyer && !sirenOfSiret(doc.client?.siret)) return json({ error: "Bac à sable : renseigne l'identifiant de test Super PDP du client (ex. 315143296_106842) dans le champ SIRET de sa fiche." }, 400);
 
     // 2. Verrou « envoi en cours » (une seule transmission à la fois, réémission après échec seulement).

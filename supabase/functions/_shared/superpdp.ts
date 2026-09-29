@@ -18,6 +18,8 @@
 // vaut pas "true", une connexion à une entreprise dont Super PDP indique
 // env = production est refusée (bac à sable seulement).
 
+import { sandboxIdentifierOf } from "./superpdp-rules.ts";
+
 const env = (k: string): string => {
   const d = (globalThis as { Deno?: { env?: { get(k: string): string | undefined } } }).Deno;
   return d?.env?.get(k) ?? "";
@@ -183,6 +185,21 @@ export async function accessTokenFor(dbAdmin: any, organizationId: string): Prom
   return { token: fresh.access_token, connection: { ...conn, ...patch } };
 }
 // Appel authentifié de l'API pour une organisation ; renvoie la réponse brute.
+// Bac à sable : adresse électronique de l'entreprise connectée (vendeur) =
+// son entrée d'annuaire Peppol, ex. « 0225:315143296_106843 », à placer dans
+// le XML Factur-X. Son numéro d'entreprise de test (« 000000002 », schéma
+// « sandbox ») n'est pas une adresse : c'est l'erreur du 29/09/2026
+// (« l'entreprise connectée n'a pas d'identifiant de test reconnu »).
+// Entrées « reply-to » (techniques) et en erreur ignorées ; les entrées
+// créées passent avant celles en attente.
+export function sandboxSellerFromDirectory(entries: unknown): string | null {
+  const list = (Array.isArray(entries) ? entries : []).filter((e: any) => e && !e.is_replyto && String(e.status || "created") !== "error");
+  for (const e of [...list.filter((e: any) => e.status === "created"), ...list]) {
+    const id = sandboxIdentifierOf(e.identifier)?.id;
+    if (id) return id;
+  }
+  return null;
+}
 export async function superpdpFetch(dbAdmin: any, organizationId: string, path: string, init: RequestInit = {}): Promise<Response> {
   const { token } = await accessTokenFor(dbAdmin, organizationId);
   const headers = new Headers(init.headers || {});

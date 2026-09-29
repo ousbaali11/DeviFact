@@ -224,3 +224,18 @@ d'environnement, c'est le numéro d'entreprise qui détermine l'entreprise
 reliée. Désormais le SIREN n'est transmis que si `SUPERPDP_ALLOW_PRODUCTION`
 vaut `true` ; en bac à sable, la page d'autorisation laisse choisir
 l'entreprise de test (Burger Queen).
+
+## 11. Correctif du 29/09/2026 : « l'entreprise connectée n'a pas d'identifiant de test reconnu (000000001) »
+
+En bac à sable, `GET /companies/me` renvoie un numéro d'entreprise de test
+(`number` = « 000000001 » pour Tricatel, « 000000002 » pour Burger Queen,
+`number_scheme` = `sandbox`). Les identifiants `315143296_10684x` vus dans le
+tableau de bord sont les **adresses d'annuaire Peppol** (`0225:…`), pas le
+numéro d'entreprise. L'envoi lit donc désormais `GET /directory_entries` de
+l'entreprise connectée (`sandboxSellerFromDirectory` : entrée créée, non
+« reply-to ») pour l'adresse du vendeur dans le XML. Le contrôle porte bien
+sur l'entreprise **connectée** (vendeur, table `pdp_connections`), jamais sur
+le client ; le client garde son adresse de test dans le champ SIRET de sa
+fiche. Le 29/09, la connexion enregistrée était Tricatel (choisie sur la page
+d'autorisation) : se déconnecter puis se reconnecter en choisissant Burger
+Queen.
