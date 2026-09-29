@@ -2695,6 +2695,21 @@ function legalMentionLines(doc, companyProfile, options = {}) {
   return lines;
 }
 
+// Identité de l'émetteur en tête des PDF (01/10/2026) : le logo importé dans
+// Mon entreprise, affiché complet (jamais rogné, contrairement à l'aperçu
+// rond de la page), 1,5 cm de haut, aussi large que le nom de l'entreprise
+// écrit dessous ; sans nom, 4 cm. Le logo de la fiche à jour l'emporte sur
+// la copie portée par le document.
+function PrintCompanyIdentity({ logo, name, nameStyle = {}, align = "left" }) {
+  if (!logo && !name) return null;
+  const width = name ? "max-content" : "4cm";
+  return (
+    <div className="print-company-identity" style={{ display: "inline-flex", flexDirection: "column", alignItems: "stretch", width, maxWidth: "9cm", textAlign: align }}>
+      {logo && <img src={logo} alt="Logo" className="print-company-logo" style={{ width: "100%", height: "1.5cm", objectFit: "contain", objectPosition: `${align === "right" ? "right" : "left"} center`, display: "block", marginBottom: "4px" }} />}
+      {name && <div style={nameStyle}>{name}</div>}
+    </div>
+  );
+}
 const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSettings, watermarkEnabled = true, publicQr = null, companyProfile = null, creditTotal = 0, creditNotes = [] }, ref) {
   const { subtotalHT, tvaGroups, totalTVA, totalTTC, acompteAmount, resteAPayer } = totals;
   const hasGlobalDiscount = (totals.globalDiscountPct || 0) > 0 && (totals.globalDiscountAmount || 0) > 0;
@@ -2814,12 +2829,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
           )}
         </div>
         <div style={{ textAlign: "left" }}>
-          {doc.company.logo && (
-            <img src={doc.company.logo} alt="Logo" style={{ height: "46px", display: "block", marginBottom: "6px", objectFit: "contain" }} />
-          )}
-          {companyName && (
-            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontWeight: 700 }}>{companyName}</div>
-          )}
+          <PrintCompanyIdentity logo={companyProfile?.logo || doc.company.logo || null} name={companyName} nameStyle={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "14pt", fontWeight: 700 }} />
         </div>
       </div>
 
@@ -5527,6 +5537,7 @@ function DeviFactAppInner() {
       <PvReceptionEditor
         key={activeDoc.id}
         doc={activeDoc}
+        companyProfile={companyProfile}
         clients={clients}
         chantierNames={[...new Set(documents.map((d) => String(d.chantier || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))}
         saving={saving}
@@ -5548,6 +5559,7 @@ function DeviFactAppInner() {
       <RapportInterventionEditor
         key={activeDoc.id}
         doc={activeDoc}
+        companyProfile={companyProfile}
         clients={clients}
         saving={saving}
         account={account}
@@ -5635,6 +5647,7 @@ function DeviFactAppInner() {
       <PlanningChantierEditor
         key={activeDoc.id}
         doc={activeDoc}
+        companyProfile={companyProfile}
         clients={clients}
         saving={saving}
         account={account}
@@ -5859,11 +5872,11 @@ function DeviFactAppInner() {
           const wmEnabled = (plans.find((p) => p.id === (account?.plan || "gratuit"))?.watermarkEnabled) !== false;
           if (batchExportDoc.type === "revision") return <PrintRevision ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
           if (batchExportDoc.type === "situation") return <PrintSituation ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} photoUrls={batchPhotoUrls} />;
-          if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} />;
-          if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} />;
+          if (batchExportDoc.type === "pv_reception") return <PrintPvReception ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} companyProfile={companyProfile} />;
+          if (batchExportDoc.type === "rapport") return <PrintRapportIntervention ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} photoUrls={batchPhotoUrls} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "contrat") return <PrintContrat ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           if (batchExportDoc.type === "relance") return <PrintRelance ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
-          if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} />;
+          if (batchExportDoc.type === "planning") return <PrintPlanning ref={batchPrintRef} doc={batchExportDoc} siteSettings={siteSettings} watermarkEnabled={wmEnabled} companyProfile={companyProfile} />;
           return <PrintDocument ref={batchPrintRef} doc={batchExportDoc} totals={computeTotals(batchExportDoc)} companyProfile={companyProfile} siteSettings={siteSettings} creditTotal={creditNotesTotalFor(batchExportDoc, documents)} creditNotes={documents.filter((d) => d.type === "avoir" && d.factureOrigineId === batchExportDoc.id && d.status !== "brouillon").map((d) => d.docNumber || "")} watermarkEnabled={wmEnabled} />;
         })()}
       </div>
@@ -8159,7 +8172,7 @@ const PrintSituation = forwardRef(function PrintSituation({ doc, siteSettings, w
           {doc.chantier && <div style={{ color: inkSoft }}>Chantier : {doc.chantier}</div>}
           {doc.dateDebut && <div style={{ color: inkSoft }}>Début des travaux : {localDateOf(doc.dateDebut).toLocaleDateString("fr-FR")}</div>}
         </div>
-        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
+        <PrintCompanyIdentity logo={companyProfile?.logo || doc.company.logo || null} name={doc.company.name} nameStyle={{ fontWeight: 700, fontSize: "13pt" }} align="right" />
       </div>
       {doc.objet && <div style={{ marginTop: "10px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>{doc.objet}</div>}
       <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
@@ -8794,7 +8807,7 @@ const PV_TYPES = {
   refusee: { label: "Réception refusée", color: "#A33B2A" },
 };
 
-const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSettings, watermarkEnabled = true, photoUrls = {} }, ref) {
+const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSettings, watermarkEnabled = true, photoUrls = {}, companyProfile = null }, ref) {
   const band = siteSettings?.pdfHeaderColor || "#1B2A33"; // bandeaux et filets
   const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
@@ -8820,7 +8833,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
           <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}</div>
           {doc.marcheNumero && <div style={{ color: inkSoft }}>Marché N° : {doc.marcheNumero}</div>}
         </div>
-        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
+        <PrintCompanyIdentity logo={companyProfile?.logo || doc.company.logo || null} name={doc.company.name} nameStyle={{ fontWeight: 700, fontSize: "13pt" }} align="right" />
       </div>
       {doc.objet && <div style={{ marginTop: "10px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>{doc.objet}</div>}
       {(doc.chantier || "").trim() && <div style={{ marginTop: "4px", fontSize: "9pt", color: inkSoft, position: "relative", zIndex: 1 }}>Chantier : {doc.chantier.trim()}</div>}
@@ -8914,7 +8927,7 @@ const PrintPvReception = forwardRef(function PrintPvReception({ doc, siteSetting
   );
 });
 
-function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [], chantierNames = [] }) {
+function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [], chantierNames = [], companyProfile = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const saveTimer = useRef(null);
   // Cumul des modifications en attente d'enregistrement (voir patch).
@@ -9219,7 +9232,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
       </div>
 
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
-      <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
+      <PrintPvReception ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} companyProfile={companyProfile} />
     </div>
   );
 }
@@ -9227,7 +9240,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
 const TYPES_INTERVENTION = { depannage: "Dépannage urgent", entretien: "Entretien programmé", sav: "Service après-vente", diagnostic: "Diagnostic" };
 const STATUTS_RESOLUTION = { resolu: { label: "Problème résolu", color: "#2F6B4F" }, partiel: { label: "Partiellement résolu", color: "#B8763E" }, nouvelle_intervention: { label: "Nouvelle intervention nécessaire", color: "#A33B2A" } };
 
-const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ doc, siteSettings, watermarkEnabled = true, photoUrls = {} }, ref) {
+const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ doc, siteSettings, watermarkEnabled = true, photoUrls = {}, companyProfile = null }, ref) {
   const materielTotal = computeMaterielTotal(doc);
   const hasPrices = materielTotal > 0;
   const currency = doc.currency || "EUR";
@@ -9256,7 +9269,7 @@ const PrintRapportIntervention = forwardRef(function PrintRapportIntervention({ 
           <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}</div>
           <div style={{ color: inkSoft }}>{TYPES_INTERVENTION[doc.typeIntervention] || ""}{doc.technicien ? ` — Technicien : ${doc.technicien}` : ""}</div>
         </div>
-        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
+        <PrintCompanyIdentity logo={companyProfile?.logo || doc.company.logo || null} name={doc.company.name} nameStyle={{ fontWeight: 700, fontSize: "13pt" }} align="right" />
       </div>
 
       <div style={{ display: "flex", gap: "16px", marginTop: "16px", position: "relative", zIndex: 1 }}>
@@ -9467,7 +9480,7 @@ function TeamMemberField({ members, value, memberId, onChange, required = false 
   );
 }
 
-function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [] }) {
+function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [], companyProfile = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const members = useOrgMembers(account?.organizationId);
   const saveTimer = useRef(null);
@@ -9767,7 +9780,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
       </div>
 
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
-      <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} />
+      <PrintRapportIntervention ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} photoUrls={photoState.urls} companyProfile={companyProfile} />
     </div>
   );
 }
@@ -9809,7 +9822,7 @@ const PrintContrat = forwardRef(function PrintContrat({ doc, siteSettings, water
           <div style={{ fontWeight: 700, fontSize: "14pt" }}>CONTRAT DE CHANTIER</div>
           <div style={{ color: inkSoft, marginTop: "4px" }}>Réf. {doc.docNumber} — Date : {localDateOf(doc.issueDate).toLocaleDateString("fr-FR")}</div>
         </div>
-        {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "48px", maxWidth: "160px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "13pt" }}>{doc.company.name}</div>}
+        <PrintCompanyIdentity logo={companyProfile?.logo || doc.company.logo || null} name={doc.company.name} nameStyle={{ fontWeight: 700, fontSize: "13pt" }} align="right" />
       </div>
 
       <div style={{ marginTop: "10px", padding: "8px 12px", borderRadius: "4px", background: "#FDF3D9", color: "#7A5A12", fontSize: "8pt", fontStyle: "italic", position: "relative", zIndex: 1 }}>
@@ -10177,7 +10190,7 @@ const PrintRelance = forwardRef(function PrintRelance({ doc, siteSettings, water
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative", zIndex: 1 }}>
         <div>
-          {doc.company.name && <div style={{ fontWeight: 700 }}>{doc.company.name}</div>}
+          <PrintCompanyIdentity logo={companyProfile?.logo || doc.company.logo || null} name={doc.company.name} nameStyle={{ fontWeight: 700 }} />
           {doc.company.address && <div style={{ fontSize: "9pt", color: inkSoft }}>{doc.company.address}</div>}
         </div>
         <div style={{ textAlign: "right", fontSize: "9pt", color: inkSoft }}>
@@ -10723,7 +10736,7 @@ function computeMonthMarkers(range) {
   return markers;
 }
 
-const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, watermarkEnabled = true }, ref) {
+const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, watermarkEnabled = true, companyProfile = null }, ref) {
   const ink = siteSettings?.pdfTextColor || "#1B2A33"; // texte
   const inkSoft = "#4A5B63", line = "#DAE1DC";
   const box = siteSettings?.pdfBlockColor || "#F1F0EA";
@@ -10752,8 +10765,7 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
           {(doc.responsable || "").trim() && <div style={{ color: inkSoft }}>Responsable : {doc.responsable.trim()}</div>}
         </div>
         <div style={{ textAlign: "right" }}>
-          {doc.company.logo ? <img src={doc.company.logo} alt="" style={{ maxHeight: "44px", maxWidth: "150px", objectFit: "contain" }} /> : <div style={{ fontWeight: 700, fontSize: "12pt" }}>{doc.company.name}</div>}
-          {doc.company.logo && doc.company.name && <div style={{ fontSize: "8.5pt", fontWeight: 600 }}>{doc.company.name}</div>}
+          <PrintCompanyIdentity logo={companyProfile?.logo || doc.company.logo || null} name={doc.company.name} nameStyle={{ fontWeight: 700, fontSize: "12pt" }} align="right" />
           {(doc.company.address || "").trim() && <div style={{ fontSize: "8pt", color: inkSoft }}>{doc.company.address.trim()}</div>}
         </div>
       </div>
@@ -10809,7 +10821,7 @@ const PrintPlanning = forwardRef(function PrintPlanning({ doc, siteSettings, wat
   );
 });
 
-function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [] }) {
+function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isLocked, isViewer, onChange, onFinalize, onBack, onGoToPricing, clients = [], companyProfile = null }) {
   const [localDoc, setLocalDoc] = useState(doc);
   const members = useOrgMembers(account?.organizationId);
   const saveTimer = useRef(null);
@@ -11061,7 +11073,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
       </div>
 
       <FinalizeButton doc={localDoc} onFinalize={onFinalize} siteSettings={siteSettings} errors={documentValidationErrors(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} hints={documentSuggestedFields(localDoc, { companyProfile: typeof companyProfile === "undefined" ? null : companyProfile, clients })} />
-      <PrintPlanning ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} />
+      <PrintPlanning ref={printRef} doc={localDoc} siteSettings={siteSettings} watermarkEnabled={watermarkEnabled} companyProfile={companyProfile} />
     </div>
   );
 }
@@ -15754,7 +15766,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full" style={{ background: colors.brass, color: "white" }}>
-                {profile.logo ? <img src={profile.logo} alt="Logo" className="h-full w-full object-cover" /> : <span className="df-display text-base font-semibold">{initials(profile.name) || "?"}</span>}
+                {profile.logo ? <img src={profile.logo} alt="Logo" className="h-full w-full object-contain" style={{ background: "white" }} /> : <span className="df-display text-base font-semibold">{initials(profile.name) || "?"}</span>}
               </div>
               <div>
                 <div className="text-sm font-semibold">{profile.name || "Non renseigné"}</div>
@@ -19675,7 +19687,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 // détecter une erreur de rendu avant la mise en ligne. Aucun effet sur
 // l'application, qui n'utilise que l'export par défaut.
 export {
-  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal, touchWorkStage, parseColorInput, ColorField, ContactView, AdminDeleteUserDialog, AdminView,
+  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal, touchWorkStage, parseColorInput, ColorField, ContactView, AdminDeleteUserDialog, AdminView, PrintCompanyIdentity,
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, groupStockLinesByDay, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
