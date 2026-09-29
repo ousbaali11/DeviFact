@@ -2726,6 +2726,13 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   // remplacent les lignes correspondantes des mentions légales.
   const legalCo = legalCompanyOf(doc.company, companyProfile);
   const showPayment = isInvoiceLike && !hidePrices;
+  // QR code de paiement (30/09/2026) : pour les pièces qui ont le bloc de
+  // paiement, il occupe la colonne de gauche de la rangée des totaux, calé en
+  // bas (aligné sur le Total TTC), à 1,6 cm, au lieu d'une rangée séparée
+  // sous le bloc de paiement qui laissait un vide au-dessus. Les autres pièces
+  // (devis : signature en ligne ; avoir, proforma : consultation) gardent leur
+  // QR code en bas à gauche.
+  const qrInTotals = showPayment && !!publicQr?.dataUrl;
   const isMarkedPaid = isInvoiceLike && doc.status === "payée";
   const paidBefore = isInvoiceLike ? totals.acompteVerse || 0 : 0;
   const docPayments = isInvoiceLike ? (Array.isArray(doc.payments) ? doc.payments : []).filter((p) => p && (Number(p.amount) || 0) > 0) : [];
@@ -2980,7 +2987,7 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
 
       {/* Conditions + Totaux */}
       <div style={{ display: "flex", justifyContent: "space-between", gap: "24px", marginTop: "18px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
-        <div style={{ flex: 1, fontSize: "9pt" }}>
+        <div style={{ flex: 1, fontSize: "9pt", display: "flex", flexDirection: "column" }}>
           {doc.notes && (
             <>
               <div style={{ fontWeight: 700, marginBottom: "4px" }}>Note :</div>
@@ -2996,6 +3003,12 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
           {legalLines.length > 0 && (
             <div className="print-legal" style={{ marginTop: doc.notes || showAcompteDemande || (doc.type === "devis" && (doc.paymentTerms || "").trim()) ? "10px" : 0, fontSize: "7.5pt", lineHeight: 1.35, color: inkSoft }}>
               {legalLines.map((l, i) => <div key={i} style={{ marginBottom: "2px" }}>{l}</div>)}
+            </div>
+          )}
+          {qrInTotals && (
+            <div className="print-qr-totals" style={{ marginTop: "auto", paddingTop: "8px", width: "2.6cm" }}>
+              <img src={publicQr.dataUrl} alt="QR code" style={{ width: "1.6cm", height: "1.6cm", display: "block", margin: "0 auto" }} />
+              <div style={{ fontSize: "6.5pt", color: inkSoft, marginTop: "3px", lineHeight: 1.2, textAlign: "center" }}>Scannez pour voir les informations de paiement</div>
             </div>
           )}
         </div>
@@ -3102,13 +3115,13 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
 
       {/* QR code du lien public — bas à gauche (devis/factures uniquement)
           — et signature — bas à droite, uniquement si une signature existe */}
-      {(publicQr?.dataUrl ||
+      {((publicQr?.dataUrl && !qrInTotals) ||
         (doc.signature?.mode === "texte" && doc.signature?.name) ||
         (doc.signature?.mode === "dessin" && doc.signature?.drawing) ||
         (doc.signature?.mode === "image" && doc.signature?.image)) && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: "20px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
           <div>
-            {publicQr?.dataUrl && (
+            {publicQr?.dataUrl && !qrInTotals && (
               <div style={{ width: "2cm" }}>
                 <img src={publicQr.dataUrl} alt="QR code" style={{ width: "2cm", height: "2cm", display: "block" }} />
                 <div style={{ fontSize: "6.5pt", color: inkSoft, marginTop: "3px", lineHeight: 1.2, textAlign: "center" }}>
