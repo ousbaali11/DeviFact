@@ -3200,6 +3200,40 @@ function HomeLink({ setView, className, style, title = "Retour à l'accueil", ch
   }
   return <a href={HOME_HREF} className={className} style={style} title={title} onClick={handleClick}>{children}</a>;
 }
+// Appel d'une fonction serveur avec la session de la personne connectée.
+// Jeton refusé par le serveur (401 « Non connecté ») : la session est
+// renouvelée une fois puis l'appel rejoué ; si le renouvellement échoue, la
+// session est morte (révoquée par une déconnexion ailleurs, expirée sans
+// renouvellement) : le site en est prévenu (onDeadSession → écran de
+// connexion avec explication) et l'appel échoue avec un message clair.
+// Avant, l'écran restait « connecté » avec des boutons muets (« État
+// indisponible ») et il fallait se déconnecter puis se reconnecter à la main.
+const SESSION_EXPIRED_MESSAGE = "Ta session a expiré : reconnecte-toi pour continuer.";
+let deadSessionListener = null;
+function onDeadSession(listener) {
+  deadSessionListener = listener;
+  return () => { if (deadSessionListener === listener) deadSessionListener = null; };
+}
+function isUnauthorizedResponse(res) {
+  return res?.data?.error === "Non connecté" || res?.error?.context?.status === 401;
+}
+async function invokeFunction(name, body) {
+  const call = (token) => db.functions.invoke(name, { body, headers: { Authorization: `Bearer ${token}` } });
+  const { data: { session } } = await db.auth.getSession();
+  let res = await call(session?.access_token);
+  if (!isUnauthorizedResponse(res)) return res;
+  let token = null;
+  if (typeof db.auth.refreshSession === "function") {
+    try { token = (await db.auth.refreshSession())?.data?.session?.access_token || null; } catch { token = null; }
+  }
+  if (token) {
+    res = await call(token);
+    if (!isUnauthorizedResponse(res)) return res;
+  }
+  console.warn(`[Session] Jeton refusé par ${name} et renouvellement impossible : session close.`);
+  if (deadSessionListener) { try { deadSessionListener(); } catch (err) { console.error(err); } }
+  throw new Error(SESSION_EXPIRED_MESSAGE);
+}
 // Vue de départ : « /?accueil » → tableau de bord (paramètre retiré de
 // l'adresse) ; sinon la dernière vue mémorisée sur l'appareil.
 function initialView() {
@@ -3259,6 +3293,18 @@ function DeviFactAppInner() {
   // Connexion réussie mais compte impossible à charger (réseau, droits) :
   // message montré sur l'écran de connexion.
   const [sessionError, setSessionError] = useState(null);
+  // Jeton refusé par le serveur et non renouvelable (voir invokeFunction) :
+  // fermeture propre de la session sur cet appareil seulement et écran de
+  // connexion avec la raison, au lieu d'un écran « connecté » aux boutons muets.
+  useEffect(() => onDeadSession(async () => {
+    try { await db.auth.signOut({ scope: "local" }); } catch { /* session déjà close côté serveur */ }
+    currentUserIdRef.current = null;
+    clearUserData();
+    setAccount(null);
+    setAuthMode("login");
+    setPreAuthView("auth");
+    setSessionError(SESSION_EXPIRED_MESSAGE);
+  }), []);
   // Empêche d'afficher la page d'accueil (ou toute page) avec les
   // réglages par défaut pendant la fraction de seconde où
   // le vrai réglage n'est pas encore arrivé de la base de données —
@@ -3306,11 +3352,7 @@ function DeviFactAppInner() {
     if (!reviewNotice || reviewNotice.sending || reviewNotice.sent) return;
     setReviewNotice((n) => ({ ...n, sending: true, error: null }));
     try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error } = await db.functions.invoke("send-review-request", {
-        body: { organizationId: account?.organizationId, documentId: reviewNotice.docId },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const { data, error } = await invokeFunction("send-review-request", { organizationId: account?.organizationId, documentId: reviewNotice.docId });
       if (error || data?.error) {
         let detail = data;
         if (!detail && error?.context) { try { detail = await error.context.json(); } catch { /* corps illisible */ } }
@@ -4106,7 +4148,11 @@ function DeviFactAppInner() {
     }
   }
   async function logout() {
-    await db.auth.signOut();
+    // Cet appareil seulement : se déconnecter ici ne coupe pas la session
+    // ouverte dans un autre navigateur (avant : toutes les sessions du
+    // compte étaient révoquées, et l'autre navigateur restait affiché
+    // « connecté » avec des appels serveur refusés).
+    await db.auth.signOut({ scope: "local" });
     clearStorageCache();
     setAccount(null);
   }
@@ -4138,11 +4184,7 @@ function DeviFactAppInner() {
     if (!window.confirm("Résilier ton abonnement ? Tu gardes l'accès jusqu'à la fin de la période déjà payée, puis ton compte repassera automatiquement en gratuit.")) return;
     setCancellingSubscription(true);
     try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error: fnError } = await db.functions.invoke("cancel-subscription", {
-        body: { organizationId: account.organizationId },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const { data, error: fnError } = await invokeFunction("cancel-subscription", { organizationId: account.organizationId });
       if (fnError || data?.error) {
         alert(`Impossible de résilier : ${data?.error || fnError?.message || "erreur inconnue"}`);
         return;
@@ -4713,11 +4755,7 @@ function DeviFactAppInner() {
   // Transmission d'une facture via Super PDP (fonction superpdp-send-invoice :
   // éligibilité, Factur-X, validation, annuaire, envoi, tout côté serveur).
   async function sendInvoiceToPdp(docId) {
-    const { data: { session } } = await db.auth.getSession();
-    const { data, error } = await db.functions.invoke("superpdp-send-invoice", {
-      body: { organizationId: account?.organizationId, documentId: docId },
-      headers: { Authorization: `Bearer ${session?.access_token}` },
-    });
+    const { data, error } = await invokeFunction("superpdp-send-invoice", { organizationId: account?.organizationId, documentId: docId });
     if (error || !data || data.error) {
       let message = data?.error;
       if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
@@ -4728,11 +4766,7 @@ function DeviFactAppInner() {
   }
   // Appel de la fonction superpdp-sync-events (suivi des factures transmises).
   async function callPdpSync(action, extra = {}) {
-    const { data: { session } } = await db.auth.getSession();
-    const { data, error } = await db.functions.invoke("superpdp-sync-events", {
-      body: { organizationId: account?.organizationId, action, ...extra },
-      headers: { Authorization: `Bearer ${session?.access_token}` },
-    });
+    const { data, error } = await invokeFunction("superpdp-sync-events", { organizationId: account?.organizationId, action, ...extra });
     if (error || !data || data.error) {
       let message = data?.error;
       if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
@@ -8239,11 +8273,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
     if (facturxGenerating) return;
     setFacturxGenerating(true);
     try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error } = await db.functions.invoke("generate-facturx", {
-        body: { document: localDoc, companyProfile: companyProfile || null, siteName: siteSettings?.name || "" },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const { data, error } = await invokeFunction("generate-facturx", { document: localDoc, companyProfile: companyProfile || null, siteName: siteSettings?.name || "" });
       if (error || data?.error) {
         let detail = data;
         if (!detail && error?.context) { try { detail = await error.context.json(); } catch { /* corps illisible */ } }
@@ -14435,11 +14465,7 @@ function ApiView({ account }) {
     setError("");
     setCreating(true);
     try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error: fnError } = await db.functions.invoke("manage-api-key", {
-        body: { action: "create", organizationId: account.organizationId, name: newKeyName.trim() || "Clé API" },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const { data, error: fnError } = await invokeFunction("manage-api-key", { action: "create", organizationId: account.organizationId, name: newKeyName.trim() || "Clé API" });
       let realMessage = data?.error;
       if (!realMessage && fnError?.context) {
         try { realMessage = (await fnError.context.json())?.error; } catch { /* pas de corps JSON lisible */ }
@@ -14461,11 +14487,7 @@ function ApiView({ account }) {
     if (!window.confirm(`Révoquer la clé "${keyName}" ? Toute intégration qui l'utilise cessera immédiatement de fonctionner — action irréversible.`)) return;
     setRevokingId(keyId);
     try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error: fnError } = await db.functions.invoke("manage-api-key", {
-        body: { action: "revoke", organizationId: account.organizationId, keyId },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const { data, error: fnError } = await invokeFunction("manage-api-key", { action: "revoke", organizationId: account.organizationId, keyId });
       if (fnError || data?.error) {
         alert(`Impossible de révoquer cette clé : ${data?.error || fnError?.message || "erreur inconnue"}`);
         return;
@@ -14631,11 +14653,7 @@ function TeamView({ account, onRelinkStaff = null }) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) { setError("Email invalide."); return; }
     setInviting(true);
     try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error: fnError } = await db.functions.invoke("invite-member", {
-        body: { email: cleanEmail, role: inviteRole, organizationId: account.organizationId, fullName: inviteProfile.fullName.trim(), jobTitle: inviteProfile.jobTitle.trim(), phone: inviteProfile.phone.trim() },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const { data, error: fnError } = await invokeFunction("invite-member", { email: cleanEmail, role: inviteRole, organizationId: account.organizationId, fullName: inviteProfile.fullName.trim(), jobTitle: inviteProfile.jobTitle.trim(), phone: inviteProfile.phone.trim() });
       if (fnError || data?.error) {
         // Le SDK masque le vrai message derrière une erreur générique en
         // cas de statut non-2xx — on va le chercher dans la réponse brute.
@@ -14943,11 +14961,7 @@ function companyInsuranceLabel(p) {
 const STRIPE_DASHBOARD_URL = "https://dashboard.stripe.com";
 // Appel de la fonction superpdp-oauth (propriétaire) : start, callback, status, disconnect.
 async function callSuperPdp(organizationId, action, extra = {}) {
-  const { data: { session } } = await db.auth.getSession();
-  const { data, error } = await db.functions.invoke("superpdp-oauth", {
-    body: { organizationId, action, ...extra },
-    headers: { Authorization: `Bearer ${session?.access_token}` },
-  });
+  const { data, error } = await invokeFunction("superpdp-oauth", { organizationId, action, ...extra });
   if (error || data?.error) {
     let message = data?.error;
     if (!message && error?.context) { try { message = (await error.context.json())?.error; } catch { /* pas de corps JSON lisible */ } }
@@ -15003,6 +15017,11 @@ function SuperPdpCard({ account, profile = null, onRedirect = (url) => { window.
     })();
     return () => { cancelled = true; };
   }, [isOwner, organizationId]);
+  async function retryStatus() {
+    setStatus(null);
+    setError("");
+    try { setStatus(await callSuperPdp(organizationId, "status")); } catch (err) { setError(err?.message || "Super PDP indisponible pour l'instant."); setStatus({ unavailable: true }); }
+  }
   async function start() {
     setBusy(true); setError("");
     try {
@@ -15030,7 +15049,10 @@ function SuperPdpCard({ account, profile = null, onRedirect = (url) => { window.
       {status === null ? (
         <p className="flex items-center gap-2 text-sm" style={{ color: colors.inkSoft }}><Loader2 size={14} className="animate-spin" /> Vérification…</p>
       ) : status.unavailable ? (
-        <p className="text-sm" style={{ color: colors.inkSoft }}>État indisponible pour l'instant.</p>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <p style={{ color: colors.inkSoft }}>État indisponible pour l'instant.</p>
+          <button onClick={retryStatus} className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate }} data-testid="superpdp-retry"><RotateCcw size={12} /> Réessayer</button>
+        </div>
       ) : status.configured === false ? (
         <p className="text-sm" style={{ color: colors.inkSoft }}>La connexion à Super PDP n'est pas encore activée par l'administrateur du site.</p>
       ) : status.connected ? (
@@ -15054,11 +15076,7 @@ function SuperPdpCard({ account, profile = null, onRedirect = (url) => { window.
   );
 }
 async function callConnectOnboarding(organizationId, action) {
-  const { data: { session } } = await db.auth.getSession();
-  const { data, error } = await db.functions.invoke("connect-onboarding", {
-    body: { organizationId, action },
-    headers: { Authorization: `Bearer ${session?.access_token}` },
-  });
+  const { data, error } = await invokeFunction("connect-onboarding", { organizationId, action });
   if (error || data?.error) {
     // Le SDK masque le vrai message derrière une erreur générique en cas
     // de statut non-2xx — on va le chercher dans la réponse brute.
@@ -17880,11 +17898,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     setAiLoading(true);
     setAiError(null);
     try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error } = await db.functions.invoke("suggest-lines", {
-        body: { description: aiDescription.trim() },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const { data, error } = await invokeFunction("suggest-lines", { description: aiDescription.trim() });
       if (error) throw error;
       const parsed = data?.lines;
       if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Réponse vide");
@@ -18241,11 +18255,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
     if (facturxGenerating) return;
     setFacturxGenerating(true);
     try {
-      const { data: { session } } = await db.auth.getSession();
-      const { data, error } = await db.functions.invoke("generate-facturx", {
-        body: { document: localDoc, companyProfile: companyProfile || null, siteName: siteSettings?.name || "" },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
+      const { data, error } = await invokeFunction("generate-facturx", { document: localDoc, companyProfile: companyProfile || null, siteName: siteSettings?.name || "" });
       if (error || data?.error) {
         // En cas de statut non-2xx, le vrai message (et la liste des
         // informations manquantes) est dans le corps de la réponse.
@@ -19301,6 +19311,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 // détecter une erreur de rendu avant la mise en ligne. Aucun effet sur
 // l'application, qui n'utilise que l'export par défaut.
 export {
+  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE,
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, groupStockLinesByDay, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
