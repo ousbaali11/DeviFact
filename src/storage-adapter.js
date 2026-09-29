@@ -171,6 +171,11 @@ export function mergeRecord(b, l, r, remoteWriter = null) {
     if (rChanged && !lChanged) { if (inR) out[key] = rv; continue; }
     if (!lChanged && !rChanged) { if (inL) out[key] = lv; else if (inR) out[key] = rv; continue; }
     // Modifié des deux côtés, différemment.
+    // « pdp » (suivi Super PDP) n'est écrit que par les fonctions serveur, jamais
+    // saisi par une personne : la génération la plus récente (son propre
+    // updatedAt) est gardée, sans note de conflit (29/09/2026 : un avoir
+    // signalait un « conflit » sur ce champ entre le serveur et le navigateur).
+    if (key === "pdp") { const lt = Number(lv?.updatedAt) || 0, rt = Number(rv?.updatedAt) || 0; out[key] = lt === rt ? (localWins ? lv : rv) : lt > rt ? lv : rv; continue; }
     if (key === "items" && isItemList(lv) && isItemList(rv)) { out[key] = mergeItems(bv, lv, rv, localWins, conflicts); continue; }
     if (key === "payments" || key === "signature" || key === "lastReminderSentAt") { out[key] = localWins ? lv : rv; continue; } // repris ensuite par mergePayments / mergeSignature
     const winner = localWins ? l : r;

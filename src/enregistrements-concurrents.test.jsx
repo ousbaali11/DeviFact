@@ -120,6 +120,21 @@ describe("fusion champ par champ", () => {
     expect(m2.notes).toBe("local");
     expect(m2.conflict).toMatchObject({ fields: ["notes"], kept: "local", otherWriter: "user-B" });
   });
+  it("champ « pdp » (suivi Super PDP, écrit par le serveur) modifié des deux côtés : génération la plus récente gardée, jamais de note de conflit", () => {
+    const older = { invoiceId: 1, status: "api:sending", updatedAt: 100 };
+    const newer = { invoiceId: 1, status: "api:uploaded", updatedAt: 500 };
+    // Le navigateur a enregistré en dernier (updatedAt 900) avec une copie plus ancienne du suivi : le suivi du serveur l'emporte quand même.
+    const [m] = mergeValues([base], [facture({ pdp: older, updatedAt: 900 })], [facture({ pdp: newer, updatedAt: 800 })], "user-B");
+    expect(m.pdp).toEqual(newer);
+    expect(m.conflict).toBeUndefined();
+    const [m2] = mergeValues([base], [facture({ pdp: newer, updatedAt: 900 })], [facture({ pdp: older, updatedAt: 800 })]);
+    expect(m2.pdp).toEqual(newer);
+    expect(m2.conflict).toBeUndefined();
+    // Autre champ en conflit en même temps : la note ne cite que ce champ.
+    const [m3] = mergeValues([base], [facture({ pdp: older, notes: "a", updatedAt: 900 })], [facture({ pdp: newer, notes: "b", updatedAt: 800 })], "user-B");
+    expect(m3.pdp).toEqual(newer);
+    expect(m3.conflict.fields).toEqual(["notes"]);
+  });
   it("lignes : ajoutée par chacun → les deux ; supprimée ici et modifiée là-bas → la modification gagne ; même ligne modifiée des deux côtés → la plus récente, avec note", () => {
     const local = facture({ updatedAt: 200, items: [...base.items, { id: "l3", designation: "Ajout A", qty: 1, unitPrice: 10 }] });
     const remote = facture({ updatedAt: 150, items: [...base.items, { id: "l4", designation: "Ajout B", qty: 1, unitPrice: 20 }] });
