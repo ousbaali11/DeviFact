@@ -18,6 +18,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPERPDP_ENABLED } from "../_shared/pdp-flags.ts";
 import { updateKvValue } from "../_shared/kv.ts";
+import { journal } from "../_shared/pdp-journal.ts";
 import { superpdpConfigured, superpdpAllowProduction, readConnection, superpdpFetch, apiErrorMessage, type PdpConnection } from "../_shared/superpdp.ts";
 import { applyPdpEvents, shouldSendPaidEvent, PDP_STATUS_LABELS, type PdpEvent } from "../_shared/superpdp-rules.ts";
 
@@ -47,7 +48,8 @@ function connectionAllowed(conn: PdpConnection | null): conn is PdpConnection {
 
 // Lecture des événements depuis le dernier identifiant lu ; renvoie les
 // documents mis à jour (pour l'écran) et le nombre d'événements lus.
-async function syncOrganization(organizationId: string, conn: PdpConnection): Promise<{ updated: DocPatch[]; eventsRead: number; paidSent: number }> {
+// actorId : membre qui a demandé la relecture (bouton Actualiser) ; null = tâche planifiée.
+async function syncOrganization(organizationId: string, conn: PdpConnection, actorId: string | null = null): Promise<{ updated: DocPatch[]; eventsRead: number; paidSent: number }> {
   const events: PdpEvent[] = [];
   let after = Number(conn.last_event_id) || 0;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -61,6 +63,8 @@ async function syncOrganization(organizationId: string, conn: PdpConnection): Pr
   }
   const { updates, lastEventId } = applyPdpEvents(events);
   const patches: DocPatch[] = [];
+  const documents = await readDocuments(organizationId);
+  const numberOf = (documentId: string) => String(documents.find((d: any) => d?.id === documentId)?.docNumber || "");
   if (updates.length) {
     const ids = updates.map((u) => u.invoiceId);
     const { data: rows, error } = await dbAdmin.from("pdp_invoices").select("document_id, pdp_invoice_id, status_code").eq("organization_id", organizationId).in("pdp_invoice_id", ids);
@@ -70,6 +74,7 @@ async function syncOrganization(organizationId: string, conn: PdpConnection): Pr
       const row = rowByInvoice.get(u.invoiceId);
       if (!row) continue; // facture inconnue de Chantiflow (envoyée par un autre outil) : ignorée
       await dbAdmin.from("pdp_invoices").update({ status_code: u.status, status_text: u.statusText, last_event_id: u.lastEventId, last_event_at: u.lastEventAt, last_error: null }).eq("organization_id", organizationId).eq("document_id", row.document_id);
+      await journal(dbAdmin, { organizationId, documentId: row.document_id, docNumber: numberOf(row.document_id), pdpInvoiceId: u.invoiceId, source: "relecture", statusCode: u.status, statusText: u.statusText, detail: `Événement Super PDP n° ${u.lastEventId}${u.lastEventAt ? ` du ${u.lastEventAt}` : ""}`, actor: actorId });
       patches.push({ documentId: row.document_id, pdp: { status: u.status, statusText: u.statusText, lastEventAt: u.lastEventAt, updatedAt: Date.now() } });
     }
     await writeDocPatches(organizationId, patches);
@@ -79,10 +84,9 @@ async function syncOrganization(organizationId: string, conn: PdpConnection): Pr
   }
   // Rattrapage des encaissements : factures payées transmises sans fr:212.
   let paidSent = 0;
-  const documents = await readDocuments(organizationId);
   for (const doc of documents) {
     if (!shouldSendPaidEvent(doc)) continue;
-    const r = await sendPaidEvent(organizationId, doc);
+    const r = await sendPaidEvent(organizationId, doc, actorId);
     if (r.ok) { paidSent += 1; patches.push({ documentId: doc.id, pdp: r.pdp }); }
   }
   return { updated: patches, eventsRead: events.length, paidSent };
@@ -91,7 +95,7 @@ async function syncOrganization(organizationId: string, conn: PdpConnection): Pr
 // Encaissement d'une facture transmise : événement fr:212 (montant total repris
 // par Super PDP), noté sur le document ; en cas d'échec, l'erreur est notée et la
 // tâche quotidienne réessaie.
-async function sendPaidEvent(organizationId: string, doc: any): Promise<{ ok: boolean; pdp: Record<string, unknown>; error?: string }> {
+async function sendPaidEvent(organizationId: string, doc: any, actorId: string | null = null): Promise<{ ok: boolean; pdp: Record<string, unknown>; error?: string }> {
   const invoiceId = Number(doc?.pdp?.invoiceId);
   const resp = await superpdpFetch(dbAdmin, organizationId, "/v1.beta/invoice_events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ invoice_id: invoiceId, status_code: "fr:212" }) });
   if (!resp.ok) {
@@ -99,12 +103,14 @@ async function sendPaidEvent(organizationId: string, doc: any): Promise<{ ok: bo
     const pdp = { paidEventError: message.slice(0, 300), updatedAt: Date.now() };
     await writeDocPatches(organizationId, [{ documentId: doc.id, pdp }]);
     await dbAdmin.from("pdp_invoices").update({ last_error: `Encaissement non transmis : ${message}`.slice(0, 1000) }).eq("organization_id", organizationId).eq("document_id", doc.id);
+    await journal(dbAdmin, { organizationId, documentId: doc.id, docNumber: doc.docNumber, pdpInvoiceId: invoiceId, source: "erreur", statusCode: "fr:212", statusText: "Encaissement non transmis", detail: message, actor: actorId });
     return { ok: false, pdp, error: message };
   }
   const paidEventAt = new Date().toISOString();
   const pdp = { paidEventAt, paidEventError: null, status: "fr:212", statusText: PDP_STATUS_LABELS["fr:212"], updatedAt: Date.now() };
   await writeDocPatches(organizationId, [{ documentId: doc.id, pdp }]);
   await dbAdmin.from("pdp_invoices").update({ paid_event_at: paidEventAt, status_code: "fr:212", status_text: PDP_STATUS_LABELS["fr:212"], last_error: null }).eq("organization_id", organizationId).eq("document_id", doc.id);
+  await journal(dbAdmin, { organizationId, documentId: doc.id, docNumber: doc.docNumber, pdpInvoiceId: invoiceId, source: "encaissement", statusCode: "fr:212", statusText: PDP_STATUS_LABELS["fr:212"], detail: "Encaissement transmis à Super PDP (facture payée en totalité)", actor: actorId });
   return { ok: true, pdp };
 }
 
@@ -152,7 +158,7 @@ serve(async (req) => {
     if (!connectionAllowed(conn)) return json({ error: "Compte Super PDP en production : le suivi n'est pas encore autorisé dans Chantiflow." }, 403);
 
     if (action === "sync") {
-      const r = await syncOrganization(organizationId, conn);
+      const r = await syncOrganization(organizationId, conn, user.id);
       return json({ ok: true, ...r });
     }
     if (action === "paid") {
@@ -161,7 +167,7 @@ serve(async (req) => {
       const doc = (await readDocuments(organizationId)).find((d: any) => d?.id === documentId);
       if (!doc) return json({ error: "Facture introuvable." }, 404);
       if (!shouldSendPaidEvent(doc)) return json({ ok: true, skipped: true, reason: doc?.pdp?.paidEventAt ? "Encaissement déjà transmis." : "Facture non transmise via Super PDP, ou pas encore payée en totalité." });
-      const r = await sendPaidEvent(organizationId, doc);
+      const r = await sendPaidEvent(organizationId, doc, user.id);
       return r.ok ? json({ ok: true, pdp: r.pdp }) : json({ error: `Encaissement non transmis (la tâche quotidienne réessaiera). ${r.error}`, pdp: r.pdp }, 502);
     }
     return json({ error: "Action inconnue" }, 400);

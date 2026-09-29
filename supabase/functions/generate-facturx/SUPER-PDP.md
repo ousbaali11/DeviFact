@@ -263,3 +263,18 @@ session (`000000002`). Désormais `superpdp-send-invoice` transmet à
 `buyerNumber` (lu dans `french_directory/entries?number=<adresse du client>`
 quand l'annuaire le connaît) : identifiant légal = numéro de test, adresse
 électronique = entrée d'annuaire, aucun SIRET réel dans le XML de bac à sable.
+
+## 14. Étape 4, chantier 1 (30/09/2026) : journal des envois
+
+- Table `pdp_journal` (script `2026-09-30_super-pdp-etape4.sql`) : une ligne
+  par événement — dépôt (`envoi`), refus de validation ou échec (`erreur`),
+  événement relu chez Super PDP (`relecture`), encaissement transmis
+  (`encaissement`) — avec pièce, numéro, dépôt Super PDP, statut, détail,
+  membre à l'origine (vide = tâche planifiée) et date. Écriture par les
+  fonctions serveur seulement (`_shared/pdp-journal.ts`, jamais bloquante),
+  lecture par tout membre actif (RLS). Jamais purgé.
+- Front : composant `PdpJournal` — historique d'une pièce au clic sur son
+  badge Super PDP (éditeur principal et éditeur de situation), vingt derniers
+  événements de l'organisation sur la carte Super PDP de Mon entreprise. Table
+  absente : message « Journal indisponible » sans casser la page.
+- Tests : `src/superpdp-journal.test.jsx`.

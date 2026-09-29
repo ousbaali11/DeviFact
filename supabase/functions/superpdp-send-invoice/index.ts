@@ -22,6 +22,7 @@ import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPERPDP_ENABLED } from "../_shared/pdp-flags.ts";
 import { updateKvValue } from "../_shared/kv.ts";
+import { journal } from "../_shared/pdp-journal.ts";
 import { superpdpConfigured, superpdpAllowProduction, superpdpApiBase, readConnection, superpdpFetch, apiErrorMessage, sandboxSellerFromDirectory } from "../_shared/superpdp.ts";
 import { pdpEligibility, pdpCanResend, sandboxIdentifierOf, sirenOfSiret, PDP_STATUS_LABELS } from "../_shared/superpdp-rules.ts";
 
@@ -56,11 +57,14 @@ serve(async (req) => {
   if (!SUPERPDP_ENABLED) return json({ error: "La transmission via la Plateforme Agréée est désactivée." }, 503);
 
   let organizationId = "", documentId = "", marked = false;
+  let actorId: string | null = null; // journal : membre à l'origine de l'envoi
+  let docNumber = "";
   try {
     const authHeader = req.headers.get("Authorization") || "";
     const authClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authHeader } } });
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) return json({ error: "Non connecté" }, 401);
+    actorId = user.id;
     const body = await req.json().catch(() => ({}));
     organizationId = typeof body?.organizationId === "string" ? body.organizationId : "";
     documentId = typeof body?.documentId === "string" ? body.documentId : "";
@@ -77,6 +81,7 @@ serve(async (req) => {
     const [documents, profile] = await Promise.all([readKv(organizationId, "documents"), readKv(organizationId, "company-profile")]);
     const doc = (Array.isArray(documents) ? documents : []).find((d: any) => d?.id === documentId);
     if (!doc) return json({ error: "Facture introuvable." }, 404);
+    docNumber = String(doc.docNumber || "");
     const eligibility = pdpEligibility(doc, { connected: true, env: conn.env, verificationStatus: conn.verification_status, companyCountryCode: countryCode(profile?.country), allowProduction: superpdpAllowProduction() });
     if (!eligibility.ok) return json({ error: eligibility.reason, code: eligibility.code }, 400);
     const sandbox = conn.env !== "production";
@@ -172,6 +177,7 @@ serve(async (req) => {
     await dbAdmin.from("pdp_invoices").update({ pdp_invoice_id: invoiceId, env: conn.env, processing_rule: String(invoice?.processing_rule || "B2B"), external_id: String(doc.id).slice(0, 36), status_code: statusCode, status_text: statusText, sent_at: sentAt, last_event_id: Number(lastEvent?.id) || 0, last_event_at: lastEvent ? sentAt : null, last_error: null }).eq("organization_id", organizationId).eq("document_id", documentId);
     const pdp: PdpField = { invoiceId, externalId: String(doc.id).slice(0, 36), env: conn.env, status: statusCode, statusText, sentAt, updatedAt: Date.now(), error: null };
     await writeDocPdp(organizationId, documentId, pdp);
+    await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: invoiceId, source: "envoi", statusCode: statusCode, statusText, detail: `Dépôt n° ${invoiceId} (${conn.env === "production" ? "production" : "bac à sable"}, fichier ${fileName})${warnings.length ? ` — points d'attention : ${warnings.join(" ; ")}` : ""}`, actor: actorId });
     return json({ ok: true, pdp, warnings, fileName });
   } catch (err) {
     const e = err as SendError;
@@ -180,6 +186,7 @@ serve(async (req) => {
     if (marked) {
       await dbAdmin.from("pdp_invoices").update({ status_code: "error", status_text: "Envoi en échec", last_error: message.slice(0, 1000) }).eq("organization_id", organizationId).eq("document_id", documentId).eq("status_code", "api:sending");
       await writeDocPdp(organizationId, documentId, { invoiceId: null, externalId: documentId.slice(0, 36), env: "", status: "error", statusText: "Envoi en échec", sentAt: null, updatedAt: Date.now(), error: message.slice(0, 500) });
+      await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: null, source: "erreur", statusCode: Array.isArray(e?.extra?.failures) ? "api:invalid" : "error", statusText: Array.isArray(e?.extra?.failures) ? "Fichier refusé" : "Envoi en échec", detail: message, actor: actorId });
     }
     return json({ error: message, ...(e?.extra || {}) }, e?.status && e.status >= 400 ? e.status : 500);
   }

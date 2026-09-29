@@ -8280,6 +8280,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   const [pdpSending, setPdpSending] = useState(false);
   const [pdpLockNotice, setPdpLockNotice] = useState(false);
   const [pdpRefreshing, setPdpRefreshing] = useState(false);
+  const [pdpJournalOpen, setPdpJournalOpen] = useState(false); // historique de la pièce (clic sur le badge)
   function flushPendingPatch() {
     if (!saveTimer.current) return;
     clearTimeout(saveTimer.current);
@@ -8472,7 +8473,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
           >
             {FACTURE_STATUSES.map((st) => <option key={st} value={st} style={{ color: colors.ink }}>{st}</option>)}
           </select>
-          {localDoc.pdp?.status && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</span>}
+          {localDoc.pdp?.status && <button type="button" onClick={() => setPdpJournalOpen((v) => !v)} className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white", border: "none", cursor: "pointer" }} aria-expanded={pdpJournalOpen} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</button>}
           {localDoc.pdp?.invoiceId && onRefreshPdp && <button onClick={refreshPdp} disabled={pdpRefreshing} className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white" style={{ border: "1px solid rgba(255,255,255,0.35)", opacity: pdpRefreshing ? 0.6 : 1 }} title="Relire les événements Super PDP" data-testid="pdp-refresh">{pdpRefreshing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Actualiser</button>}
           {!hasNextSituation && !isLocked && (
             <button onClick={() => onCreateNext(localDoc)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }} title="Crée la situation suivante, en reprenant automatiquement le cumul de celle-ci">
@@ -8581,6 +8582,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
                 <AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>La situation N° {nextSituation.numeroSituation || 1} ({nextSituation.docNumber}) fait suite à celle-ci : toute modification ici change son « déjà facturé », à mettre à jour depuis cette situation suivante.</span>
               </div>
             )}
+            {pdpJournalOpen && localDoc.pdp?.status && <PdpJournal organizationId={account?.organizationId} documentId={localDoc.id} title={`Historique Super PDP de ${localDoc.docNumber || "cette pièce"}`} onClose={() => setPdpJournalOpen(false)} />}
             {pdpLocked && (
               <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="pdp-lock-banner">
                 <Lock size={15} className="mt-0.5 shrink-0" />
@@ -15029,6 +15031,62 @@ async function callSuperPdp(organizationId, action, extra = {}) {
   }
   return data;
 }
+// Journal des envois Super PDP (étape 4, 30/09/2026) : lignes de la table
+// pdp_journal, écrites par les fonctions serveur (dépôt, refus, échec,
+// événement relu, encaissement), lisibles par tout membre actif ; pour une
+// pièce (clic sur son badge) ou pour l'organisation (carte de Mon entreprise).
+const PDP_JOURNAL_SOURCES = { envoi: "Envoi", relecture: "Suivi", encaissement: "Encaissement", erreur: "Erreur" };
+function PdpJournal({ organizationId, documentId = null, limit = 50, title = "Historique Super PDP", onClose = null, compact = false }) {
+  const [rows, setRows] = useState(null); // null = chargement
+  const [error, setError] = useState("");
+  const members = useOrgMemberLabels(organizationId);
+  useEffect(() => {
+    if (!organizationId) { setRows([]); return undefined; }
+    let cancelled = false;
+    (async () => {
+      try {
+        let q = db.from("pdp_journal").select("id, document_id, doc_number, pdp_invoice_id, source, status_code, status_text, detail, actor, created_at").eq("organization_id", organizationId);
+        if (documentId) q = q.eq("document_id", documentId);
+        const { data, error: readError } = await q.order("created_at", { ascending: false }).limit(limit);
+        if (cancelled) return;
+        if (readError) throw readError;
+        setRows(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Journal Super PDP illisible", err);
+        setError("Journal indisponible pour l'instant (base de données à préparer : script Super PDP étape 4 ?).");
+        setRows([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [organizationId, documentId, limit]);
+  const when = (iso) => { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" }); };
+  return (
+    <div className={`no-print ${compact ? "mt-3" : "mb-4"} rounded-xl p-4 text-sm`} style={{ border: `1px solid ${colors.line}`, background: colors.surface }} data-testid="pdp-journal">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="df-display text-xs font-semibold uppercase tracking-widest" style={{ color: colors.slate }}>{title}</span>
+        {onClose && <button type="button" onClick={onClose} className="rounded p-0.5" style={{ color: colors.inkSoft }} aria-label="Fermer l'historique" title="Fermer"><X size={14} /></button>}
+      </div>
+      {rows === null ? <p className="flex items-center gap-2 text-xs" style={{ color: colors.inkSoft }}><Loader2 size={13} className="animate-spin" /> Chargement…</p>
+        : error ? <p className="text-xs" style={{ color: colors.brick }}>{error}</p>
+        : rows.length === 0 ? <p className="text-xs" style={{ color: colors.inkSoft }}>Aucun événement enregistré.</p>
+        : (
+          <ul className="space-y-1.5">
+            {rows.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs" data-testid="pdp-journal-row" data-source={r.source}>
+                <span className="df-mono shrink-0" style={{ color: colors.inkSoft }}>{when(r.created_at)}</span>
+                <span className="shrink-0 rounded-full px-1.5 py-0.5 font-semibold uppercase" style={{ background: `${r.source === "erreur" ? colors.brick : colors.slate}18`, color: r.source === "erreur" ? colors.brick : colors.slate }}>{PDP_JOURNAL_SOURCES[r.source] || r.source}</span>
+                {!documentId && r.doc_number && <span className="df-mono shrink-0 font-semibold">{r.doc_number}</span>}
+                <span className="font-medium">{pdpStatusLabel({ status: r.status_code, statusText: r.status_text }) || r.status_text}</span>
+                {r.detail && <span className="min-w-0 break-words" style={{ color: colors.inkSoft }} title={r.detail}>{r.detail.length > 240 ? `${r.detail.slice(0, 240)}…` : r.detail}</span>}
+                <span className="shrink-0" style={{ color: colors.inkSoft }}>{r.actor ? members[r.actor] || "un membre" : "tâche automatique"}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+    </div>
+  );
+}
 // Carte « Super PDP » de Mon entreprise (propriétaire, entreprise en France) :
 // connexion du compte Super PDP de l'artisan par OAuth, état, déconnexion.
 // Retour de l'autorisation : ?superpdp=retour&code=…&state=… (ou &error=…).
@@ -15122,6 +15180,7 @@ function SuperPdpCard({ account, profile = null, onRedirect = (url) => { window.
           {status.verificationStatus && status.verificationStatus !== "verified" && <p className="text-xs" style={{ color: colors.brick }}>Entreprise pas encore vérifiée chez Super PDP ({status.verificationStatus}) : l'envoi de factures sera refusé tant que la vérification n'est pas faite.</p>}
           {status.env !== "production" && <p className="text-xs" style={{ color: colors.inkSoft }}>Bac à sable : rien n'est transmis à l'administration, les envois servent aux tests.</p>}
           <button onClick={disconnect} disabled={busy} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.brick, opacity: busy ? 0.6 : 1 }}>Déconnecter</button>
+          <PdpJournal organizationId={organizationId} limit={20} title="Derniers événements Super PDP" compact />
         </div>
       ) : (
         <div className="space-y-2">
@@ -18284,6 +18343,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   const [pdpSending, setPdpSending] = useState(false);
   const [pdpLockNotice, setPdpLockNotice] = useState(false);
   const [pdpRefreshing, setPdpRefreshing] = useState(false);
+  const [pdpJournalOpen, setPdpJournalOpen] = useState(false); // historique de la pièce (clic sur le badge)
   async function refreshPdp() {
     if (pdpRefreshing || !onRefreshPdp) return;
     setPdpRefreshing(true);
@@ -18358,7 +18418,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           >
             {statuses.map((s) => <option key={s} value={s} style={{ color: colors.ink }}>{s}</option>)}
           </select>
-          {localDoc.pdp?.status && <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</span>}
+          {localDoc.pdp?.status && <button type="button" onClick={() => setPdpJournalOpen((v) => !v)} className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white", border: "none", cursor: "pointer" }} aria-expanded={pdpJournalOpen} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</button>}
           {localDoc.pdp?.invoiceId && onRefreshPdp && <button onClick={refreshPdp} disabled={pdpRefreshing} className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white" style={{ border: "1px solid rgba(255,255,255,0.35)", opacity: pdpRefreshing ? 0.6 : 1 }} title="Relire les événements Super PDP" data-testid="pdp-refresh">{pdpRefreshing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Actualiser</button>}
           {saving ? (
             <span className="flex items-center gap-1 text-xs text-white"><Loader2 size={12} className="animate-spin" /> Enregistrement</span>
@@ -18411,6 +18471,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
             <button onClick={() => patch({ conflict: null })} className="shrink-0 rounded-md px-3 py-1 text-xs font-medium" style={{ border: `1px solid ${colors.brick}66`, color: colors.brick }} data-testid="conflict-dismiss">Vu, ne plus afficher</button>
           </div>
         )}
+        {pdpJournalOpen && localDoc.pdp?.status && <PdpJournal organizationId={account?.organizationId} documentId={localDoc.id} title={`Historique Super PDP de ${localDoc.docNumber || "cette pièce"}`} onClose={() => setPdpJournalOpen(false)} />}
         {pdpLocked && (
           <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="pdp-lock-banner">
             <Lock size={15} className="mt-0.5 shrink-0" />
@@ -19371,7 +19432,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 // détecter une erreur de rendu avant la mise en ligne. Aucun effet sur
 // l'application, qui n'utilise que l'export par défaut.
 export {
-  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE,
+  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal,
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, groupStockLinesByDay, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
