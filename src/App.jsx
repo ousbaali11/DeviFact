@@ -3242,7 +3242,7 @@ function initialView() {
     if (params.has("accueil")) {
       params.delete("accueil");
       const qs = params.toString();
-      window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
       return "dashboard";
     }
   } catch { /* adresse non lisible : vue mémorisée */ }
@@ -3469,6 +3469,52 @@ function DeviFactAppInner() {
   // Fiche chantier ouverte (nom du chantier) et chantier à pré-remplir
   // sur le prochain document créé depuis le panneau « Créer ».
   const [atelierChantier, setAtelierChantier] = useState(null);
+  // Flèches arrière / avant du navigateur (29/09/2026). Le site est une
+  // application à page unique : sans entrée d'historique, les flèches
+  // quittaient le site. Désormais chaque page visitée (vue, document ouvert,
+  // chantier ouvert) ajoute une entrée, sans changer l'adresse affichée (les
+  // paramètres ?superpdp, ?voir-document, ?paiement… restent intacts), et
+  // l'événement de navigation remet la page mémorisée sans rien rajouter.
+  // Hors connexion, rien n'est ajouté. Les onglets internes d'une page ne
+  // créent pas d'entrée.
+  const historyNavRef = useRef(false); // vrai pendant un retour/avance : ne pas rajouter d'entrée
+  const navStateRef = useRef(null);
+  navStateRef.current = { view, activeId: activeId || null, atelierChantier: atelierChantier || null, connected: !!account };
+  useEffect(() => {
+    if (typeof window === "undefined" || !account) return;
+    const entry = { chantiflow: true, view, activeId: activeId || null, atelierChantier: atelierChantier || null };
+    if (historyNavRef.current) { historyNavRef.current = false; return; }
+    const cur = window.history.state;
+    if (cur && cur.chantiflow && cur.view === entry.view && (cur.activeId || null) === entry.activeId && (cur.atelierChantier || null) === entry.atelierChantier) return;
+    try {
+      if (!cur || !cur.chantiflow) window.history.replaceState({ ...(cur || {}), ...entry }, "", window.location.href);
+      else window.history.pushState(entry, "", window.location.href);
+    } catch (err) { console.error("Historique du navigateur indisponible", err); }
+  }, [view, activeId, atelierChantier, account]);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    function onPopState(e) {
+      const st = e.state;
+      const cur = navStateRef.current;
+      if (!st || !st.chantiflow || !cur?.connected) return;
+      let nextView = typeof st.view === "string" && st.view ? st.view : "dashboard";
+      let nextId = st.activeId || null;
+      // Document supprimé entre-temps : tableau de bord.
+      if (nextId && !documentsRef.current.some((d) => d.id === nextId)) { nextView = "dashboard"; nextId = null; }
+      const nextChantier = nextView === "atelier-chantier" ? st.atelierChantier || null : cur.atelierChantier;
+      if (nextView === "atelier-chantier" && !nextChantier) nextView = "chantiers";
+      if (nextView === cur.view && nextId === cur.activeId && nextChantier === cur.atelierChantier) return;
+      historyNavRef.current = true;
+      // Même logique que le bouton « Tableau de bord » : un document « en
+      // attente » jamais rempli est abandonné quand on le quitte.
+      setPendingDoc((p) => (p && p.id === cur.activeId && nextId !== p.id ? null : p));
+      if (nextChantier !== cur.atelierChantier) setAtelierChantier(nextChantier);
+      setActiveId(nextId);
+      setView(nextView);
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   const [atelierCreateChantier, setAtelierCreateChantier] = useState(null);
 
   const [plans, setPlans] = useState(PLANS);
@@ -4081,7 +4127,7 @@ function DeviFactAppInner() {
       }
       const params = new URLSearchParams(window.location.search);
       params.delete("confirm");
-      window.history.replaceState({}, "", window.location.pathname + (params.toString() ? `?${params.toString()}` : ""));
+      window.history.replaceState(window.history.state, "", window.location.pathname + (params.toString() ? `?${params.toString()}` : ""));
     })();
   }, []);
 
@@ -15004,7 +15050,7 @@ function SuperPdpCard({ account, profile = null, onRedirect = (url) => { window.
         returned = { code: params.get("code") || "", state: params.get("state") || "", error: params.get("error") || "", description: params.get("error_description") || "" };
         ["superpdp", "code", "state", "error", "error_description"].forEach((k) => params.delete(k));
         const qs = params.toString();
-        window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+        window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
       }
     } catch { /* adresse non modifiable : sans conséquence */ }
     (async () => {
@@ -15142,7 +15188,7 @@ function StripeConnectCard({ account, siteSettings = null, profile = null, onRed
         setBackFromStripe(true);
         params.delete("stripe-connect");
         const qs = params.toString();
-        window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+        window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
       }
     } catch { /* adresse non modifiable : sans conséquence */ }
     load();
@@ -15882,7 +15928,7 @@ function PricingView({ account, plans, onChooseFree, onChooseZeroPrice, onCancel
       setStripeReturnMsg(paiement);
       params.delete("paiement");
       const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : "");
-      window.history.replaceState({}, "", newUrl);
+      window.history.replaceState(window.history.state, "", newUrl);
     }
     if (paiement === "succes") {
       // Le webhook Stripe peut mettre quelques secondes à confirmer le
