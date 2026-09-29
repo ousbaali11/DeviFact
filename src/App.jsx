@@ -3548,8 +3548,19 @@ function DeviFactAppInner() {
   const [plans, setPlans] = useState(PLANS);
 
   async function loadProfile(userId, email, preferredOrgId = null) {
-    const { data: profile } = await db.from("profiles").select("*").eq("id", userId).maybeSingle();
-    if (!profile) return null;
+    let { data: profile } = await db.from("profiles").select("*").eq("id", userId).maybeSingle();
+    if (!profile) {
+      // Compte sans ligne de profil (ligne supprimée à la main dans l'éditeur
+      // de table, création interrompue) : recréée par la fonction
+      // ensure_user_has_profile (script 2026-10-01_profil-manquant.sql), puis
+      // relue. Avant, chaque connexion affichait « ton espace n'est pas
+      // encore prêt » sans issue.
+      const { error: repairError } = await db.rpc("ensure_user_has_profile");
+      if (repairError) console.error("Profil manquant non recréé (script 2026-10-01_profil-manquant.sql appliqué ?)", repairError);
+      else ({ data: profile } = await db.from("profiles").select("*").eq("id", userId).maybeSingle());
+      if (!profile) return null;
+      console.warn("Profil recréé pour le compte", userId);
+    }
 
     let { data: memberships } = await db
       .from("organization_members")

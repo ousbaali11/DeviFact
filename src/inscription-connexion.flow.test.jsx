@@ -149,7 +149,7 @@ describe("inscription puis connexion immédiate", () => {
     await unmount();
   }, 40000);
   it("compte non affiché après l'inscription (profil durablement illisible) : « Se connecter » ouvre le compte sans actualiser la page", async () => {
-    auth.profileMissing = 8; // au-delà des relectures : le premier chargement n'affiche pas le compte
+    auth.profileMissing = 20; // au-delà des relectures (et de la réparation du profil) : le premier chargement n'affiche pas le compte
     const { container, unmount } = await openApp();
     expect(await waitFor(() => isLanding(container))).toBe(true);
     await signUp(container);
