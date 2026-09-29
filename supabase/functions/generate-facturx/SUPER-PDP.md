@@ -278,3 +278,23 @@ quand l'annuaire le connaît) : identifiant légal = numéro de test, adresse
   événements de l'organisation sur la carte Super PDP de Mon entreprise. Table
   absente : message « Journal indisponible » sans casser la page.
 - Tests : `src/superpdp-journal.test.jsx`.
+
+## 15. Étape 4, chantier 2 (30/09/2026) : reprise sur erreur
+
+- Bandeau de rejet dans l'éditeur principal et l'éditeur de situation quand
+  le statut Super PDP est un échec final (`pdpFailureSummary`, règles
+  partagées) : titre (« Fichier refusé par la validation », « Rejetée par la
+  plateforme du client », « Refusée par le client », « Rejetée »,
+  « Irrecevable », « Envoi en échec »), motif (message d'envoi conservé sur la
+  pièce, ou raison transmise par Super PDP avec l'événement — désormais
+  enregistrée dans `pdp.reason` par la relecture), consigne, bouton
+  « Renvoyer » (même confirmation, avec « Nouvelle tentative (n° N) »),
+  croix pour masquer.
+- Tentatives : `pdp.attempt` incrémenté à chaque envoi, affiché sur le badge à
+  partir de la deuxième ; identifiant externe `pdpExternalId(doc.id, n)`
+  (suffixe `-n` dès la deuxième, 36 caractères au plus). Un fichier refusé
+  par la validation est enregistré `api:invalid` / « Fichier refusé » (et non
+  plus « Envoi en échec »). Journal : tentative mentionnée.
+- Verrou « envoi en cours » resté plus de 10 minutes (`STALE_LOCK_MS`) :
+  libéré, nouvelle tentative acceptée, ligne de journal « Verrou libéré ».
+- Aucun script SQL. Tests : `src/superpdp-reprise.test.jsx`.

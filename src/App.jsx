@@ -5,7 +5,7 @@ import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
 import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument, buildPurchaseEntries, factureRecueTotals, csvCell } from "./accounting.js";
-import { pdpEligibility, pdpLocksContent, pdpStatusLabel, pdpBlockedKeys, shouldSendPaidEvent } from "./pdp-rules.js";
+import { pdpEligibility, pdpLocksContent, pdpStatusLabel, pdpBlockedKeys, shouldSendPaidEvent, pdpFailureSummary } from "./pdp-rules.js";
 import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
@@ -8281,6 +8281,8 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   const [pdpLockNotice, setPdpLockNotice] = useState(false);
   const [pdpRefreshing, setPdpRefreshing] = useState(false);
   const [pdpJournalOpen, setPdpJournalOpen] = useState(false); // historique de la pièce (clic sur le badge)
+  const pdpFailure = pdpFailureSummary(localDoc.pdp); // rejet ou refus : bandeau avec motif et « Renvoyer »
+  const [pdpFailureDismissed, setPdpFailureDismissed] = useState(false);
   function flushPendingPatch() {
     if (!saveTimer.current) return;
     clearTimeout(saveTimer.current);
@@ -8304,7 +8306,8 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   async function sendToPdp() {
     if (pdpSending) return;
     const env = pdpStatus?.env === "production" ? "production" : "bac à sable";
-    if (!window.confirm(`Envoyer la situation ${localDoc.docNumber || ""} (valant facture) à ${localDoc.client?.name || "ce client"} via Super PDP (${env}) ?\n\nLe fichier Factur-X sera validé puis transmis. Cet envoi ne s'annule pas et le contenu de la situation sera figé.`)) return;
+    const retryNote = pdpFailure ? `\n\nNouvelle tentative (n° ${pdpFailure.attempt + 1}) après : ${pdpFailure.title.toLowerCase()}.` : "";
+    if (!window.confirm(`Envoyer la situation ${localDoc.docNumber || ""} (valant facture) à ${localDoc.client?.name || "ce client"} via Super PDP (${env}) ?\n\nLe fichier Factur-X sera validé puis transmis. Cet envoi ne s'annule pas et le contenu de la situation sera figé.${retryNote}`)) return;
     flushPendingPatch();
     setPdpSending(true);
     try {
@@ -8473,7 +8476,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
           >
             {FACTURE_STATUSES.map((st) => <option key={st} value={st} style={{ color: colors.ink }}>{st}</option>)}
           </select>
-          {localDoc.pdp?.status && <button type="button" onClick={() => setPdpJournalOpen((v) => !v)} className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white", border: "none", cursor: "pointer" }} aria-expanded={pdpJournalOpen} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</button>}
+          {localDoc.pdp?.status && <button type="button" onClick={() => setPdpJournalOpen((v) => !v)} className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white", border: "none", cursor: "pointer" }} aria-expanded={pdpJournalOpen} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}{Number(localDoc.pdp.attempt) > 1 ? ` · tentative ${localDoc.pdp.attempt}` : ""}</button>}
           {localDoc.pdp?.invoiceId && onRefreshPdp && <button onClick={refreshPdp} disabled={pdpRefreshing} className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white" style={{ border: "1px solid rgba(255,255,255,0.35)", opacity: pdpRefreshing ? 0.6 : 1 }} title="Relire les événements Super PDP" data-testid="pdp-refresh">{pdpRefreshing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Actualiser</button>}
           {!hasNextSituation && !isLocked && (
             <button onClick={() => onCreateNext(localDoc)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }} title="Crée la situation suivante, en reprenant automatiquement le cumul de celle-ci">
@@ -8580,6 +8583,18 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
             {nextSituation && (
               <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.slate}14`, border: `1px solid ${colors.slate}55`, color: colors.slate }} data-testid="situation-has-next">
                 <AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>La situation N° {nextSituation.numeroSituation || 1} ({nextSituation.docNumber}) fait suite à celle-ci : toute modification ici change son « déjà facturé », à mettre à jour depuis cette situation suivante.</span>
+              </div>
+            )}
+            {pdpFailure && !pdpFailureDismissed && (
+              <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}55`, color: colors.brick }} data-testid="pdp-reject-banner">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">Super PDP : {pdpFailure.title}{pdpFailure.attempt > 1 ? ` (tentative ${pdpFailure.attempt})` : ""}</p>
+                  {pdpFailure.reason && <p className="mt-0.5 break-words" data-testid="pdp-reject-reason">{pdpFailure.reason}</p>}
+                  <p className="mt-1" style={{ color: colors.ink }}>Corrige la pièce puis renvoie-la : son contenu est de nouveau modifiable.</p>
+                </div>
+                {pdpEligible && <button type="button" onClick={sendToPdp} disabled={pdpSending} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick, opacity: pdpSending ? 0.6 : 1 }} data-testid="pdp-resend">Renvoyer</button>}
+                <button type="button" onClick={() => setPdpFailureDismissed(true)} className="shrink-0 rounded p-0.5" style={{ color: colors.brick }} aria-label="Masquer ce message" title="Masquer"><X size={14} /></button>
               </div>
             )}
             {pdpJournalOpen && localDoc.pdp?.status && <PdpJournal organizationId={account?.organizationId} documentId={localDoc.id} title={`Historique Super PDP de ${localDoc.docNumber || "cette pièce"}`} onClose={() => setPdpJournalOpen(false)} />}
@@ -18344,6 +18359,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   const [pdpLockNotice, setPdpLockNotice] = useState(false);
   const [pdpRefreshing, setPdpRefreshing] = useState(false);
   const [pdpJournalOpen, setPdpJournalOpen] = useState(false); // historique de la pièce (clic sur le badge)
+  const pdpFailure = pdpFailureSummary(localDoc.pdp); // rejet ou refus : bandeau avec motif et « Renvoyer »
+  const [pdpFailureDismissed, setPdpFailureDismissed] = useState(false);
   async function refreshPdp() {
     if (pdpRefreshing || !onRefreshPdp) return;
     setPdpRefreshing(true);
@@ -18359,7 +18376,8 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   async function sendToPdp() {
     if (pdpSending) return;
     const env = pdpStatus?.env === "production" ? "production" : "bac à sable";
-    if (!window.confirm(`Envoyer ${pdpDocLabel} ${localDoc.docNumber || ""} à ${localDoc.client?.name || "ce client"} via Super PDP (${env}) ?\n\nLe fichier Factur-X sera validé puis transmis. Cet envoi ne s'annule pas et le contenu de ${pdpDocLabel} sera figé.`)) return;
+    const retryNote = pdpFailure ? `\n\nNouvelle tentative (n° ${pdpFailure.attempt + 1}) après : ${pdpFailure.title.toLowerCase()}.` : "";
+    if (!window.confirm(`Envoyer ${pdpDocLabel} ${localDoc.docNumber || ""} à ${localDoc.client?.name || "ce client"} via Super PDP (${env}) ?\n\nLe fichier Factur-X sera validé puis transmis. Cet envoi ne s'annule pas et le contenu de ${pdpDocLabel} sera figé.${retryNote}`)) return;
     flushPendingPatch();
     setPdpSending(true);
     try {
@@ -18418,7 +18436,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
           >
             {statuses.map((s) => <option key={s} value={s} style={{ color: colors.ink }}>{s}</option>)}
           </select>
-          {localDoc.pdp?.status && <button type="button" onClick={() => setPdpJournalOpen((v) => !v)} className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white", border: "none", cursor: "pointer" }} aria-expanded={pdpJournalOpen} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}</button>}
+          {localDoc.pdp?.status && <button type="button" onClick={() => setPdpJournalOpen((v) => !v)} className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ background: "rgba(255,255,255,0.15)", color: "white", border: "none", cursor: "pointer" }} aria-expanded={pdpJournalOpen} title={localDoc.pdp.paidEventError ? `Encaissement non transmis : ${localDoc.pdp.paidEventError}` : localDoc.pdp.error || ""} data-testid="pdp-badge">Super PDP : {pdpStatusLabel(localDoc.pdp)}{localDoc.pdp.paidEventAt ? " · encaissement transmis" : ""}{Number(localDoc.pdp.attempt) > 1 ? ` · tentative ${localDoc.pdp.attempt}` : ""}</button>}
           {localDoc.pdp?.invoiceId && onRefreshPdp && <button onClick={refreshPdp} disabled={pdpRefreshing} className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white" style={{ border: "1px solid rgba(255,255,255,0.35)", opacity: pdpRefreshing ? 0.6 : 1 }} title="Relire les événements Super PDP" data-testid="pdp-refresh">{pdpRefreshing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Actualiser</button>}
           {saving ? (
             <span className="flex items-center gap-1 text-xs text-white"><Loader2 size={12} className="animate-spin" /> Enregistrement</span>
@@ -18469,6 +18487,18 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
               <span>Modifié en même temps par {localDoc.conflict.otherWriter && memberLabelOf?.(localDoc.conflict.otherWriter) ? <strong>{memberLabelOf(localDoc.conflict.otherWriter)}</strong> : "un autre membre"}{localDoc.conflict.at ? ` le ${fr(new Date(localDoc.conflict.at))}` : ""} : {(localDoc.conflict.fields || []).join(", ")}. La version la plus récente ({localDoc.conflict.kept === "local" ? "la tienne" : "la sienne"}) a été gardée pour ces champs ; vérifie-les.</span>
             </span>
             <button onClick={() => patch({ conflict: null })} className="shrink-0 rounded-md px-3 py-1 text-xs font-medium" style={{ border: `1px solid ${colors.brick}66`, color: colors.brick }} data-testid="conflict-dismiss">Vu, ne plus afficher</button>
+          </div>
+        )}
+        {pdpFailure && !pdpFailureDismissed && (
+          <div className="no-print mb-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}55`, color: colors.brick }} data-testid="pdp-reject-banner">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Super PDP : {pdpFailure.title}{pdpFailure.attempt > 1 ? ` (tentative ${pdpFailure.attempt})` : ""}</p>
+              {pdpFailure.reason && <p className="mt-0.5 break-words" data-testid="pdp-reject-reason">{pdpFailure.reason}</p>}
+              <p className="mt-1" style={{ color: colors.ink }}>Corrige la pièce puis renvoie-la : son contenu est de nouveau modifiable.</p>
+            </div>
+            {pdpEligible && <button type="button" onClick={sendToPdp} disabled={pdpSending} className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white" style={{ background: colors.brick, opacity: pdpSending ? 0.6 : 1 }} data-testid="pdp-resend">Renvoyer</button>}
+            <button type="button" onClick={() => setPdpFailureDismissed(true)} className="shrink-0 rounded p-0.5" style={{ color: colors.brick }} aria-label="Masquer ce message" title="Masquer"><X size={14} /></button>
           </div>
         )}
         {pdpJournalOpen && localDoc.pdp?.status && <PdpJournal organizationId={account?.organizationId} documentId={localDoc.id} title={`Historique Super PDP de ${localDoc.docNumber || "cette pièce"}`} onClose={() => setPdpJournalOpen(false)} />}

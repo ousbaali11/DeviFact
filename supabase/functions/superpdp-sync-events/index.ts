@@ -74,8 +74,8 @@ async function syncOrganization(organizationId: string, conn: PdpConnection, act
       const row = rowByInvoice.get(u.invoiceId);
       if (!row) continue; // facture inconnue de Chantiflow (envoyée par un autre outil) : ignorée
       await dbAdmin.from("pdp_invoices").update({ status_code: u.status, status_text: u.statusText, last_event_id: u.lastEventId, last_event_at: u.lastEventAt, last_error: null }).eq("organization_id", organizationId).eq("document_id", row.document_id);
-      await journal(dbAdmin, { organizationId, documentId: row.document_id, docNumber: numberOf(row.document_id), pdpInvoiceId: u.invoiceId, source: "relecture", statusCode: u.status, statusText: u.statusText, detail: `Événement Super PDP n° ${u.lastEventId}${u.lastEventAt ? ` du ${u.lastEventAt}` : ""}`, actor: actorId });
-      patches.push({ documentId: row.document_id, pdp: { status: u.status, statusText: u.statusText, lastEventAt: u.lastEventAt, updatedAt: Date.now() } });
+      await journal(dbAdmin, { organizationId, documentId: row.document_id, docNumber: numberOf(row.document_id), pdpInvoiceId: u.invoiceId, source: "relecture", statusCode: u.status, statusText: u.statusText, detail: `Événement Super PDP n° ${u.lastEventId}${u.lastEventAt ? ` du ${u.lastEventAt}` : ""}${u.reason && u.reason !== u.statusText ? ` — ${u.reason}` : ""}`, actor: actorId });
+      patches.push({ documentId: row.document_id, pdp: { status: u.status, statusText: u.statusText, reason: u.reason, lastEventAt: u.lastEventAt, updatedAt: Date.now() } });
     }
     await writeDocPatches(organizationId, patches);
   }

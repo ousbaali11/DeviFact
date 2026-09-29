@@ -10,7 +10,7 @@
 // SIRET de la fiche client porte l'identifiant de test Super PDP
 // (« 0225:315143296_106842 » ou « 315143296_106842 »).
 
-export type PdpState = { invoiceId?: number | null; status?: string | null; statusText?: string | null; sentAt?: string | null; updatedAt?: number | null; env?: string | null; error?: string | null } | null | undefined;
+export type PdpState = { invoiceId?: number | null; status?: string | null; statusText?: string | null; sentAt?: string | null; updatedAt?: number | null; env?: string | null; error?: string | null; reason?: string | null; attempt?: number | null } | null | undefined;
 export type PdpContext = { connected: boolean; env?: string | null; verificationStatus?: string | null; companyCountryCode?: string | null; allowProduction?: boolean };
 export type PdpEligibility = { ok: boolean; code: string | null; reason: string | null };
 
@@ -56,7 +56,7 @@ export function pdpBlockedKeys(patch: Record<string, unknown> | null | undefined
 // événement par facture. Renvoie les mises à jour par identifiant de facture
 // Super PDP et le plus grand identifiant d'événement lu.
 export type PdpEvent = { id: number; invoice_id: number; status_code: string; status_text?: string | null; created_at?: string | null };
-export type PdpEventUpdate = { invoiceId: number; status: string; statusText: string; lastEventId: number; lastEventAt: string | null };
+export type PdpEventUpdate = { invoiceId: number; status: string; statusText: string; reason: string | null; lastEventId: number; lastEventAt: string | null };
 export function applyPdpEvents(events: PdpEvent[]): { updates: PdpEventUpdate[]; lastEventId: number } {
   const byInvoice = new Map<number, PdpEventUpdate>();
   let lastEventId = 0;
@@ -65,7 +65,7 @@ export function applyPdpEvents(events: PdpEvent[]): { updates: PdpEventUpdate[];
     if (!Number.isFinite(id) || !Number.isFinite(invoiceId) || !e?.status_code) continue;
     lastEventId = Math.max(lastEventId, id);
     const status = String(e.status_code);
-    byInvoice.set(invoiceId, { invoiceId, status, statusText: PDP_STATUS_LABELS[status] || String(e.status_text || status), lastEventId: id, lastEventAt: e.created_at ? String(e.created_at) : null });
+    byInvoice.set(invoiceId, { invoiceId, status, statusText: PDP_STATUS_LABELS[status] || String(e.status_text || status), reason: e.status_text ? String(e.status_text) : null, lastEventId: id, lastEventAt: e.created_at ? String(e.created_at) : null });
   }
   return { updates: [...byInvoice.values()], lastEventId };
 }
@@ -101,4 +101,23 @@ export function pdpEligibility(doc: any, ctx: PdpContext): PdpEligibility {
   if (sandbox ? !sandboxIdentifierOf(doc.client?.siret) && !sirenOfSiret(doc.client?.siret) : !sirenOfSiret(doc.client?.siret)) return no("siret", sandbox ? "Client sans identifiant : en bac à sable, renseigne dans le champ SIRET de la fiche client l'identifiant de test Super PDP (ex. 315143296_106842)." : "Client sans SIRET : renseigne le SIRET (14 chiffres) sur la fiche client.");
   if (!pdpCanResend(doc.pdp)) return no("deja-envoyee", doc.pdp?.status === "api:sending" ? "Envoi déjà en cours." : `Facture déjà transmise via Super PDP (${pdpStatusLabel(doc.pdp)}).`);
   return { ok: true, code: null, reason: null };
+}
+
+// Reprise sur erreur (étape 4, 30/09/2026) : résumé d'un échec final pour le
+// bandeau de rejet — titre, motif (message d'envoi ou raison transmise par
+// Super PDP avec l'événement), numéro de la tentative qui a échoué.
+export const PDP_FAILURE_TITLES: Record<string, string> = { "api:invalid": "Fichier refusé par la validation", "api:rejected": "Rejetée par la plateforme du client", "fr:210": "Refusée par le client", "fr:213": "Rejetée", "fr:501": "Irrecevable", error: "Envoi en échec" };
+export function pdpFailureSummary(pdp: PdpState): { status: string; title: string; reason: string | null; attempt: number } | null {
+  if (!pdp || !PDP_FINAL_FAILURES.includes(String(pdp.status || ""))) return null;
+  const status = String(pdp.status);
+  const reason = String(pdp.error || pdp.reason || "").trim();
+  return { status, title: PDP_FAILURE_TITLES[status] || pdpStatusLabel(pdp), reason: reason || null, attempt: Number(pdp.attempt) || 1 };
+}
+// Identifiant externe d'une tentative d'envoi (36 caractères au plus chez
+// Super PDP) : identifiant de la pièce, suffixé du numéro à partir de la
+// deuxième tentative pour ne jamais confondre deux dépôts.
+export function pdpExternalId(documentId: unknown, attempt: unknown): string {
+  const n = Number(attempt) || 1;
+  const suffix = n > 1 ? `-${n}` : "";
+  return `${String(documentId || "").slice(0, 36 - suffix.length)}${suffix}`;
 }

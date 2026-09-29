@@ -17,13 +17,13 @@ describe("application des événements", () => {
     const { updates, lastEventId } = site.applyPdpEvents([ev(12, 501, "fr:202"), ev(10, 501, "api:uploaded"), ev(11, 777, "api:sent"), ev(13, 777, "fr:210", { status_text: "Refused" })]);
     expect(lastEventId).toBe(13);
     expect(updates).toEqual([
-      { invoiceId: 501, status: "fr:202", statusText: "Reçue", lastEventId: 12, lastEventAt: "2026-09-26T10:00:02.000Z" },
-      { invoiceId: 777, status: "fr:210", statusText: "Refusée", lastEventId: 13, lastEventAt: "2026-09-26T10:00:03.000Z" },
+      { invoiceId: 501, status: "fr:202", statusText: "Reçue", reason: "x", lastEventId: 12, lastEventAt: "2026-09-26T10:00:02.000Z" },
+      { invoiceId: 777, status: "fr:210", statusText: "Refusée", reason: "Refused", lastEventId: 13, lastEventAt: "2026-09-26T10:00:03.000Z" },
     ]);
   });
   it("événements incomplets ignorés, statut inconnu : libellé de Super PDP, liste vide → rien", () => {
     const { updates, lastEventId } = site.applyPdpEvents([{ id: 5 }, ev(6, 9, "ppf:something", { status_text: "Déposé sur le PPF" }), { id: "x", invoice_id: 9, status_code: "fr:200" }]);
-    expect(updates).toEqual([{ invoiceId: 9, status: "ppf:something", statusText: "Déposé sur le PPF", lastEventId: 6, lastEventAt: "2026-09-26T10:00:06.000Z" }]);
+    expect(updates).toEqual([{ invoiceId: 9, status: "ppf:something", statusText: "Déposé sur le PPF", reason: "Déposé sur le PPF", lastEventId: 6, lastEventAt: "2026-09-26T10:00:06.000Z" }]);
     expect(lastEventId).toBe(6);
     expect(site.applyPdpEvents([])).toEqual({ updates: [], lastEventId: 0 });
   });

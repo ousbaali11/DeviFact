@@ -24,7 +24,7 @@ import { SUPERPDP_ENABLED } from "../_shared/pdp-flags.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 import { journal } from "../_shared/pdp-journal.ts";
 import { superpdpConfigured, superpdpAllowProduction, superpdpApiBase, readConnection, superpdpFetch, apiErrorMessage, sandboxSellerFromDirectory } from "../_shared/superpdp.ts";
-import { pdpEligibility, pdpCanResend, sandboxIdentifierOf, sirenOfSiret, PDP_STATUS_LABELS } from "../_shared/superpdp-rules.ts";
+import { pdpEligibility, pdpCanResend, sandboxIdentifierOf, sirenOfSiret, pdpExternalId, PDP_STATUS_LABELS } from "../_shared/superpdp-rules.ts";
 
 const dbAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
@@ -45,7 +45,9 @@ function fromBase64(b64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 // Champ « pdp » du document, repris tel quel par le site (badge, verrou).
-type PdpField = { invoiceId: number | null; externalId: string; env: string; status: string; statusText: string; sentAt: string | null; updatedAt: number; error?: string | null };
+type PdpField = { invoiceId: number | null; externalId: string; env: string; status: string; statusText: string; sentAt: string | null; updatedAt: number; error?: string | null; attempt: number; reason?: string | null };
+// Verrou « envoi en cours » laissé par une coupure : libéré après ce délai.
+const STALE_LOCK_MS = 10 * 60 * 1000;
 async function writeDocPdp(organizationId: string, documentId: string, pdp: PdpField) {
   const result = await updateKvValue<any[]>(dbAdmin, organizationId, "documents", (list) => (Array.isArray(list) ? list.map((d: any) => (d?.id === documentId ? { ...d, pdp, updatedAt: Date.now() } : d)) : list));
   if (!result.ok) console.error(`Champ pdp non enregistré sur ${documentId} : ${result.reason}`);
@@ -59,6 +61,7 @@ serve(async (req) => {
   let organizationId = "", documentId = "", marked = false;
   let actorId: string | null = null; // journal : membre à l'origine de l'envoi
   let docNumber = "";
+  let attempt = 1; // numéro de la tentative en cours (reprise après échec)
   try {
     const authHeader = req.headers.get("Authorization") || "";
     const authClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authHeader } } });
@@ -82,6 +85,8 @@ serve(async (req) => {
     const doc = (Array.isArray(documents) ? documents : []).find((d: any) => d?.id === documentId);
     if (!doc) return json({ error: "Facture introuvable." }, 404);
     docNumber = String(doc.docNumber || "");
+    attempt = (Number(doc?.pdp?.attempt) || 0) + 1;
+    const externalId = pdpExternalId(doc.id, attempt);
     const eligibility = pdpEligibility(doc, { connected: true, env: conn.env, verificationStatus: conn.verification_status, companyCountryCode: countryCode(profile?.country), allowProduction: superpdpAllowProduction() });
     if (!eligibility.ok) return json({ error: eligibility.reason, code: eligibility.code }, 400);
     const sandbox = conn.env !== "production";
@@ -113,8 +118,10 @@ serve(async (req) => {
     if (sandbox && !sandboxIds?.buyer && !sirenOfSiret(doc.client?.siret)) return json({ error: "Bac à sable : renseigne l'identifiant de test Super PDP du client (ex. 315143296_106842) dans le champ SIRET de sa fiche." }, 400);
 
     // 2. Verrou « envoi en cours » (une seule transmission à la fois, réémission après échec seulement).
-    const { data: existing } = await dbAdmin.from("pdp_invoices").select("pdp_invoice_id, status_code").eq("organization_id", organizationId).eq("document_id", documentId).maybeSingle();
-    if (existing && !pdpCanResend({ invoiceId: existing.pdp_invoice_id, status: existing.status_code })) {
+    const { data: existing } = await dbAdmin.from("pdp_invoices").select("pdp_invoice_id, status_code, updated_at").eq("organization_id", organizationId).eq("document_id", documentId).maybeSingle();
+    const staleLock = !!existing && existing.status_code === "api:sending" && Date.now() - new Date(existing.updated_at || 0).getTime() > STALE_LOCK_MS;
+    if (staleLock) await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: existing.pdp_invoice_id, source: "erreur", statusCode: "api:sending", statusText: "Verrou libéré", detail: `Envoi resté « en cours » depuis plus de 10 minutes (coupure probable) : verrou libéré, nouvelle tentative acceptée.`, actor: actorId });
+    if (existing && !staleLock && !pdpCanResend({ invoiceId: existing.pdp_invoice_id, status: existing.status_code })) {
       return json({ error: existing.status_code === "api:sending" ? "Envoi déjà en cours." : `Facture déjà transmise via Super PDP (${PDP_STATUS_LABELS[existing.status_code] || existing.status_code}).` }, 409);
     }
     const { error: markError } = await dbAdmin.from("pdp_invoices").upsert({ organization_id: organizationId, document_id: documentId, env: conn.env, status_code: "api:sending", status_text: "Envoi en cours", pdp_invoice_id: null, sent_at: null, last_error: null }, { onConflict: "organization_id,document_id" });
@@ -163,7 +170,7 @@ serve(async (req) => {
     }
 
     // 6. Envoi.
-    const sent = await superpdpFetch(dbAdmin, organizationId, `/v1.beta/invoices?external_id=${encodeURIComponent(String(doc.id).slice(0, 36))}&processing_rule=B2B`, { method: "POST", headers: { "Content-Type": "application/pdf" }, body: pdf });
+    const sent = await superpdpFetch(dbAdmin, organizationId, `/v1.beta/invoices?external_id=${encodeURIComponent(externalId)}&processing_rule=B2B`, { method: "POST", headers: { "Content-Type": "application/pdf" }, body: pdf });
     if (!sent.ok) throw new SendError(`Super PDP a refusé la facture. ${await apiErrorMessage(sent)}`, 502);
     const invoice = await sent.json();
     const invoiceId = Number(invoice?.id);
@@ -174,19 +181,20 @@ serve(async (req) => {
     const sentAt = new Date().toISOString();
 
     // 7. Enregistrement.
-    await dbAdmin.from("pdp_invoices").update({ pdp_invoice_id: invoiceId, env: conn.env, processing_rule: String(invoice?.processing_rule || "B2B"), external_id: String(doc.id).slice(0, 36), status_code: statusCode, status_text: statusText, sent_at: sentAt, last_event_id: Number(lastEvent?.id) || 0, last_event_at: lastEvent ? sentAt : null, last_error: null }).eq("organization_id", organizationId).eq("document_id", documentId);
-    const pdp: PdpField = { invoiceId, externalId: String(doc.id).slice(0, 36), env: conn.env, status: statusCode, statusText, sentAt, updatedAt: Date.now(), error: null };
+    await dbAdmin.from("pdp_invoices").update({ pdp_invoice_id: invoiceId, env: conn.env, processing_rule: String(invoice?.processing_rule || "B2B"), external_id: externalId, status_code: statusCode, status_text: statusText, sent_at: sentAt, last_event_id: Number(lastEvent?.id) || 0, last_event_at: lastEvent ? sentAt : null, last_error: null }).eq("organization_id", organizationId).eq("document_id", documentId);
+    const pdp: PdpField = { invoiceId, externalId, env: conn.env, status: statusCode, statusText, sentAt, updatedAt: Date.now(), error: null, attempt, reason: null };
     await writeDocPdp(organizationId, documentId, pdp);
-    await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: invoiceId, source: "envoi", statusCode: statusCode, statusText, detail: `Dépôt n° ${invoiceId} (${conn.env === "production" ? "production" : "bac à sable"}, fichier ${fileName})${warnings.length ? ` — points d'attention : ${warnings.join(" ; ")}` : ""}`, actor: actorId });
+    await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: invoiceId, source: "envoi", statusCode: statusCode, statusText, detail: `Dépôt n° ${invoiceId} (${conn.env === "production" ? "production" : "bac à sable"}, fichier ${fileName}${attempt > 1 ? `, tentative n° ${attempt}` : ""})${warnings.length ? ` — points d'attention : ${warnings.join(" ; ")}` : ""}`, actor: actorId });
     return json({ ok: true, pdp, warnings, fileName });
   } catch (err) {
     const e = err as SendError;
     const message = e?.message || "Une erreur inattendue est survenue.";
     console.error("Erreur superpdp-send-invoice", err);
     if (marked) {
-      await dbAdmin.from("pdp_invoices").update({ status_code: "error", status_text: "Envoi en échec", last_error: message.slice(0, 1000) }).eq("organization_id", organizationId).eq("document_id", documentId).eq("status_code", "api:sending");
-      await writeDocPdp(organizationId, documentId, { invoiceId: null, externalId: documentId.slice(0, 36), env: "", status: "error", statusText: "Envoi en échec", sentAt: null, updatedAt: Date.now(), error: message.slice(0, 500) });
-      await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: null, source: "erreur", statusCode: Array.isArray(e?.extra?.failures) ? "api:invalid" : "error", statusText: Array.isArray(e?.extra?.failures) ? "Fichier refusé" : "Envoi en échec", detail: message, actor: actorId });
+      const failed = Array.isArray(e?.extra?.failures);
+      await dbAdmin.from("pdp_invoices").update({ status_code: failed ? "api:invalid" : "error", status_text: failed ? "Fichier refusé" : "Envoi en échec", last_error: message.slice(0, 1000) }).eq("organization_id", organizationId).eq("document_id", documentId).eq("status_code", "api:sending");
+      await writeDocPdp(organizationId, documentId, { invoiceId: null, externalId: pdpExternalId(documentId, attempt), env: "", status: failed ? "api:invalid" : "error", statusText: failed ? "Fichier refusé" : "Envoi en échec", sentAt: null, updatedAt: Date.now(), error: message.slice(0, 500), attempt, reason: null });
+      await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: null, source: "erreur", statusCode: Array.isArray(e?.extra?.failures) ? "api:invalid" : "error", statusText: Array.isArray(e?.extra?.failures) ? "Fichier refusé" : "Envoi en échec", detail: `${attempt > 1 ? `Tentative n° ${attempt} : ` : ""}${message}`, actor: actorId });
     }
     return json({ error: message, ...(e?.extra || {}) }, e?.status && e.status >= 400 ? e.status : 500);
   }
