@@ -2726,12 +2726,14 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
   // remplacent les lignes correspondantes des mentions légales.
   const legalCo = legalCompanyOf(doc.company, companyProfile);
   const showPayment = isInvoiceLike && !hidePrices;
-  // QR code de paiement (30/09/2026) : pour les pièces qui ont le bloc de
-  // paiement, il occupe la colonne de gauche de la rangée des totaux, calé en
-  // bas (aligné sur le Total TTC), à 1,6 cm, au lieu d'une rangée séparée
-  // sous le bloc de paiement qui laissait un vide au-dessus. Les autres pièces
-  // (devis : signature en ligne ; avoir, proforma : consultation) gardent leur
-  // QR code en bas à gauche.
+  // Facture et facture d'acompte (proposition A du 30/09/2026) : le bloc de
+  // paiement (à payer, échéance, IBAN, paiements reçus) occupe la colonne de
+  // gauche de la rangée des totaux, le tableau des totaux restant à droite ;
+  // le QR code de paiement vient sous ce tableau, aligné à droite, à 2 cm,
+  // sur fond blanc avec une marge de silence (jamais sous le filigrane). Plus
+  // aucun vide entre les totaux et le paiement. Les autres pièces (devis :
+  // signature en ligne ; avoir, proforma : consultation) gardent leur QR code
+  // en bas à gauche.
   const qrInTotals = showPayment && !!publicQr?.dataUrl;
   const isMarkedPaid = isInvoiceLike && doc.status === "payée";
   const paidBefore = isInvoiceLike ? totals.acompteVerse || 0 : 0;
@@ -3005,10 +3007,26 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
               {legalLines.map((l, i) => <div key={i} style={{ marginBottom: "2px" }}>{l}</div>)}
             </div>
           )}
-          {qrInTotals && (
-            <div className="print-qr-totals" style={{ marginTop: "auto", paddingTop: "8px", width: "2.6cm" }}>
-              <img src={publicQr.dataUrl} alt="QR code" style={{ width: "1.6cm", height: "1.6cm", display: "block", margin: "0 auto" }} />
-              <div style={{ fontSize: "6.5pt", color: inkSoft, marginTop: "3px", lineHeight: 1.2, textAlign: "center" }}>Scannez pour voir les informations de paiement</div>
+          {showPayment && (
+            <div className="print-payment" style={{ position: "relative", marginTop: doc.notes || showAcompteDemande || legalLines.length > 0 ? "12px" : 0, lineHeight: 1.55 }}>
+              <div style={{ maxWidth: "320px" }}>
+                <div>À payer : <strong style={{ ...mono, fontSize: "13pt", color: isPaid ? PAID_GREEN : ink }}>{formatMoney(amountToPay, doc.currency)}</strong></div>
+                <div>Montant payé : <strong style={mono}>{formatMoney(amountPaid, doc.currency)}</strong></div>
+                <div>Date limite de règlement : <strong>{dueLabel}</strong></div>
+                <div>Mode de règlement : <strong>{(doc.paymentMethod || "").trim() || "—"}</strong></div>
+                {(legalCo.bankName || "").trim() && <div>Banque : <strong>{legalCo.bankName.trim()}</strong></div>}
+                {(legalCo.bic || "").trim() && <div>BIC : <strong style={mono}>{legalCo.bic.trim()}</strong></div>}
+                {(legalCo.iban || "").trim() && <div>IBAN : <strong style={mono}>{legalCo.iban.trim()}</strong></div>}
+                <div style={{ marginTop: "6px", fontSize: "7.5pt", textTransform: "uppercase", letterSpacing: "0.04em", color: inkSoft }}>Paiements reçus</div>
+                <div style={{ border: `1px solid ${line}`, borderRadius: "3px", padding: "5px 8px", marginTop: "2px" }}>
+                  {paymentsReceived.length === 0
+                    ? <span style={{ color: inkSoft }}>Aucun paiement reçu à ce jour.</span>
+                    : paymentsReceived.map((p, i) => <div key={i}><span style={mono}>{formatMoney(p.amount, doc.currency)}</span>{p.date ? ` le ${p.date}` : ""}{p.label ? ` - ${p.label}` : ""}</div>)}
+                </div>
+              </div>
+              {isPaid && (
+                <img className="print-paid-stamp" src={paidStampSvg(paidDate)} alt={`PAYÉ${paidDate ? ` le ${paidDate}` : ""}`} style={{ position: "absolute", right: 0, top: "50%", width: "200px", height: "110px", transform: "translateY(-50%) rotate(-8deg)", opacity: 0.9 }} />
+              )}
             </div>
           )}
         </div>
@@ -3085,33 +3103,17 @@ const PrintDocument = forwardRef(function PrintDocument({ doc, totals, siteSetti
                 </div>
               </>
             )}
+            {qrInTotals && (
+              <div className="print-qr-totals" style={{ display: "flex", justifyContent: "flex-end", marginTop: "6mm" }}>
+                <div style={{ width: "3.4cm", position: "relative", zIndex: 2 }}>
+                  <img src={publicQr.dataUrl} alt="QR code" style={{ width: "2cm", height: "2cm", display: "block", margin: "0 auto", padding: "2mm", boxSizing: "content-box", background: "#ffffff" }} />
+                  <div style={{ fontSize: "6.5pt", color: inkSoft, lineHeight: 1.2, textAlign: "center" }}>Scannez pour voir les informations de paiement</div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
-
-      {/* Facture : bloc de paiement à gauche, tampon PAYÉ à droite une fois réglée */}
-      {showPayment && (
-        <div className="print-payment" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "24px", marginTop: "16px", pageBreakInside: "avoid", position: "relative", zIndex: 1 }}>
-          <div style={{ flex: "0 0 60%", fontSize: "9pt", lineHeight: 1.55 }}>
-            <div>À payer : <strong style={{ ...mono, fontSize: "13pt", color: isPaid ? PAID_GREEN : ink }}>{formatMoney(amountToPay, doc.currency)}</strong></div>
-            <div>Montant payé : <strong style={mono}>{formatMoney(amountPaid, doc.currency)}</strong></div>
-            <div>Date limite de règlement : <strong>{dueLabel}</strong></div>
-            <div>Mode de règlement : <strong>{(doc.paymentMethod || "").trim() || "—"}</strong></div>
-            {(legalCo.bankName || "").trim() && <div>Banque : <strong>{legalCo.bankName.trim()}</strong></div>}
-            {(legalCo.bic || "").trim() && <div>BIC : <strong style={mono}>{legalCo.bic.trim()}</strong></div>}
-            {(legalCo.iban || "").trim() && <div>IBAN : <strong style={mono}>{legalCo.iban.trim()}</strong></div>}
-            <div style={{ marginTop: "6px", fontSize: "7.5pt", textTransform: "uppercase", letterSpacing: "0.04em", color: inkSoft }}>Paiements reçus</div>
-            <div style={{ border: `1px solid ${line}`, borderRadius: "3px", padding: "5px 8px", marginTop: "2px" }}>
-              {paymentsReceived.length === 0
-                ? <span style={{ color: inkSoft }}>Aucun paiement reçu à ce jour.</span>
-                : paymentsReceived.map((p, i) => <div key={i}><span style={mono}>{formatMoney(p.amount, doc.currency)}</span>{p.date ? ` le ${p.date}` : ""}{p.label ? ` - ${p.label}` : ""}</div>)}
-            </div>
-          </div>
-          {isPaid && (
-            <img className="print-paid-stamp" src={paidStampSvg(paidDate)} alt={`PAYÉ${paidDate ? ` le ${paidDate}` : ""}`} style={{ width: "220px", height: "120px", marginRight: "12px", opacity: 0.92 }} />
-          )}
-        </div>
-      )}
 
       {/* QR code du lien public — bas à gauche (devis/factures uniquement)
           — et signature — bas à droite, uniquement si une signature existe */}

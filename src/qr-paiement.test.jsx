@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-// Point 3 (30/09/2026) : sur les pièces qui ont le bloc de paiement (facture,
-// facture d'acompte), le QR code de paiement occupe la colonne de gauche de
-// la rangée des totaux, calé en bas (aligné sur le Total TTC), à 1,6 cm ; la
-// rangée du bas ne garde que la signature. Devis (signature en ligne), avoir
+// Point 3, proposition A (30/09/2026) : sur les pièces qui ont le bloc de
+// paiement (facture, facture d'acompte), ce bloc occupe la colonne de gauche
+// de la rangée des totaux et le QR code de paiement vient sous le tableau des
+// totaux, à 2 cm sur fond blanc avec marge de silence ; la rangée du bas ne
+// garde que la signature. Devis (signature en ligne), avoir
 // et proforma (consultation) gardent leur QR code en bas à gauche, à 2 cm.
 import { describe, it, expect } from "vitest";
 import React from "react";
@@ -16,30 +17,32 @@ const piece = (type, extra = {}) => ({ ...newDocument(type, []), docNumber: `${t
 const qrBlocks = (markup) => [...markup.matchAll(/<img src="data:image\/png;base64,iVBORw0KGgo=" alt="QR code" style="([^"]*)"/g)].map((m) => m[1]);
 
 describe("QR code de paiement dans la rangée des totaux", () => {
-  it("facture et facture d'acompte : un seul QR code, à 1,6 cm, dans la colonne de gauche des totaux (avant le tableau des totaux et le bloc de paiement)", () => {
+  it("facture et facture d'acompte : un seul QR code à 2 cm sous le tableau des totaux ; bloc de paiement avant les totaux (colonne de gauche)", () => {
     for (const type of ["facture", "acompte"]) {
       const markup = html(piece(type));
       const blocks = qrBlocks(markup);
       expect(blocks).toHaveLength(1);
-      expect(blocks[0]).toContain("width:1.6cm");
+      expect(blocks[0]).toContain("width:2cm");
+      expect(blocks[0]).toContain("padding:2mm"); // marge de silence sur fond blanc
       expect(markup).toContain('class="print-qr-totals"');
-      expect(markup).toContain("margin-top:auto");
       const qrAt = markup.indexOf("print-qr-totals");
-      expect(qrAt).toBeLessThan(markup.indexOf("Total TTC")); // « Total HT » est aussi un en-tête de colonne du tableau des lignes
-      expect(qrAt).toBeLessThan(markup.indexOf("À payer :"));
+      expect(qrAt).toBeGreaterThan(markup.indexOf("Total TTC"));
+      expect(markup.indexOf("À payer :")).toBeLessThan(markup.indexOf("Total TTC")); // bloc de paiement dans la colonne de gauche, avant les totaux
+      expect(markup.indexOf("À payer :")).toBeLessThan(qrAt);
       expect((markup.match(/Scannez pour voir les informations de paiement/g) || []).length).toBe(1);
     }
   });
-  it("avec une note : la note reste au-dessus du QR code dans la même colonne", () => {
+  it("avec une note : la note reste au-dessus du bloc de paiement dans la colonne de gauche", () => {
     const markup = html(piece("facture", { notes: "Merci de votre confiance" }));
-    expect(markup.indexOf("Merci de votre confiance")).toBeLessThan(markup.indexOf("print-qr-totals"));
+    expect(markup.indexOf("Merci de votre confiance")).toBeLessThan(markup.indexOf("À payer :"));
     expect(qrBlocks(markup)).toHaveLength(1);
   });
-  it("facture payée : le QR code reste dans les totaux et le tampon PAYÉ reste à droite du bloc de paiement", () => {
+  it("facture payée : le tampon PAYÉ est dans le bloc de paiement, le QR code sous les totaux", () => {
     const markup = html(piece("facture", { status: "payée", paidAt: "2026-09-30" }));
     expect(qrBlocks(markup)).toHaveLength(1);
     expect(markup).toContain("print-paid-stamp");
-    expect(markup.indexOf("print-qr-totals")).toBeLessThan(markup.indexOf("print-paid-stamp"));
+    expect(markup.indexOf("print-paid-stamp")).toBeLessThan(markup.indexOf("print-qr-totals"));
+    expect(markup.indexOf("À payer :")).toBeLessThan(markup.indexOf("print-paid-stamp"));
   });
   it("devis, avoir, proforma : QR code inchangé, en bas à gauche à 2 cm, après les totaux", () => {
     for (const [type, legend] of [["devis", "Scannez pour signer en ligne"], ["avoir", "Scannez pour consulter en ligne"], ["proforma", "Scannez pour consulter en ligne"]]) {
