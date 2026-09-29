@@ -6331,7 +6331,6 @@ function ContactView({ siteSettings, onBack, onLegal }) {
   const [error, setError] = useState("");
 
   function patch(p) {
-    p = touchWorkStage(localDoc, p);
     setForm((f) => ({ ...f, ...p }));
     if (error) setError("");
   }
@@ -15676,7 +15675,6 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
   useEffect(() => setLocal(withGeoCountry(profile)), []);
 
   function patch(p) {
-    p = touchWorkStage(localDoc, p);
     setLocal((prev) => ({ ...prev, ...p }));
   }
   function handleLogoUpload(e) {
@@ -16367,13 +16365,52 @@ function ServicesVisibilitySettings({ siteSettings, saving, onSave }) {
   );
 }
 
+// Champ couleur des réglages du site (30/09/2026) : pastille du sélecteur
+// natif ET saisie libre — « #1B2A33 », « 1b2a33 », « 27, 42, 51 » ou
+// « rgb(27, 42, 51) » — avec le RVB affiché à côté. Avant, seule la pastille
+// permettait de changer la valeur, et le code affiché n'était pas éditable.
+function parseColorInput(text) {
+  const t = String(text ?? "").trim();
+  const hex = /^#?([0-9a-f]{6})$/i.exec(t);
+  if (hex) return `#${hex[1].toLowerCase()}`;
+  const short = /^#?([0-9a-f]{3})$/i.exec(t);
+  if (short) return `#${short[1].split("").map((c) => c + c).join("").toLowerCase()}`;
+  const rgb = /^(?:rgba?\s*\()?\s*(\d{1,3})\s*[,;\s]\s*(\d{1,3})\s*[,;\s]\s*(\d{1,3})\s*\)?$/i.exec(t);
+  if (rgb) {
+    const parts = rgb.slice(1, 4).map(Number);
+    if (parts.every((n) => n >= 0 && n <= 255)) return `#${parts.map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+  }
+  return null;
+}
+const rgbOfHex = (hex) => { const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ""); return m ? m.slice(1, 4).map((h) => parseInt(h, 16)).join(", ") : ""; };
+function ColorField({ label, value, fallback = "#000000", onChange, testId }) {
+  const current = parseColorInput(value) || parseColorInput(fallback) || "#000000";
+  const [text, setText] = useState(current);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setText(current); }, [current, editing]);
+  const valid = parseColorInput(text) !== null;
+  function commit() {
+    const parsed = parseColorInput(text);
+    if (parsed && parsed !== current) onChange(parsed); else setText(current);
+    setEditing(false);
+  }
+  return (
+    <label className="text-xs" style={{ color: colors.inkSoft }}>
+      {label}
+      <div className="mt-1 flex items-center gap-2">
+        <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={current} onChange={(e) => onChange(parseColorInput(e.target.value) || current)} aria-label={`${label} (sélecteur)`} />
+        <input type="text" className="df-input df-mono w-36 rounded-md px-2 py-1 text-xs" style={{ border: `1px solid ${valid ? colors.line : colors.brick}`, color: colors.ink }} value={text} onFocus={() => setEditing(true)} onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }} placeholder="#1B2A33 ou 27, 42, 51" title="Code hexadécimal (#1B2A33) ou RVB (27, 42, 51), puis Entrée" aria-label={label} aria-invalid={!valid} data-testid={testId} />
+        <span className="df-mono text-[11px]" style={{ color: colors.inkSoft }} title="Rouge, vert, bleu">{rgbOfHex(current)}</span>
+      </div>
+    </label>
+  );
+}
 function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   const [local, setLocal] = useState(siteSettings);
 
   useEffect(() => { setLocal(siteSettings); }, []);
 
   function patch(p) {
-    p = touchWorkStage(localDoc, p);
     setLocal((prev) => ({ ...prev, ...p }));
   }
   function handleLogoUpload(e) {
@@ -16444,34 +16481,10 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
         <div className="border-t pt-4" style={{ borderColor: colors.line }}>
           <label className="mb-2 block text-xs font-medium" style={{ color: colors.inkSoft }}>Couleurs des PDF (devis, factures, proforma)</label>
           <div className="flex flex-wrap gap-4">
-            <label className="text-xs" style={{ color: colors.inkSoft }}>
-              Fond de page
-              <div className="mt-1 flex items-center gap-2">
-                <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfBackground} onChange={(e) => patch({ pdfBackground: e.target.value })} />
-                <span className="df-mono text-xs">{local.pdfBackground}</span>
-              </div>
-            </label>
-            <label className="text-xs" style={{ color: colors.inkSoft }}>
-              Bandeaux (en-tête de tableau, totaux)
-              <div className="mt-1 flex items-center gap-2">
-                <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfHeaderColor} onChange={(e) => patch({ pdfHeaderColor: e.target.value })} />
-                <span className="df-mono text-xs">{local.pdfHeaderColor}</span>
-              </div>
-            </label>
-            <label className="text-xs" style={{ color: colors.inkSoft }}>
-              Texte
-              <div className="mt-1 flex items-center gap-2">
-                <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfTextColor || "#1B2A33"} onChange={(e) => patch({ pdfTextColor: e.target.value })} />
-                <span className="df-mono text-xs">{local.pdfTextColor || "#1B2A33"}</span>
-              </div>
-            </label>
-            <label className="text-xs" style={{ color: colors.inkSoft }}>
-              Blocs émetteur / client
-              <div className="mt-1 flex items-center gap-2">
-                <input type="color" className="h-9 w-9 cursor-pointer rounded" style={{ border: `1px solid ${colors.line}` }} value={local.pdfBlockColor} onChange={(e) => patch({ pdfBlockColor: e.target.value })} />
-                <span className="df-mono text-xs">{local.pdfBlockColor}</span>
-              </div>
-            </label>
+            <ColorField label="Fond de page" value={local.pdfBackground} fallback="#FBF7EF" onChange={(v) => patch({ pdfBackground: v })} testId="color-pdfBackground" />
+            <ColorField label="Bandeaux (en-tête de tableau, totaux)" value={local.pdfHeaderColor} fallback="#1B2A33" onChange={(v) => patch({ pdfHeaderColor: v })} testId="color-pdfHeaderColor" />
+            <ColorField label="Texte" value={local.pdfTextColor} fallback="#1B2A33" onChange={(v) => patch({ pdfTextColor: v })} testId="color-pdfTextColor" />
+            <ColorField label="Blocs émetteur / client" value={local.pdfBlockColor} fallback="#F1F0EA" onChange={(v) => patch({ pdfBlockColor: v })} testId="color-pdfBlockColor" />
           </div>
         </div>
         <button onClick={handleSave} className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium" style={{ background: colors.brass, color: colors.ink }}>
@@ -19536,7 +19549,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 // détecter une erreur de rendu avant la mise en ligne. Aucun effet sur
 // l'application, qui n'utilise que l'export par défaut.
 export {
-  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal, touchWorkStage,
+  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal, touchWorkStage, parseColorInput, ColorField, ContactView,
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, groupStockLinesByDay, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
