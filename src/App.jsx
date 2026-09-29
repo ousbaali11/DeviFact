@@ -8274,7 +8274,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   // l'acompte versé passent en conditions de paiement et montant prépayé).
   const facturxAvailable = isFranceCompany(companyProfile) && localDoc.vautFacture === true;
   const [facturxGenerating, setFacturxGenerating] = useState(false);
-  const pdpCtx = { connected: !!pdpStatus?.connected, env: pdpStatus?.env || null, verificationStatus: pdpStatus?.verificationStatus || null, companyCountryCode: (countryCodeOf(companyProfile?.country) || "").toUpperCase() || null };
+  const pdpCtx = { connected: !!pdpStatus?.connected, env: pdpStatus?.env || null, verificationStatus: pdpStatus?.verificationStatus || null, companyCountryCode: (countryCodeOf(companyProfile?.country) || "").toUpperCase() || null, needsReconnect: !!pdpStatus?.needsReconnect };
   const pdpEligible = SUPERPDP_ENABLED && !!onSendPdp && !isViewer && !isLocked && pdpEligibility(localDoc, pdpCtx).ok;
   const pdpLocked = pdpLocksContent(localDoc.pdp);
   const [pdpSending, setPdpSending] = useState(false);
@@ -15194,6 +15194,12 @@ function SuperPdpCard({ account, profile = null, onRedirect = (url) => { window.
           <p><strong>{status.companyName || "Entreprise"}</strong>{status.companyNumber ? <span className="df-mono" style={{ color: colors.inkSoft }}> · {status.companyNumberScheme === "sandbox" ? "n°" : "SIREN"} {status.companyNumber}</span> : null}</p>
           {status.verificationStatus && status.verificationStatus !== "verified" && <p className="text-xs" style={{ color: colors.brick }}>Entreprise pas encore vérifiée chez Super PDP ({status.verificationStatus}) : l'envoi de factures sera refusé tant que la vérification n'est pas faite.</p>}
           {status.env !== "production" && <p className="text-xs" style={{ color: colors.inkSoft }}>Bac à sable : rien n'est transmis à l'administration, les envois servent aux tests.</p>}
+          {status.needsReconnect && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: `${colors.brick}12`, border: `1px solid ${colors.brick}55`, color: colors.brick }} data-testid="superpdp-reconnect">
+              <span className="min-w-0 flex-1">Connexion à refaire : Super PDP n'accepte plus le jeton de ce compte (révoqué ou expiré). Les envois et le suivi sont suspendus jusqu'à la reconnexion.{status.lastError ? ` Détail : ${status.lastError}` : ""}</span>
+              <button onClick={start} disabled={busy} className="shrink-0 rounded-md px-3 py-1.5 font-medium text-white" style={{ background: colors.brick, opacity: busy ? 0.7 : 1 }}>Reconnecter</button>
+            </div>
+          )}
           <button onClick={disconnect} disabled={busy} className="rounded-md px-3 py-1.5 text-xs font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.brick, opacity: busy ? 0.6 : 1 }}>Déconnecter</button>
           <PdpJournal organizationId={organizationId} limit={20} title="Derniers événements Super PDP" compact />
         </div>
@@ -18350,7 +18356,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   const facturxAvailable = isFranceCompany(companyProfile); // réservé aux entreprises françaises
   // Super PDP : « Envoyer via Super PDP » quand la facture est éligible
   // (mêmes règles que le serveur, qui reste juge) ; contenu figé une fois transmise.
-  const pdpCtx = { connected: !!pdpStatus?.connected, env: pdpStatus?.env || null, verificationStatus: pdpStatus?.verificationStatus || null, companyCountryCode: (countryCodeOf(companyProfile?.country) || "").toUpperCase() || null };
+  const pdpCtx = { connected: !!pdpStatus?.connected, env: pdpStatus?.env || null, verificationStatus: pdpStatus?.verificationStatus || null, companyCountryCode: (countryCodeOf(companyProfile?.country) || "").toUpperCase() || null, needsReconnect: !!pdpStatus?.needsReconnect };
   const pdpEligible = SUPERPDP_ENABLED && !!onSendPdp && !isViewer && !isLocked && pdpEligibility(localDoc, pdpCtx).ok;
   const pdpLocked = pdpLocksContent(localDoc.pdp);
   const pdpDocTitle = localDoc.type === "avoir" ? "Avoir" : localDoc.type === "acompte" ? "Facture d'acompte" : "Facture";

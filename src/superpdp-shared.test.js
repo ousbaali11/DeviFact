@@ -59,7 +59,7 @@ describe("chiffrement des jetons", () => {
 describe("état public", () => {
   it("jamais de jeton dans ce que reçoit le navigateur", () => {
     const st = publicStatusOf({ env: "sandbox", company_name: "Burger Queen", company_number: "315143296_001", company_number_scheme: "sandbox", vat_regime: "monthly", verification_status: "verified", connected_at: "2026-09-26T10:00:00Z", access_token_enc: "v1:x:y", refresh_token_enc: "v1:x:z" });
-    expect(st).toEqual({ connected: true, env: "sandbox", companyName: "Burger Queen", companyNumber: "315143296_001", companyNumberScheme: "sandbox", vatRegime: "monthly", verificationStatus: "verified", connectedAt: "2026-09-26T10:00:00Z", lastError: null });
+    expect(st).toEqual({ connected: true, env: "sandbox", companyName: "Burger Queen", companyNumber: "315143296_001", companyNumberScheme: "sandbox", vatRegime: "monthly", verificationStatus: "verified", connectedAt: "2026-09-26T10:00:00Z", needsReconnect: false, lastError: null });
     expect(JSON.stringify(st)).not.toMatch(/token/i);
     expect(publicStatusOf(null)).toEqual({ connected: false });
   });

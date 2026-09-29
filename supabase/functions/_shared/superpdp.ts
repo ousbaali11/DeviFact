@@ -18,7 +18,7 @@
 // vaut pas "true", une connexion à une entreprise dont Super PDP indique
 // env = production est refusée (bac à sable seulement).
 
-import { sandboxIdentifierOf, translatePdpMessage } from "./superpdp-rules.ts";
+import { sandboxIdentifierOf, translatePdpMessage, pdpNeedsReconnect, PDP_RECONNECT_PREFIX, PDP_RECONNECT_MESSAGE } from "./superpdp-rules.ts";
 
 const env = (k: string): string => {
   const d = (globalThis as { Deno?: { env?: { get(k: string): string | undefined } } }).Deno;
@@ -113,7 +113,10 @@ async function tokenRequest(params: Record<string, string>): Promise<TokenSet> {
   const body = await resp.json().catch(() => ({}));
   if (!resp.ok || !body?.access_token) {
     const detail = body?.error_description || body?.error || body?.message || `http ${resp.status}`;
-    throw new Error(`Super PDP a refusé l'authentification : ${detail}`);
+    const err = new Error(`Super PDP a refusé l'authentification : ${detail}`) as Error & { status?: number; oauthError?: string };
+    err.status = resp.status;
+    err.oauthError = String(body?.error || "");
+    throw err;
   }
   return body as TokenSet;
 }
@@ -152,7 +155,8 @@ export function publicStatusOf(c: Partial<PdpConnection> | null | undefined) {
     vatRegime: c.vat_regime || "",
     verificationStatus: c.verification_status || "",
     connectedAt: c.connected_at || null,
-    lastError: c.last_error || null,
+    needsReconnect: pdpNeedsReconnect(c.last_error),
+    lastError: String(c.last_error || "").replace(/^RECONNECT:\s*/, "") || null,
   };
 }
 export async function readConnection(dbAdmin: any, organizationId: string): Promise<PdpConnection | null> {
@@ -165,10 +169,26 @@ export async function readConnection(dbAdmin: any, organizationId: string): Prom
 export async function accessTokenFor(dbAdmin: any, organizationId: string): Promise<{ token: string; connection: PdpConnection }> {
   const conn = await readConnection(dbAdmin, organizationId);
   if (!conn) throw new Error("Aucun compte Super PDP connecté pour cette organisation.");
+  if (pdpNeedsReconnect(conn.last_error)) { const dead = new Error(PDP_RECONNECT_MESSAGE) as Error & { needsReconnect?: boolean }; dead.needsReconnect = true; throw dead; }
   const key = superpdpTokenKey();
   const expiresAt = conn.access_expires_at ? new Date(conn.access_expires_at).getTime() : 0;
   if (expiresAt - Date.now() > 60_000) return { token: await decryptSecret(conn.access_token_enc, key), connection: conn };
-  const fresh = await refreshTokenSet(await decryptSecret(conn.refresh_token_enc, key));
+  let fresh: TokenSet;
+  try {
+    fresh = await refreshTokenSet(await decryptSecret(conn.refresh_token_enc, key));
+  } catch (err) {
+    // Refus définitif (jeton révoqué, invalid_grant) : connexion marquée « à
+    // refaire » (préfixe dans last_error), sans nouvelle colonne ; la carte
+    // de Mon entreprise propose « Reconnecter ». Panne réseau : simple erreur.
+    const e = err as Error & { status?: number; oauthError?: string; needsReconnect?: boolean };
+    if (e.status === 400 || e.status === 401 || /invalid_grant|invalid_client|unauthorized/i.test(e.oauthError || "")) {
+      await dbAdmin.from("pdp_connections").update({ last_error: `${PDP_RECONNECT_PREFIX} ${e.message}`.slice(0, 500) }).eq("organization_id", organizationId);
+      const dead = new Error(PDP_RECONNECT_MESSAGE) as Error & { needsReconnect?: boolean };
+      dead.needsReconnect = true;
+      throw dead;
+    }
+    throw err;
+  }
   const patch = {
     access_token_enc: await encryptSecret(fresh.access_token, key),
     refresh_token_enc: await encryptSecret(fresh.refresh_token || (await decryptSecret(conn.refresh_token_enc, key)), key),

@@ -7,6 +7,9 @@ la facturation électronique. Elle ne transmet rien à une Plateforme Agréée :
 elle produit uniquement le fichier, que la personne télécharge depuis le bouton
 « Télécharger au format Factur-X » de l'éditeur de facture.
 
+> Transmission à la Plateforme Agréée Super PDP : voir le guide `SUPER-PDP.md`
+> (fonctionnement, parcours de test, dépannage, historique).
+
 ## Fichiers
 
 - `index.ts` — point d'entrée HTTP (authentification par session, garde-fous,

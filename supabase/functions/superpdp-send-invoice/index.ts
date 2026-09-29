@@ -24,7 +24,7 @@ import { SUPERPDP_ENABLED } from "../_shared/pdp-flags.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 import { journal } from "../_shared/pdp-journal.ts";
 import { superpdpConfigured, superpdpAllowProduction, superpdpApiBase, readConnection, superpdpFetch, apiErrorMessage, sandboxSellerFromDirectory } from "../_shared/superpdp.ts";
-import { pdpEligibility, pdpCanResend, sandboxIdentifierOf, sirenOfSiret, pdpExternalId, explainValidationFailure, PDP_STATUS_LABELS } from "../_shared/superpdp-rules.ts";
+import { pdpEligibility, pdpCanResend, sandboxIdentifierOf, sirenOfSiret, pdpExternalId, explainValidationFailure, pdpNeedsReconnect, PDP_STATUS_LABELS } from "../_shared/superpdp-rules.ts";
 
 const dbAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
@@ -87,7 +87,7 @@ serve(async (req) => {
     docNumber = String(doc.docNumber || "");
     attempt = (Number(doc?.pdp?.attempt) || 0) + 1;
     const externalId = pdpExternalId(doc.id, attempt);
-    const eligibility = pdpEligibility(doc, { connected: true, env: conn.env, verificationStatus: conn.verification_status, companyCountryCode: countryCode(profile?.country), allowProduction: superpdpAllowProduction() });
+    const eligibility = pdpEligibility(doc, { connected: true, env: conn.env, verificationStatus: conn.verification_status, companyCountryCode: countryCode(profile?.country), allowProduction: superpdpAllowProduction(), needsReconnect: pdpNeedsReconnect(conn.last_error) });
     if (!eligibility.ok) return json({ error: eligibility.reason, code: eligibility.code }, 400);
     const sandbox = conn.env !== "production";
     // Bac à sable : l'adresse électronique du vendeur est son entrée d'annuaire

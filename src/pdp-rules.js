@@ -78,6 +78,7 @@ export function pdpEligibility(doc, ctx) {
   if (countryCode(doc.client?.country) !== "FR") return no("etranger", "Client établi hors de France : cette vente relève du e-reporting, pas de la transmission B2B.");
   if ((ctx.companyCountryCode || "").toUpperCase() !== "FR") return no("entreprise-pays", "Réservé aux entreprises dont le pays (Mon entreprise) est la France.");
   if (!ctx.connected) return no("non-connecte", "Aucun compte Super PDP connecté : connecte-le depuis Mon entreprise.");
+  if (ctx.needsReconnect) return no("reconnexion", PDP_RECONNECT_MESSAGE);
   if (ctx.verificationStatus && ctx.verificationStatus !== "verified") return no("non-verifie", `Entreprise pas encore vérifiée chez Super PDP (${ctx.verificationStatus}).`);
   if (ctx.env === "production" && !ctx.allowProduction) return no("production", "Compte Super PDP en production : les envois réels ne sont pas encore autorisés dans Chantiflow.");
   const sandbox = ctx.env !== "production";
@@ -224,4 +225,35 @@ export function translatePdpMessage(raw, status = null) {
   if (pdpRuleOf(text)) return text.split(/\s*;\s*/).map((part) => explainValidationFailure(part)).join(" ; ");
   if (/^(?:Super PDP|Le |La |Les |L'|Un |Une |Bac à sable|Entreprise|Client|Émetteur|Session|Trop|Panne|Fichier)/.test(text)) return text; // déjà en français
   return `Super PDP indique : ${text}`;
+}
+
+// ---------------------------------------------------------------------------
+// Consolidation (étape 4, chantier 4, 30/09/2026).
+// ---------------------------------------------------------------------------
+// Connexion « à refaire » : jeton de rafraîchissement refusé définitivement
+// (compte révoqué côté Super PDP, secret changé). Marquée dans la colonne
+// last_error de pdp_connections avec ce préfixe, sans nouvelle colonne.
+export const PDP_RECONNECT_PREFIX = "RECONNECT:";
+export const PDP_RECONNECT_MESSAGE = "Connexion Super PDP à refaire depuis Mon entreprise (compte révoqué ou jeton expiré).";
+export function pdpNeedsReconnect(lastError) { return String(lastError || "").startsWith(PDP_RECONNECT_PREFIX); }
+// Réconciliation d'une pièce avec sa ligne de la table des envois (écrite par
+// le serveur seulement, donc de référence) : « patch » quand la pièce est en
+// retard, « createRow » quand la pièce porte un dépôt sans ligne (coupure entre
+// les deux écritures), « none » sinon. Un envoi encore « en cours » n'est pas
+// touché (une transmission est peut-être en train d'écrire).
+export function reconcilePdpDoc(doc, row, now = Date.now()) {
+  const pdp = doc && doc.pdp && typeof doc.pdp === "object" ? doc.pdp : null;
+  if (!row) {
+    if (!pdp || !Number.isFinite(Number(pdp.invoiceId)) || !pdp.invoiceId) return { action: "none" };
+    return { action: "createRow", row: { pdp_invoice_id: Number(pdp.invoiceId), env: pdp.env === "production" ? "production" : "sandbox", external_id: String(pdp.externalId || doc.id || "").slice(0, 36), status_code: String(pdp.status || "api:uploaded"), status_text: String(pdp.statusText || ""), sent_at: pdp.sentAt || null, paid_event_at: pdp.paidEventAt || null, last_error: null } };
+  }
+  if (row.status_code === "api:sending") return { action: "none" };
+  const rowInvoice = Number.isFinite(Number(row.pdp_invoice_id)) && row.pdp_invoice_id != null ? Number(row.pdp_invoice_id) : null;
+  const fields = [];
+  if ((pdp ? (Number(pdp.invoiceId) || null) : null) !== rowInvoice) fields.push("invoiceId");
+  if (String(pdp?.status || "") !== String(row.status_code || "")) fields.push("status");
+  if ((pdp?.paidEventAt || null) !== (row.paid_event_at || null)) fields.push("paidEventAt");
+  if (!fields.length) return { action: "none" };
+  const patch = { ...(pdp || {}), invoiceId: rowInvoice, status: String(row.status_code || ""), statusText: String(row.status_text || pdpStatusLabel({ status: row.status_code }) || ""), sentAt: row.sent_at || pdp?.sentAt || null, paidEventAt: row.paid_event_at || null, env: row.env || pdp?.env || "", externalId: row.external_id || pdp?.externalId || "", updatedAt: now };
+  return { action: "patch", patch, fields };
 }

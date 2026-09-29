@@ -20,7 +20,7 @@ import { SUPERPDP_ENABLED } from "../_shared/pdp-flags.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 import { journal } from "../_shared/pdp-journal.ts";
 import { superpdpConfigured, superpdpAllowProduction, readConnection, superpdpFetch, apiErrorMessage, type PdpConnection } from "../_shared/superpdp.ts";
-import { applyPdpEvents, shouldSendPaidEvent, PDP_STATUS_LABELS, type PdpEvent } from "../_shared/superpdp-rules.ts";
+import { applyPdpEvents, shouldSendPaidEvent, reconcilePdpDoc, PDP_STATUS_LABELS, type PdpEvent } from "../_shared/superpdp-rules.ts";
 
 const dbAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret" };
@@ -63,6 +63,18 @@ async function syncOrganization(organizationId: string, conn: PdpConnection, act
   }
   const { updates, lastEventId } = applyPdpEvents(events);
   const patches: DocPatch[] = [];
+  // État de la connexion tenu à jour : statut de vérification de l'entreprise
+  // relu à chaque passage (il n'était lu qu'à la connexion).
+  try {
+    const sess = await superpdpFetch(dbAdmin, organizationId, "/v1.beta/oauth2_sessions/me");
+    if (sess.ok) {
+      const status = String((await sess.json().catch(() => null))?.company_verification_status || "");
+      if (status && status !== String(conn.verification_status || "")) {
+        await dbAdmin.from("pdp_connections").update({ verification_status: status }).eq("organization_id", organizationId);
+        conn.verification_status = status;
+      }
+    }
+  } catch (err) { console.error("Statut de vérification non relu :", (err as Error)?.message || err); }
   const documents = await readDocuments(organizationId);
   const numberOf = (documentId: string) => String(documents.find((d: any) => d?.id === documentId)?.docNumber || "");
   if (updates.length) {
@@ -82,9 +94,39 @@ async function syncOrganization(organizationId: string, conn: PdpConnection, act
   if (lastEventId > (Number(conn.last_event_id) || 0)) {
     await dbAdmin.from("pdp_connections").update({ last_event_id: lastEventId, last_error: null }).eq("organization_id", organizationId);
   }
+  // Réconciliation : la table des envois (écrite par le serveur) fait
+  // référence ; pièce en retard réalignée, dépôt sans ligne recréé, pièce
+  // supprimée notée une seule fois. Relecture des pièces après les patches.
+  const docsNow = patches.length ? await readDocuments(organizationId) : documents;
+  const { data: allRows } = await dbAdmin.from("pdp_invoices").select("*").eq("organization_id", organizationId);
+  const rowByDoc = new Map<string, any>(((allRows || []) as any[]).map((r) => [String(r.document_id), r]));
+  const reconPatches: DocPatch[] = [];
+  for (const row of rowByDoc.values()) {
+    const doc = docsNow.find((d: any) => d?.id === row.document_id);
+    if (!doc) {
+      if (row.last_error !== "Pièce supprimée") {
+        await dbAdmin.from("pdp_invoices").update({ last_error: "Pièce supprimée" }).eq("organization_id", organizationId).eq("document_id", row.document_id);
+        await journal(dbAdmin, { organizationId, documentId: row.document_id, docNumber: "", pdpInvoiceId: row.pdp_invoice_id, source: "relecture", statusCode: String(row.status_code || ""), statusText: "Pièce supprimée", detail: "La pièce n'existe plus dans Chantiflow ; la ligne d'envoi est conservée comme preuve.", actor: actorId });
+      }
+      continue;
+    }
+    const r = reconcilePdpDoc(doc, row);
+    if (r.action === "patch" && r.patch) {
+      reconPatches.push({ documentId: doc.id, pdp: r.patch });
+      await journal(dbAdmin, { organizationId, documentId: doc.id, docNumber: doc.docNumber, pdpInvoiceId: row.pdp_invoice_id, source: "relecture", statusCode: String(row.status_code || ""), statusText: "Réaligné", detail: `Pièce réalignée sur la table des envois (${(r.fields || []).join(", ")}).`, actor: actorId });
+    }
+  }
+  for (const doc of docsNow) {
+    if (!doc?.pdp?.invoiceId || rowByDoc.has(String(doc.id))) continue;
+    const r = reconcilePdpDoc(doc, null);
+    if (r.action !== "createRow" || !r.row) continue;
+    await dbAdmin.from("pdp_invoices").upsert({ organization_id: organizationId, document_id: doc.id, ...r.row }, { onConflict: "organization_id,document_id" });
+    await journal(dbAdmin, { organizationId, documentId: doc.id, docNumber: doc.docNumber, pdpInvoiceId: Number(doc.pdp.invoiceId), source: "relecture", statusCode: String(doc.pdp.status || ""), statusText: "Ligne d'envoi recréée", detail: "La pièce portait un dépôt Super PDP sans ligne dans la table des envois : ligne recréée depuis la pièce.", actor: actorId });
+  }
+  if (reconPatches.length) { await writeDocPatches(organizationId, reconPatches); patches.push(...reconPatches); }
   // Rattrapage des encaissements : factures payées transmises sans fr:212.
   let paidSent = 0;
-  for (const doc of documents) {
+  for (const doc of docsNow) {
     if (!shouldSendPaidEvent(doc)) continue;
     const r = await sendPaidEvent(organizationId, doc, actorId);
     if (r.ok) { paidSent += 1; patches.push({ documentId: doc.id, pdp: r.pdp }); }
@@ -126,6 +168,8 @@ serve(async (req) => {
     const expectedSecret = Deno.env.get("CRON_SECRET") || "";
     if (providedSecret && expectedSecret && providedSecret === expectedSecret) {
       let checked = 0, failed = 0, eventsRead = 0, paidSent = 0;
+      // Nettoyage des états d'autorisation expirés (plus de 10 minutes).
+      await dbAdmin.from("pdp_oauth_states").delete().lt("created_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
       const { data: conns, error } = await dbAdmin.from("pdp_connections").select("*");
       if (error) return json({ error: `Connexions illisibles : ${error.message}` }, 500);
       for (const conn of (conns || []) as PdpConnection[]) {
@@ -137,7 +181,8 @@ serve(async (req) => {
         } catch (err) {
           failed += 1;
           console.error("Suivi Super PDP en échec pour", conn.organization_id, err);
-          await dbAdmin.from("pdp_connections").update({ last_error: String((err as Error)?.message || err).slice(0, 500) }).eq("organization_id", conn.organization_id);
+          // Connexion à refaire : déjà marquée par accessTokenFor (préfixe conservé).
+          if (!(err as { needsReconnect?: boolean })?.needsReconnect) await dbAdmin.from("pdp_connections").update({ last_error: String((err as Error)?.message || err).slice(0, 500) }).eq("organization_id", conn.organization_id);
         }
       }
       return json({ success: true, checked, failed, eventsRead, paidSent });

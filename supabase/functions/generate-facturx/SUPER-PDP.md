@@ -1,3 +1,92 @@
+# Super PDP — guide d'intégration Chantiflow
+
+Plateforme Agréée par laquelle les pièces électroniques (factures, factures
+d'acompte, avoirs, situations valant facture) sont transmises aux clients
+professionnels français. Ce guide décrit le fonctionnement, le parcours de
+test en bac à sable et le dépannage ; l'historique des chantiers est en annexe.
+La procédure de passage en production est un document à part
+(`PRODUCTION-SUPER-PDP.md`), jamais exécutée par le code.
+
+## 1. Fonctionnement
+
+**Fonctions serveur** (`supabase/functions`) :
+- `superpdp-oauth` — connexion du compte Super PDP de l'entreprise (OAuth 2.1,
+  PKCE) : actions `start`, `callback`, `status` (tout membre actif), `disconnect`.
+- `superpdp-send-invoice` — envoi d'une pièce : éligibilité, Factur-X via
+  `generate-facturx`, validation `POST /validation_reports`, annuaire,
+  `POST /invoices`, enregistrement, journal.
+- `superpdp-sync-events` — relecture des événements (tâche quotidienne
+  07:00 UTC et bouton « Actualiser »), encaissement `fr:212`, réconciliation,
+  statut de vérification, nettoyage.
+- `generate-facturx` — fichier Factur-X (PDF/A-3 + XML CII) ; polices et
+  profil ICC embarqués dans le code (pas de `static_files`).
+- Règles partagées `_shared/superpdp-rules.ts` = `src/pdp-rules.js` (tests
+  de parité) : éligibilité, statuts, verrou de contenu, réémission,
+  traductions, glossaire, réconciliation.
+
+**Tables** (scripts `supabase/migrations_audit/2026-09-*_super-pdp-*.sql`) :
+`pdp_connections` (jetons chiffrés AES-256-GCM, entreprise, statut de
+vérification, `last_error` — préfixe `RECONNECT:` = connexion à refaire),
+`pdp_oauth_states` (états d'autorisation, 10 minutes), `pdp_invoices` (un
+envoi par pièce : dépôt, statut, dernier événement, encaissement, erreur),
+`pdp_journal` (une ligne par événement, jamais purgé).
+
+**Champ `pdp` d'une pièce** : `invoiceId`, `externalId`, `env`, `status`,
+`statusText`, `sentAt`, `updatedAt`, `error`, `reason`, `attempt`,
+`paidEventAt`, `paidEventError`. Piloté par le serveur ; la fusion des
+enregistrements concurrents garde la génération la plus récente sans note
+de conflit.
+
+**Secrets** : `SUPERPDP_CLIENT_ID`, `SUPERPDP_CLIENT_SECRET`,
+`SUPERPDP_TOKEN_KEY` (32 octets base64), `SUPERPDP_API_BASE` (défaut
+`https://api.superpdp.tech`), `SUPERPDP_ALLOW_PRODUCTION` (`true` pour accepter
+une entreprise en production ; absent = bac à sable seulement), `SITE_URL`,
+`CRON_SECRET`.
+
+**Garde-fous** : entreprise en production refusée à la connexion, à l'envoi et
+à la relecture tant que `SUPERPDP_ALLOW_PRODUCTION` ≠ `true` ; pièce transmise
+= contenu figé (statut, paiements, relances modifiables) ; réémission
+seulement après un échec final ; verrou « envoi en cours » libéré après
+10 minutes.
+
+## 2. Parcours de test en bac à sable
+
+1. **Mon entreprise** : pays France, SIRET, numéro de TVA avec préfixe `FR`,
+   IBAN, ville. Carte « Facturation électronique : Super PDP » →
+   « Connecter mon compte Super PDP » → sur la page Super PDP, choisir
+   l'entreprise de test **Burger Queen** (bac à sable). La carte affiche
+   « Burger Queen · n° 000000002 », badge Bac à sable.
+2. **Fiche client** Tricatel : type entreprise, pays France, champ SIRET =
+   `0225:315143296_106842` (adresse d'annuaire de test), numéro de TVA avec
+   préfixe `FR`, code postal et ville.
+3. **Pièce** : facture, facture d'acompte, avoir (facture d'origine + motif) ou
+   situation cochée « Vaut facture » ; statut « envoyée » (pastille en haut) ;
+   bloc « Facturation électronique » : catégorie d'opération.
+4. **Envoyer** : menu Exporter → « Envoyer via Super PDP » → confirmation.
+   Badge « Super PDP : Déposée », contenu figé, ligne « Envoi » au journal
+   (clic sur le badge).
+5. **Suivre** : bouton « Actualiser » ou tâche quotidienne → statuts
+   `fr:20x` ; passage « payée » → encaissement `fr:212` (badge « encaissement
+   transmis »).
+6. **Refus** : bandeau rouge avec le motif en français et « Renvoyer » ;
+   corriger puis renvoyer (tentative n° 2, identifiant externe suffixé).
+
+## 3. Dépannage
+
+| Message | Cause | Solution |
+|---|---|---|
+| « L'application Chantiflow et l'entreprise choisie … même environnement » | Entreprise de production choisie sur la page d'autorisation alors que l'application est en bac à sable | Choisir Burger Queen ; en bac à sable le SIREN n'est plus transmis à l'autorisation |
+| « Le vendeur du fichier n'est pas l'entreprise connectée » | Compte connecté ≠ vendeur (ex. Tricatel connecté à la place de Burger Queen) | Déconnecter puis reconnecter le bon compte |
+| « aucune adresse d'annuaire Peppol active pour l'entreprise connectée » | En bac à sable le numéro d'entreprise (`000000002`) n'est pas une adresse ; l'adresse vient de l'annuaire | Vérifier les lignes d'annuaire de l'entreprise chez Super PDP |
+| `[BR-CO-09]` numéro de TVA sans préfixe pays | TVA sans `FR` dans Mon entreprise ou sur la fiche client (la copie figée sur la pièce n'est plus utilisée pour l'émetteur) | Corriger le numéro (préfixe pays), renvoyer |
+| « Non connecté » / « État indisponible » | Jeton de session Chantiflow refusé (expiré ou révoqué) | Le site renouvelle et rejoue ; sinon écran de connexion avec explication ; bouton « Réessayer » sur la carte |
+| « Connexion à refaire » sur la carte | Jeton Super PDP révoqué ou expiré (`last_error` préfixé `RECONNECT:`) | Bouton « Reconnecter » |
+| « Envoi déjà en cours » | Verrou `api:sending` d'un envoi récent | Attendre ; libéré automatiquement après 10 minutes |
+| « Journal indisponible » | Table `pdp_journal` absente | Appliquer le script étape 4 |
+| Bandeau « Réaligné » au journal | Pièce en retard sur la table des envois (coupure, enregistrement concurrent) | Rien à faire : réalignement automatique à la relecture |
+
+## Annexe — historique des chantiers
+
 # Super PDP — notes d'intégration (lecture de la documentation, septembre 2026)
 
 Synthèse de la documentation officielle (https://www.superpdp.tech/documentation,
@@ -6,7 +95,7 @@ OpenAPI (`https://api.superpdp.tech/openapi/superpdp.json`, version 1.30.0.beta)
 et des exemples officiels (https://github.com/superpdp/examples). Aucune
 intégration n'est encore réalisée : ce document prépare le travail.
 
-## 1. Bac à sable
+### 1. Bac à sable
 
 1. Créer un compte sur https://www.superpdp.tech (bouton « Connexion » →
    « Créer un compte »). Le compte reçoit automatiquement deux entreprises
@@ -22,7 +111,7 @@ intégration n'est encore réalisée : ce document prépare le travail.
 5. Script officiel de bout en bout (Node.js) :
    `curl https://raw.githubusercontent.com/superpdp/examples/refs/heads/main/quick_start.js`.
 
-## 2. Ce qu'il faut côté Chantiflow
+### 2. Ce qu'il faut côté Chantiflow
 
 **Point structurant : la route `POST /v1.beta/companies` (enrôler une
 entreprise) est réservée aux experts-comptables.** Un logiciel multi-clients
@@ -53,7 +142,7 @@ Conséquences :
 Endpoints OAuth : `https://api.superpdp.tech/oauth2/authorize`,
 `https://api.superpdp.tech/oauth2/token`. Pas de scopes (laisser vide).
 
-## 3. Envoyer une facture déjà générée en Factur-X
+### 3. Envoyer une facture déjà générée en Factur-X
 
 Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <access_token>`.
 
@@ -94,7 +183,7 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
    récupérer les factures fournisseurs, `GET /invoices/{id}/download` pour le
    fichier (formats `original`, `factur-x`, `cii`, `ubl`).
 
-## 4. Correspondance avec ce qui existe déjà
+### 4. Correspondance avec ce qui existe déjà
 
 | Chantiflow | Super PDP |
 |---|---|
@@ -104,7 +193,7 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
 | `has_vat_on_debits` (option débits, page Mon entreprise) | champ `has_vat_on_debits` de l'entreprise |
 | Client sans SIREN (particulier / étranger) | e-reporting B2C ou `b2bint_invoices` |
 
-## 5. Alternatives et suite
+### 5. Alternatives et suite
 
 - API AFNOR (XP Z12-013) aussi disponible chez Super PDP : interopérable entre
   plateformes mais bas niveau (XML brut, CDAR en XML). À garder pour plus tard
@@ -113,7 +202,7 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
   (JSON + PDF → Factur-X) : notre générateur reste indépendant, mais cette
   route peut servir de contrôle croisé.
 
-## 6. Réalisé — étape 1 (26/09/2026) : connexion OAuth du compte de l'artisan
+### 6. Réalisé — étape 1 (26/09/2026) : connexion OAuth du compte de l'artisan
 
 - Fonction `superpdp-oauth` (propriétaire seulement) : `start` (état + PKCE
   gardés 10 min dans `pdp_oauth_states`, adresse `/oauth2/authorize`
@@ -133,7 +222,7 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
   Adresse de retour à déclarer dans l'application Super PDP :
   `https://www.chantiflow.fr/?superpdp=retour`.
 
-## 7. Réalisé — étape 2 (26/09/2026) : envoi d'une facture
+### 7. Réalisé — étape 2 (26/09/2026) : envoi d'une facture
 
 - Fonction `superpdp-send-invoice` (propriétaire ou éditeur) : relit la
   facture et la fiche entreprise en base, applique les règles
@@ -159,7 +248,7 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
 - Étape 3 à venir : lecture des événements (`GET /invoice_events`), statuts
   officiels, événement `fr:212` quand la facture passe « payée ».
 
-## 8. Réalisé — étape 3 (26/09/2026) : suivi des statuts et encaissement
+### 8. Réalisé — étape 3 (26/09/2026) : suivi des statuts et encaissement
 
 - Fonction `superpdp-sync-events` : tâche planifiée quotidienne
   (`superpdp-sync-events-quotidien`, 07:00 UTC, script
@@ -179,7 +268,7 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
   quotidienne réessaie.
 - Bac à sable seulement tant que `SUPERPDP_ALLOW_PRODUCTION` ≠ `true`.
 
-## 9. Réalisé — points 5 et 6 (26/09/2026) : avoirs, factures d'acompte, situations valant facture
+### 9. Réalisé — points 5 et 6 (26/09/2026) : avoirs, factures d'acompte, situations valant facture
 
 - Factur-X (`facturx.ts`) accepte quatre pièces : facture (380), facture
   d'acompte (386, ligne d'acompte générée par le site reprise telle quelle),
@@ -212,7 +301,7 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
   pièces, refus), Vitest `src/superpdp-types.test.jsx`.
 - Aucun script SQL : `pdp_invoices` et le champ `pdp` servent tels quels.
 
-## 10. Correctif du 29/09/2026 : refus « Application environment do not match company environment »
+### 10. Correctif du 29/09/2026 : refus « Application environment do not match company environment »
 
 L'adresse d'autorisation transmettait toujours `superpdp_company_number`
 (SIREN de Mon entreprise) + `superpdp_company_number_scheme=fr_siren`.
@@ -225,7 +314,7 @@ reliée. Désormais le SIREN n'est transmis que si `SUPERPDP_ALLOW_PRODUCTION`
 vaut `true` ; en bac à sable, la page d'autorisation laisse choisir
 l'entreprise de test (Burger Queen).
 
-## 11. Correctif du 29/09/2026 : « l'entreprise connectée n'a pas d'identifiant de test reconnu (000000001) »
+### 11. Correctif du 29/09/2026 : « l'entreprise connectée n'a pas d'identifiant de test reconnu (000000001) »
 
 En bac à sable, `GET /companies/me` renvoie un numéro d'entreprise de test
 (`number` = « 000000001 » pour Tricatel, « 000000002 » pour Burger Queen,
@@ -240,7 +329,7 @@ fiche. Le 29/09, la connexion enregistrée était Tricatel (choisie sur la page
 d'autorisation) : se déconnecter puis se reconnecter en choisissant Burger
 Queen.
 
-## 12. Correctif du 29/09/2026 : refus BR-CO-09 (numéro de TVA sans préfixe pays)
+### 12. Correctif du 29/09/2026 : refus BR-CO-09 (numéro de TVA sans préfixe pays)
 
 Chaque document embarque une copie de l'émetteur prise à sa création, non
 modifiable depuis la facture ; le générateur préférait cette copie à Mon
@@ -252,7 +341,7 @@ gardent la copie. Un numéro de TVA sans préfixe pays sur deux lettres est
 bloquant avant tout envoi, émetteur comme client, avec l'endroit où corriger.
 Aucun représentant fiscal (BT-63) n'est jamais produit.
 
-## 13. Correctif du 29/09/2026 : « L'entreprise (000000002) liée à cette session ne correspond pas au vendeur de la facture (315143296) »
+### 13. Correctif du 29/09/2026 : « L'entreprise (000000002) liée à cette session ne correspond pas au vendeur de la facture (315143296) »
 
 En bac à sable, l'adresse d'annuaire d'une entreprise de test est
 `0225:315143296_<suffixe>` : le préfixe 315143296 est le SIREN de Super PDP,
@@ -264,7 +353,7 @@ session (`000000002`). Désormais `superpdp-send-invoice` transmet à
 quand l'annuaire le connaît) : identifiant légal = numéro de test, adresse
 électronique = entrée d'annuaire, aucun SIRET réel dans le XML de bac à sable.
 
-## 14. Étape 4, chantier 1 (30/09/2026) : journal des envois
+### 14. Étape 4, chantier 1 (30/09/2026) : journal des envois
 
 - Table `pdp_journal` (script `2026-09-30_super-pdp-etape4.sql`) : une ligne
   par événement — dépôt (`envoi`), refus de validation ou échec (`erreur`),
@@ -279,7 +368,7 @@ quand l'annuaire le connaît) : identifiant légal = numéro de test, adresse
   absente : message « Journal indisponible » sans casser la page.
 - Tests : `src/superpdp-journal.test.jsx`.
 
-## 15. Étape 4, chantier 2 (30/09/2026) : reprise sur erreur
+### 15. Étape 4, chantier 2 (30/09/2026) : reprise sur erreur
 
 - Bandeau de rejet dans l'éditeur principal et l'éditeur de situation quand
   le statut Super PDP est un échec final (`pdpFailureSummary`, règles
@@ -299,7 +388,7 @@ quand l'annuaire le connaît) : identifiant légal = numéro de test, adresse
   libéré, nouvelle tentative acceptée, ligne de journal « Verrou libéré ».
 - Aucun script SQL. Tests : `src/superpdp-reprise.test.jsx`.
 
-## 16. Étape 4, chantier 3 (30/09/2026) : messages en français et glossaire
+### 16. Étape 4, chantier 3 (30/09/2026) : messages en français et glossaire
 
 - Règles partagées (`src/pdp-rules.js` = `_shared/superpdp-rules.ts`, parité
   testée) : `translatePdpMessage(raw, status)` — messages connus de l'API,
