@@ -13547,6 +13547,34 @@ function StockMovementView({ kind, products, warehouses, stockDetail, canEdit, o
 }
 
 // Historique : documents de stock (mouvements groupés par numéro).
+// Documents de stock (option A du 29/09/2026) : une ligne par produit
+// mouvementé, colonnes alignées, regroupement par jour, distinction
+// visuelle entrée / sortie / ajustement (pastille + liseré), filtre de
+// période. L'export CSV reprend ce qui est filtré à l'écran.
+const STOCK_PERIODS = [["7", "7 derniers jours"], ["30", "30 derniers jours"], ["90", "90 derniers jours"], ["", "Tout l'historique"]];
+const stockDayKey = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+const stockDayLabel = (d) => { const s = new Date(d).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); return s.charAt(0).toUpperCase() + s.slice(1); };
+// Regroupe des lignes { movedAt, quantity, unit } par jour civil (ordre des
+// lignes conservé) ; solde du jour seulement si toutes les lignes partagent
+// la même unité (on n'additionne pas des m² et des sacs).
+function groupStockLinesByDay(lines) {
+  const days = [];
+  const byKey = new Map();
+  for (const l of lines) {
+    const key = stockDayKey(l.movedAt);
+    if (!byKey.has(key)) { const day = { key, label: stockDayLabel(l.movedAt), lines: [], summary: null }; byKey.set(key, day); days.push(day); }
+    byKey.get(key).lines.push(l);
+  }
+  for (const day of days) {
+    const units = new Set(day.lines.map((l) => l.unit || ""));
+    if (units.size === 1) {
+      const plus = day.lines.reduce((s, l) => s + (l.quantity > 0 ? l.quantity : 0), 0);
+      const minus = day.lines.reduce((s, l) => s + (l.quantity < 0 ? l.quantity : 0), 0);
+      day.summary = { plus: Math.round(plus * 1000) / 1000, minus: Math.round(minus * 1000) / 1000, unit: [...units][0] };
+    }
+  }
+  return days;
+}
 function StockDocumentsView({ movements, loading, products, warehouses, account, onRefresh, onGoToEntry, onGoToExit }) {
   const surface = colors.surface;
   const card = { background: surface, border: `1px solid ${colors.line}` };
@@ -13555,89 +13583,113 @@ function StockDocumentsView({ movements, loading, products, warehouses, account,
   const [kind, setKind] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
   const [search, setSearch] = useState("");
-  // Détail des lignes (produits, quantités) visible d'emblée pour chaque
-  // document ; un clic sur l'en-tête le replie. Avant, tout était replié
-  // derrière un chevron et les produits n'apparaissaient pas à l'ouverture.
-  const [collapsedRefs, setCollapsedRefs] = useState(() => new Set());
-  const toggleDoc = (key) => setCollapsedRefs((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  const [period, setPeriod] = useState("30");
+  const [periodTouched, setPeriodTouched] = useState(false);
   // Chargement à l'ouverture de la page (fonction lue via une référence
   // pour ne pas relancer le chargement à chaque rendu du parent).
   const refreshRef = useRef(onRefresh);
   refreshRef.current = onRefresh;
   useEffect(() => { refreshRef.current(); }, []);
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
-  const productName = (id) => productById.get(id)?.name || "Produit supprimé";
-  const productUnit = (id) => productById.get(id)?.unit || "";
-  const docs = useMemo(() => {
-    const nameOf = (id) => productById.get(id)?.name || "Produit supprimé";
-    const groups = new Map();
-    for (const m of movements) {
-      const key = m.document_ref || `mvt:${m.id}`;
-      if (!groups.has(key)) groups.set(key, { key, ref: m.document_ref || "—", kind: m.kind, movedAt: m.moved_at, warehouseId: m.warehouse_id, createdBy: m.created_by, reason: m.reason, lines: [] });
-      groups.get(key).lines.push(m);
-    }
+  // Période par défaut : 30 jours, sauf si elle est vide alors qu'il existe
+  // un historique plus ancien (on bascule sur « tout » tant que l'utilisateur
+  // n'a pas choisi lui-même).
+  const periodStart = (p) => (p ? Date.now() - Number(p) * 86400000 : null);
+  const effectivePeriod = periodTouched || !period || movements.length === 0 || movements.some((m) => new Date(m.moved_at).getTime() >= periodStart(period)) ? period : "";
+  const lines = useMemo(() => {
     const s = search.trim().toLowerCase();
-    return [...groups.values()]
-      .filter((d) => !kind || d.kind === kind)
-      .filter((d) => !warehouseId || (warehouseId === "none" ? !d.warehouseId : d.warehouseId === warehouseId))
-      .filter((d) => !s || d.ref.toLowerCase().includes(s) || (d.reason || "").toLowerCase().includes(s) || d.lines.some((l) => nameOf(l.product_id).toLowerCase().includes(s)))
-      .sort((a, b) => new Date(b.movedAt) - new Date(a.movedAt));
-  }, [movements, kind, warehouseId, search, productById]);
+    const start = periodStart(effectivePeriod);
+    return movements
+      .map((m) => {
+        const p = productById.get(m.product_id);
+        return { id: m.id, kind: m.kind, productId: m.product_id, product: p?.name || "Produit supprimé", deleted: !p, unit: p?.unit || "", quantity: Number(m.quantity), warehouseId: m.warehouse_id, warehouse: warehouseName(warehouses, m.warehouse_id), reason: m.reason || "", ref: m.document_ref || "", author: members[m.created_by] || "", movedAt: m.moved_at };
+      })
+      .filter((l) => !kind || l.kind === kind)
+      .filter((l) => !warehouseId || (warehouseId === "none" ? !l.warehouseId : l.warehouseId === warehouseId))
+      .filter((l) => !start || new Date(l.movedAt).getTime() >= start)
+      .filter((l) => !s || l.ref.toLowerCase().includes(s) || l.reason.toLowerCase().includes(s) || l.product.toLowerCase().includes(s))
+      .sort((a, b) => new Date(b.movedAt) - new Date(a.movedAt) || (a.ref < b.ref ? 1 : a.ref > b.ref ? -1 : 0));
+  }, [movements, kind, warehouseId, search, effectivePeriod, productById, warehouses, members]);
+  const days = useMemo(() => groupStockLinesByDay(lines), [lines]);
   function exportCsv() {
     const rows = [["Document", "Type", "Date", "Entrepôt", "Produit", "Quantité", "Motif / référence", "Auteur"]];
-    docs.forEach((d) => d.lines.forEach((l) => rows.push([d.ref, STOCK_KINDS[d.kind]?.label || d.kind, new Date(l.moved_at).toLocaleString("fr-FR"), warehouseName(warehouses, l.warehouse_id), productName(l.product_id), Number(l.quantity), l.reason || "", members[l.created_by] || ""])));
+    lines.forEach((l) => rows.push([l.ref, STOCK_KINDS[l.kind]?.label || l.kind, new Date(l.movedAt).toLocaleString("fr-FR"), l.warehouse, l.product, l.quantity, l.reason, l.author]));
     const csv = rows.map((r) => r.map(csvCell).join(";")).join("\n"); // cellules neutralisées contre les formules (motif, nom de produit…)
     downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `documents-de-stock-${toIsoDate(new Date())}.csv`);
   }
   const kindColor = (k) => (k === "entree" ? colors.moss : k === "sortie" ? colors.brick : colors.slate);
+  const KindIcon = ({ k, size = 13 }) => (k === "entree" ? <ArrowDownToLine size={size} /> : k === "sortie" ? <ArrowUpFromLine size={size} /> : <Minus size={size} />);
+  const signed = (q) => `${q > 0 ? "+" : ""}${stockQty(q)}`;
+  // Sept colonnes à partir de 1024 px ; en dessous, deux lignes par mouvement
+  // (type, produit, quantité / entrepôt, motif, document, auteur).
+  const gridCols = "grid-cols-[auto_minmax(0,1fr)_auto] lg:grid-cols-[110px_minmax(0,1.3fr)_110px_120px_minmax(0,1fr)_110px_100px]";
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           {<div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: atelier.accentSoft, color: atelier.accent }}><Archive size={18} /></div>}
           <h1 className="df-display text-2xl font-semibold">Documents de stock</h1>
-          <p className="text-sm" style={{ color: colors.inkSoft }}>Historique de toutes les entrées, sorties et ajustements, avec la date, l'entrepôt, l'auteur et le motif.</p>
+          <p className="text-sm" style={{ color: colors.inkSoft }}>Historique des entrées, sorties et ajustements, jour par jour : produit, quantité, entrepôt, motif, document et auteur.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={onGoToEntry} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.moss }}><ArrowDownToLine size={15} /> Entrée</button>
           <button onClick={onGoToExit} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white" style={{ background: colors.brick }}><ArrowUpFromLine size={15} /> Sortie</button>
-          <button onClick={exportCsv} disabled={docs.length === 0} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: docs.length ? 1 : 0.5 }}><Download size={15} /> CSV</button>
+          <button onClick={exportCsv} disabled={lines.length === 0} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium" style={{ border: `1px solid ${colors.line}`, color: colors.slate, opacity: lines.length ? 1 : 0.5 }} title="Exporte les lignes affichées (filtres et période compris)"><Download size={15} /> CSV</button>
         </div>
       </div>
       <div className="mb-4 flex flex-wrap gap-2">
-        <input className="df-input min-w-[200px] flex-1 rounded-md px-3 py-2 text-sm" style={inputStyle} placeholder="Rechercher (numéro, motif, produit)" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="relative min-w-[200px] flex-1">
+          <input className="df-input w-full rounded-md px-3 py-2 pr-8 text-sm" style={inputStyle} placeholder="Rechercher (numéro, motif, produit)" value={search} onChange={(e) => setSearch(e.target.value)} />
+          {search && <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5" style={{ color: colors.inkSoft }} title="Effacer la recherche" aria-label="Effacer la recherche" data-testid="stock-search-clear"><X size={14} /></button>}
+        </div>
         <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={kind} onChange={(e) => setKind(e.target.value)}><option value="">Tous les types</option>{Object.entries(STOCK_KINDS).map(([id, k]) => <option key={id} value={id}>{k.label}</option>)}</select>
         <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}><option value="">Tous les entrepôts</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}<option value="none">Sans entrepôt</option></select>
+        <select className="df-select rounded-md px-3 py-2 text-sm" style={inputStyle} value={effectivePeriod} onChange={(e) => { setPeriod(e.target.value); setPeriodTouched(true); }} data-testid="stock-period">{STOCK_PERIODS.map(([id, label]) => <option key={id || "all"} value={id}>{label}</option>)}</select>
       </div>
       <div className="overflow-hidden rounded-2xl" style={card}>
         {loading ? (
           <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin" style={{ color: colors.slate }} /></div>
-        ) : docs.length === 0 ? (
-          <div className="px-6 py-16 text-center"><Archive size={28} style={{ color: colors.inkSoft, margin: "0 auto 8px" }} /><p className="df-display text-lg font-semibold">Aucun document de stock</p><p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>Enregistre une entrée ou une sortie pour commencer l'historique.</p></div>
-        ) : docs.map((d, i) => {
-          const isOpen = !collapsedRefs.has(d.key);
-          const total = d.lines.reduce((s, l) => s + Number(l.quantity), 0);
-          return (
-            <div key={d.key} style={{ borderTop: i ? `1px solid ${colors.line}` : "none" }}>
-              <button onClick={() => toggleDoc(d.key)} title={isOpen ? "Masquer le détail" : "Afficher le détail"} className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left">
-                <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase" style={{ background: `${kindColor(d.kind)}18`, color: kindColor(d.kind) }}>{STOCK_KINDS[d.kind]?.label || d.kind}</span>
-                <span className="df-mono text-sm font-semibold">{d.ref}</span>
-                <span className="text-xs" style={{ color: colors.inkSoft }}>{new Date(d.movedAt).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })} · {warehouseName(warehouses, d.warehouseId)} · {members[d.createdBy] || "—"}</span>
-                <span className="ml-auto df-mono text-sm" style={{ color: total < 0 ? colors.brick : colors.moss }}>{total > 0 ? "+" : ""}{stockQty(total)}</span>
-                <span className="text-xs" style={{ color: colors.inkSoft }}>{d.lines.length} ligne{d.lines.length > 1 ? "s" : ""}</span>
-                <ChevronDown size={15} style={{ color: colors.inkSoft, transform: isOpen ? "rotate(180deg)" : "none" }} />
-              </button>
-              {isOpen && (
-                <div className="border-t px-4 pb-3 pt-2" style={{ borderColor: colors.line, background: colors.paper }}>
-                  {d.reason && <p className="mb-2 text-xs" style={{ color: colors.inkSoft }}>Motif / référence : {d.reason}</p>}
-                  {d.lines.map((l) => (
-                    <div key={l.id} className="flex items-center justify-between gap-2 py-1 text-sm"><span className="truncate">{productName(l.product_id)}</span><span className="df-mono shrink-0" style={{ color: Number(l.quantity) < 0 ? colors.brick : colors.moss }}>{Number(l.quantity) > 0 ? "+" : ""}{stockQty(l.quantity)} {productUnit(l.product_id)}</span></div>
-                  ))}
-                </div>
-              )}
+        ) : lines.length === 0 ? (
+          <div className="px-6 py-16 text-center"><Archive size={28} style={{ color: colors.inkSoft, margin: "0 auto 8px" }} /><p className="df-display text-lg font-semibold">{movements.length ? "Aucun mouvement pour ces filtres" : "Aucun document de stock"}</p><p className="mt-1 text-sm" style={{ color: colors.inkSoft }}>{movements.length ? "Élargis la période ou retire un filtre." : "Enregistre une entrée ou une sortie pour commencer l'historique."}</p></div>
+        ) : (
+          <>
+            <div className={`hidden ${gridCols} gap-x-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide lg:grid`} style={{ color: colors.inkSoft, borderBottom: `1px solid ${colors.line}` }}>
+              <span>Type</span><span>Produit</span><span className="text-right">Quantité</span><span>Entrepôt</span><span>Motif / référence</span><span>Document</span><span>Auteur</span>
             </div>
-          );
-        })}
+            {days.map((day) => (
+              <div key={day.key} data-testid="stock-day">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-2" style={{ background: colors.paper, borderBottom: `1px solid ${colors.line}` }}>
+                  <span className="df-display text-sm font-semibold">{day.label}</span>
+                  <span className="text-xs" style={{ color: colors.inkSoft }} data-testid="stock-day-summary">
+                    {day.lines.length} mouvement{day.lines.length > 1 ? "s" : ""}
+                    {day.summary && day.summary.plus > 0 && <> · <span className="df-mono" style={{ color: colors.moss }}>+{stockQty(day.summary.plus)} {day.summary.unit}</span></>}
+                    {day.summary && day.summary.minus < 0 && <> · <span className="df-mono" style={{ color: colors.brick }}>{stockQty(day.summary.minus)} {day.summary.unit}</span></>}
+                  </span>
+                </div>
+                {day.lines.map((l, i) => {
+                  const sameDocAsPrevious = i > 0 && !!l.ref && day.lines[i - 1].ref === l.ref;
+                  const c = kindColor(l.kind);
+                  return (
+                    <div key={l.id} className={`grid ${gridCols} items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm`} style={{ borderLeft: `3px solid ${c}`, borderBottom: `1px solid ${colors.line}`, background: sameDocAsPrevious ? `${c}06` : surface }} data-testid="stock-line" data-kind={l.kind}>
+                      <span className="flex items-center gap-1.5">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white" style={{ background: c }} aria-hidden="true"><KindIcon k={l.kind} /></span>
+                        <span className="text-xs font-semibold uppercase" style={{ color: c }}>{STOCK_KINDS[l.kind]?.label || l.kind}</span>
+                      </span>
+                      <span className="min-w-0 truncate font-semibold" style={{ color: l.deleted ? colors.inkSoft : colors.ink }} title={l.product}>{l.product}</span>
+                      <span className="justify-self-end text-right"><span className="df-mono text-base font-semibold" style={{ color: l.quantity < 0 ? colors.brick : colors.moss }}>{signed(l.quantity)}</span>{l.unit && <span className="ml-1 text-xs" style={{ color: colors.inkSoft }}>{l.unit}</span>}</span>
+                      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs lg:contents">
+                        <span className="min-w-0 truncate lg:text-sm" style={{ color: colors.inkSoft }} title={l.warehouse}>{l.warehouse}</span>
+                        <span className="min-w-0 truncate lg:text-sm" title={l.reason || ""}>{l.reason || <span style={{ color: colors.inkSoft }}>—</span>}</span>
+                        <span className="min-w-0">{l.ref && !sameDocAsPrevious ? <button onClick={() => setSearch(l.ref)} className="df-mono text-xs underline-offset-2 hover:underline" style={{ color: colors.slate }} title="Afficher toutes les lignes de ce document">{l.ref}</button> : <span className="text-xs" style={{ color: colors.inkSoft }}>{l.ref ? "" : "—"}</span>}</span>
+                        <span className="min-w-0 truncate text-xs" style={{ color: colors.inkSoft }} title={l.author}>{sameDocAsPrevious ? "" : l.author}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -19251,6 +19303,6 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 export {
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
-  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
+  emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, groupStockLinesByDay, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
   PrintDocument, PrintRelance, RELANCE_NIVEAUX, PrintSituation, isBlankLine, localDateOf, fr, frLong, addDaysLocal, EMPTY_SIGNATURE, isFranceCompany, rememberSignupCountry, takeSignupCountry, SIGNUP_COUNTRY_KEY, SuperPdpCard, sirenFromSiret, accountingExportRows, acompteDeduitSplit, stampAcceptedTotal, confirmSignedOptions, reevaluateInvoicesAfterCreditChange, RevenueChart, nextNumber, computePvGaranties, getSectorMontantInitial, lsGet, pvWarrantiesOf, chantierWarranties, warrantyAlerts, WARRANTY_ALERT_DAYS, AtelierHome, AtelierChantiersView, AtelierChantierView, AttestationsCard, AttachAttestationsToggle, FactureRecueEditor, newFactureRecueDocument, ExportMenu, QrCodeDialog, isCountedLine, optionState, memberKey, STAFF_ROLE, useOrgMembers, ReferralCard, referralCodeFromUrl, AuthScreen, AccountView, chantierTasksOf, chantierTaskCounts, taskIsOverdue, countedDocumentsLength, CLIENT_ROLES, rankSupplier, FACTURE_RECUE_STATUSES, creditNotesTotalFor, isIssuedAccountingDocument, acompteSuggestionFor, AcompteSuggestionNotice, resyncSituationFromPrevious, atelierChantierStats, insertProductLine, PublicDocumentView, BankView, documentAmountDue, documentOutstanding, documentSettledTotal, paymentRevertPatch, PaymentRevertNotice, ServicesVisibilitySettings, bankModuleVisible, BANK_MODULE_ID, AccountingExportCard, accountingExportPeriodLabel, TeamView, TeamMemberField, memberDisplayName, StripeConnectCard, SiteIdentitySettings, HomeLink, HOME_HREF, initialView, DEFAULT_SITE_SETTINGS, globalDiscountRate, globalDiscountLabel, PaymentsEditor, paymentsTotalOf, paymentDateLabel, isPayableDoc, documentPaidTotal, completeDocumentFromRecords, mergeClientRecord, clientRecordOf, emptyClient, duplicatedDocumentOf, atelierDocAmount, SaveErrorBanner, productFileProblem, PASSWORD_MIN_LENGTH, readCachedSiteSettings, writeCachedSiteSettings, siteSettingsFromRow, SITE_SETTINGS_CACHE_KEY, StockMenu, STOCK_MENU, AtelierShell, companySnapshotOf, findClientByName, ClientsView, PrintPlanning, emptyTachePlanning, computeTacheStatutEffectif, PrintRapportIntervention, emptyMaterielUtilise, computeMaterielTotal, PrintPvReception, emptyReserve, PrintContrat, CONTRAT_CLAUSE_RECEPTION, CONTRAT_CLAUSE_RETRACTATION, PrintRevision, computeRevision, computeRevisionLine, getRevisionSectors, emptyRevisionSector, emptyDecompte, emptyMois, computeSituation, createNextSituation, accountingExportRow, accountingLinesOf, legalMentionLines, computeTotals, documentValidationErrors, documentSuggestedFields, documentFieldGaps, DOCUMENT_SCHEMA_VERSION, isDocumentEmpty, FinalizeButton, acompteLineFor, acompteAmountOf, hasManualAcompteLines, ACOMPTE_LINE_ID,
 };

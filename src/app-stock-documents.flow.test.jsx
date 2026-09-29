@@ -92,22 +92,25 @@ async function openApp() {
 
 describe("application complète → Documents de stock", () => {
   {
-    it("le document est listé avec ses lignes visibles, un clic les replie", async () => {
+    it("le document est listé, une ligne par produit visible sans clic, sous un bandeau de jour", async () => {
       const { container, unmount } = await openApp();
       const listed = await waitFor(() => container.textContent.includes("ENT-2026-001"));
       expect(listed, `document non listé ; écran : ${container.textContent.slice(0, 400)}`).toBe(true);
       // Détail visible sans clic (c'était le bug : replié derrière un chevron)
       expect(container.textContent, `détail absent à l'ouverture ; écran : ${container.textContent.slice(0, 600)}`).toContain("Carrelage 60x60");
       expect(container.textContent).toContain("Colle");
-      expect(container.textContent).toContain("+10 m²");
-      expect(container.textContent).toContain("+3 sac");
-      // Un clic sur l'en-tête replie, un second rouvre
-      const row = [...container.querySelectorAll("button")].find((b) => b.textContent.includes("ENT-2026-001"));
-      expect(row).toBeTruthy();
-      await act(async () => { row.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-      expect(container.textContent).not.toContain("Colle");
-      await act(async () => { row.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-      expect(container.textContent).toContain("Colle");
+      expect(container.textContent).toContain("+10m²");
+      expect(container.textContent).toContain("+3sac");
+      const rows = [...container.querySelectorAll('[data-testid="stock-line"]')];
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+      expect(container.querySelectorAll('[data-testid="stock-day"]').length).toBeGreaterThanOrEqual(1);
+      // Un clic sur le numéro de document isole ses lignes (recherche), la croix efface.
+      const refButton = [...container.querySelectorAll("button")].find((x) => x.textContent.trim() === "ENT-2026-001");
+      expect(refButton).toBeTruthy();
+      await act(async () => { refButton.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+      expect(container.querySelector('input[placeholder^="Rechercher (numéro"]').value).toBe("ENT-2026-001");
+      await act(async () => { container.querySelector('[data-testid="stock-search-clear"]').dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+      expect(container.querySelector('input[placeholder^="Rechercher (numéro"]').value).toBe("");
       await unmount();
     }, 30000); // l'application complète met plusieurs secondes à se charger quand toute la suite tourne en parallèle
   }

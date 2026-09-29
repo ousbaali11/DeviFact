@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// Bug signalé : dans « Documents de stock », le document apparaissait mais
-// le détail des lignes (produits, quantités) restait invisible, replié
-// derrière un chevron. Désormais le détail est visible d'emblée, et un
-// clic sur l'en-tête le replie / le déplie.
+// « Documents de stock » (présentation du 29/09/2026) : une ligne par
+// produit mouvementé, visible sans aucun clic, avec type, produit,
+// quantité, entrepôt, motif, document et auteur ; regroupement par jour.
+// (Le bug d'origine : le détail restait replié derrière un chevron.)
 import { describe, it, expect, beforeAll } from "vitest";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -31,40 +31,43 @@ async function mount(element) {
   await act(async () => { root.render(element); });
   return { container, unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); } };
 }
-const click = (el) => act(async () => { el.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-const rowOf = (container, ref) => [...container.querySelectorAll("button")].find((b) => b.textContent.includes(ref));
+const view = () => <StockDocumentsView movements={movements} loading={false} products={products} warehouses={warehouses} account={{ organizationId: "" }} onRefresh={noop} onGoToEntry={noop} onGoToExit={noop} />;
 
-describe("Documents de stock : détail des lignes", () => {
-  {
-    it("produits et quantités visibles sans aucun clic", async () => {
-      const { container, unmount } = await mount(
-        <StockDocumentsView movements={movements} loading={false} products={products} warehouses={warehouses} account={{ organizationId: "" }} onRefresh={noop} onGoToEntry={noop} onGoToExit={noop} />,
-      );
-      const text = container.textContent;
-      expect(text).toContain("ENT-2026-001");
-      expect(text).toContain("2 lignes");
-      expect(text).toContain("Carrelage 60x60");
-      expect(text).toContain("Colle");
-      expect(text).toContain("+10 m²");
-      expect(text).toContain("+3 sac");
-      expect(text).toContain("Motif / référence : BL 42");
-      // La sortie aussi, avec sa quantité négative
-      expect(text).toContain("SOR-2026-001");
-      expect(text).toContain("-4 m²");
-      expect(text).toContain("Motif / référence : Chantier Dupont");
-      await unmount();
-    });
-  }
-  it("un clic sur l'en-tête replie le détail de ce document seulement, un second clic le rouvre", async () => {
-    const { container, unmount } = await mount(
-      <StockDocumentsView movements={movements} loading={false} products={products} warehouses={warehouses} account={{ organizationId: "" }} onRefresh={noop} onGoToEntry={noop} onGoToExit={noop} />,
-    );
-    await click(rowOf(container, "ENT-2026-001"));
-    expect(container.textContent).not.toContain("Colle");
-    expect(container.textContent).not.toContain("BL 42");
-    expect(container.textContent).toContain("Chantier Dupont"); // l'autre document reste déplié
-    await click(rowOf(container, "ENT-2026-001"));
-    expect(container.textContent).toContain("Colle");
+describe("Documents de stock : lignes produit", () => {
+  it("produits, quantités, motifs et documents visibles sans aucun clic, une ligne par produit", async () => {
+    const { container, unmount } = await mount(view());
+    const rows = [...container.querySelectorAll('[data-testid="stock-line"]')];
+    expect(rows).toHaveLength(3);
+    const text = container.textContent;
+    expect(text).toContain("ENT-2026-001");
+    expect(text).toContain("Carrelage 60x60");
+    expect(text).toContain("Colle");
+    expect(text).toContain("+10m²");
+    expect(text).toContain("+3sac");
+    expect(text).toContain("BL 42");
+    expect(text).toContain("SOR-2026-001");
+    expect(text).toContain("-4m²");
+    expect(text).toContain("Chantier Dupont");
+    expect(text).toContain("Dépôt principal");
+    // Le type se voit : pastille colorée + libellé sur chaque ligne, liseré de la couleur du type.
+    expect(rows.map((r) => r.dataset.kind)).toEqual(["entree", "entree", "sortie"]);
+    expect(rows[0].textContent).toContain("Entrée");
+    expect(rows[2].textContent).toContain("Sortie");
+    expect(rows[0].style.borderLeft).not.toBe(rows[2].style.borderLeft);
+    // Deux lignes du même document qui se suivent : le numéro n'est affiché qu'une fois.
+    expect(rows[0].textContent).toContain("ENT-2026-001");
+    expect(rows[1].textContent).not.toContain("ENT-2026-001");
+    await unmount();
+  });
+  it("regroupement par jour : deux bandeaux (13 puis 12 septembre), plus récent en premier, solde du jour seulement à unité homogène", async () => {
+    const { container, unmount } = await mount(view());
+    const days = [...container.querySelectorAll('[data-testid="stock-day"]')];
+    expect(days).toHaveLength(2);
+    expect(days[0].textContent).toContain("13 septembre 2026");
+    expect(days[1].textContent).toContain("12 septembre 2026");
+    // 13/09 : m² et sacs mélangés → nombre de mouvements seulement ; 12/09 : une sortie de 4 m².
+    expect(days[0].querySelector('[data-testid="stock-day-summary"]').textContent).toBe("2 mouvements");
+    expect(days[1].querySelector('[data-testid="stock-day-summary"]').textContent).toBe("1 mouvement · -4 m²");
     await unmount();
   });
 });
