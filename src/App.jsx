@@ -99,6 +99,17 @@ function InstagramIcon({ size = 20 }) {
   );
 }
 
+// Un document « Terminé » modifié ensuite (contenu ou statut) redevient à
+// enregistrer : l'étape repasse « brouillon » et le bouton « Enregistrer »
+// (30/09/2026 — avant, le bouton restait « Terminé » quoi qu'on change).
+// Les champs posés automatiquement (suivi Super PDP, fusion, relances,
+// signature en ligne, lien public) ne comptent pas comme une modification.
+const WORKSTAGE_AUTOMATIC_KEYS = ["workStage", "updatedAt", "conflict", "pdp", "lastReminderSentAt", "signature", "publicToken", "publicTokenCreatedAt", "viewedAt"];
+function touchWorkStage(doc, patch) {
+  if (!doc || doc.workStage !== "termine" || !patch || "workStage" in patch) return patch;
+  return Object.keys(patch).some((k) => !WORKSTAGE_AUTOMATIC_KEYS.includes(k)) ? { ...patch, workStage: "brouillon" } : patch;
+}
+
 // Bouton "Enregistrer" en bas de chaque éditeur — marque le document
 // comme "Terminé" une fois cliqué. Reste discret et informatif une
 // fois déjà cliqué, plutôt que de disparaître (pour qu'on sache
@@ -3234,6 +3245,8 @@ async function invokeFunction(name, body) {
   if (deadSessionListener) { try { deadSessionListener(); } catch (err) { console.error(err); } }
   throw new Error(SESSION_EXPIRED_MESSAGE);
 }
+// Clé locale de l'organisation active choisie par une personne (par compte).
+const lastOrganizationKey = (userId) => `devifact_lastOrganization_${userId}`;
 // Vue de départ : « /?accueil » → tableau de bord (paramètre retiré de
 // l'adresse) ; sinon la dernière vue mémorisée sur l'appareil.
 function initialView() {
@@ -3931,6 +3944,11 @@ function DeviFactAppInner() {
     clearUserData();
     const profile = await loadProfile(user.id, user.email, organizationId);
     setActiveOrganization(profile?.organizationId || null);
+    // Organisation choisie mémorisée sur cet appareil (par personne) : elle
+    // est reprise au prochain chargement de la page (point 2 du 30/09/2026 :
+    // un membre invité qui actualisait la page était renvoyé dans sa propre
+    // organisation).
+    if (profile?.organizationId) lsSet(lastOrganizationKey(user.id), profile.organizationId);
     await loadUserData();
     setAccount(profile);
     syncOnlinePayments();
@@ -3980,7 +3998,12 @@ function DeviFactAppInner() {
   function establishSession(user) {
     if (sessionLoadRef.current?.userId === user.id) return sessionLoadRef.current.promise;
     const promise = (async () => {
-      const profile = await loadProfile(user.id, user.email);
+      // Organisation mémorisée sur cet appareil (changement d'organisation
+      // précédent), si la personne en est toujours membre ; sinon loadProfile
+      // retombe sur son propre espace et la mémorisation est effacée.
+      const preferredOrgId = lsGet(lastOrganizationKey(user.id)) || null;
+      const profile = await loadProfile(user.id, user.email, preferredOrgId);
+      if (preferredOrgId && profile?.organizationId !== preferredOrgId) lsRemove(lastOrganizationKey(user.id));
       setActiveOrganization(profile?.organizationId || null);
       await loadUserData();
       currentUserIdRef.current = user.id;
@@ -4662,6 +4685,7 @@ function DeviFactAppInner() {
           if (!Object.keys(patch).length) return;
         }
       }
+      patch = touchWorkStage(original, patch);
       // Devis qui vient tout juste de passer à "signé" (jamais si déjà
       // signé avant, pour ne pas créer une facture à chaque petite
       // modification ultérieure) : génère automatiquement la facture
@@ -6278,6 +6302,7 @@ function ContactView({ siteSettings, onBack, onLegal }) {
   const [error, setError] = useState("");
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setForm((f) => ({ ...f, ...p }));
     if (error) setError("");
   }
@@ -7453,6 +7478,7 @@ function RevisionEditor({ doc, saving, clients, account, plans, siteSettings, is
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocalDoc((prev) => ({ ...prev, ...p }));
     // Toutes les modifications faites pendant le délai de 400ms sont
     // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
@@ -8232,6 +8258,7 @@ function SituationEditor({ doc, documents, saving, account, plans, siteSettings,
   }, [doc]);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     // Situation transmise via Super PDP : le contenu ne bouge plus (bandeau).
     if (pdpLocked && pdpBlockedKeys(p).length) { setPdpLockNotice(true); return; }
     setLocalDoc((prev) => ({ ...prev, ...p }));
@@ -8847,6 +8874,7 @@ function PvReceptionEditor({ doc, saving, account, plans, siteSettings, isLocked
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocalDoc((prev) => ({ ...prev, ...p }));
     // Toutes les modifications faites pendant le délai de 400ms sont
     // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
@@ -9400,6 +9428,7 @@ function RapportInterventionEditor({ doc, saving, account, plans, siteSettings, 
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocalDoc((prev) => ({ ...prev, ...p }));
     // Toutes les modifications faites pendant le délai de 400ms sont
     // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
@@ -9807,6 +9836,7 @@ function ContratChantierEditor({ doc, saving, account, plans, siteSettings, isLo
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocalDoc((prev) => ({ ...prev, ...p }));
     // Toutes les modifications faites pendant le délai de 400ms sont
     // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
@@ -10169,6 +10199,7 @@ function FactureRecueEditor({ doc, documents = [], clients = [], companyProfile 
     });
   }, [doc.id, doc.status, doc.paidAt, doc.attachment, doc.workStage]);
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocalDoc((prev) => ({ ...prev, ...p }));
     pendingPatchRef.current = { ...(pendingPatchRef.current || {}), ...p };
     clearTimeout(saveTimer.current);
@@ -10366,6 +10397,7 @@ function RelanceFormelleEditor({ doc, saving, account, plans, siteSettings, isLo
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocalDoc((prev) => ({ ...prev, ...p }));
     // Toutes les modifications faites pendant le délai de 400ms sont
     // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
@@ -10738,6 +10770,7 @@ function PlanningChantierEditor({ doc, saving, account, plans, siteSettings, isL
   useEffect(() => setLocalDoc(doc), [doc.id]);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocalDoc((prev) => ({ ...prev, ...p }));
     // Toutes les modifications faites pendant le délai de 400ms sont
     // cumulées puis envoyées ensemble — avant, seule la DERNIÈRE était
@@ -15612,6 +15645,7 @@ function CompanyView({ profile, saving, onSave, onReset, documentCount, clientCo
   useEffect(() => setLocal(withGeoCountry(profile)), []);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocal((prev) => ({ ...prev, ...p }));
   }
   function handleLogoUpload(e) {
@@ -16308,6 +16342,7 @@ function SiteIdentitySettings({ siteSettings, saving, onSave }) {
   useEffect(() => { setLocal(siteSettings); }, []);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     setLocal((prev) => ({ ...prev, ...p }));
   }
   function handleLogoUpload(e) {
@@ -17804,6 +17839,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
   }, [lastAddedDetailId]);
 
   function patch(p) {
+    p = touchWorkStage(localDoc, p);
     // Facture transmise via Super PDP : le contenu ne bouge plus (bandeau).
     if (pdpLocked && pdpBlockedKeys(p).length) { setPdpLockNotice(true); return; }
     setLocalDoc((prev) => ({ ...prev, ...p }));
@@ -19469,7 +19505,7 @@ function Editor({ doc, saving, clients, products = [], stockByProduct = {}, acco
 // détecter une erreur de rendu avant la mise en ligne. Aucun effet sur
 // l'application, qui n'utilise que l'export par défaut.
 export {
-  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal,
+  invokeFunction, onDeadSession, SESSION_EXPIRED_MESSAGE, PdpJournal, touchWorkStage,
   Editor, RevisionEditor, SituationEditor, PvReceptionEditor, RapportInterventionEditor, ContratChantierEditor, RelanceFormelleEditor, PlanningChantierEditor,
   newDocument, newRevisionDocument, newSituationDocument, newPvReceptionDocument, newRapportInterventionDocument, newContratChantierDocument, newRelanceFormelleDocument, newPlanningChantierDocument,
   emptyCompanyProfile, emptyProduct, PLANS, REVISION_SECTORS, ComptabiliteView, StockDocumentsView, groupStockLinesByDay, CompanyView, companyLegalFormLabel, companyInsuranceLabel,
