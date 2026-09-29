@@ -94,7 +94,7 @@ export function pdpFailureSummary(pdp) {
   if (!pdp || !PDP_FINAL_FAILURES.includes(String(pdp.status || ""))) return null;
   const status = String(pdp.status);
   const reason = String(pdp.error || pdp.reason || "").trim();
-  return { status, title: PDP_FAILURE_TITLES[status] || pdpStatusLabel(pdp), reason: reason || null, attempt: Number(pdp.attempt) || 1 };
+  return { status, title: PDP_FAILURE_TITLES[status] || pdpStatusLabel(pdp), reason: reason ? translatePdpMessage(reason) : null, attempt: Number(pdp.attempt) || 1 };
 }
 // Identifiant externe d'une tentative d'envoi (36 caractères au plus chez
 // Super PDP) : identifiant de la pièce, suffixé du numéro à partir de la
@@ -103,4 +103,125 @@ export function pdpExternalId(documentId, attempt) {
   const n = Number(attempt) || 1;
   const suffix = n > 1 ? `-${n}` : "";
   return `${String(documentId || "").slice(0, 36 - suffix.length)}${suffix}`;
+}
+
+// ---------------------------------------------------------------------------
+// Messages en français (étape 4, chantier 3, 30/09/2026). Les textes de
+// Super PDP (API, événements, page d'autorisation) et les règles de
+// validation du fichier arrivent en anglais : traduction des cas connus avec
+// la marche à suivre, texte d'origine conservé sinon (préfixé) et toujours
+// gardé dans le journal. Le glossaire se complète au fil des retours.
+// ---------------------------------------------------------------------------
+export const PDP_MESSAGE_TRANSLATIONS = [
+  { test: /application environment do(?:es)? not match company environ/i, fr: "L'application Chantiflow et l'entreprise choisie chez Super PDP ne sont pas dans le même environnement (bac à sable ou production). En bac à sable, choisis l'entreprise de test (Burger Queen) sur la page d'autorisation." },
+  { test: /liée à cette session ne correspond pas au vendeur/i, fr: "Le vendeur du fichier n'est pas l'entreprise connectée chez Super PDP : déconnecte puis reconnecte le bon compte depuis Mon entreprise." },
+  { test: /company_verification_status|company (?:is )?not verified|kyb|verification (?:is )?pending/i, fr: "Entreprise pas encore vérifiée chez Super PDP : l'envoi sera possible une fois la vérification terminée." },
+  { test: /invalid_grant|invalid refresh token|refresh token .*(?:revoked|expired)|token (?:has )?(?:been )?(?:revoked|expired)|session .*(?:revoked|expired)|\bunauthorized\b/i, fr: "Session Super PDP expirée ou révoquée : reconnecte le compte depuis Mon entreprise." },
+  { test: /not (?:found )?in (?:the )?directory|no directory entry|unknown recipient|recipient .*not found/i, fr: "Le destinataire n'est pas inscrit à l'annuaire de la facturation électronique : il doit d'abord y être inscrit par sa plateforme ou son SIE." },
+  { test: /external_id .*(?:already|exists|taken)|duplicate (?:external_id|invoice)/i, fr: "Un dépôt avec le même identifiant existe déjà chez Super PDP : relance l'envoi, une nouvelle tentative reçoit un identifiant différent." },
+  { test: /too many requests|rate limit/i, fr: "Trop de demandes en peu de temps chez Super PDP : réessaie dans un instant." },
+  { test: /invalid (?:pdf|xml)|not a valid (?:pdf|xml|factur-x)|unable to parse|malformed|could not (?:read|parse)/i, fr: "Fichier illisible pour Super PDP (PDF ou XML invalide) : régénère le fichier Factur-X et réessaie." },
+  { test: /refused by (?:the )?buyers*:?s*(.*)/i, fr: (m) => `Refusée par le client${m[1] ? ` : ${m[1].trim()}` : "."}` },
+  { test: /rejected by (?:the )?(?:recipient|buyer) platforms*:?s*(.*)/i, fr: (m) => `Rejetée par la plateforme du client${m[1] ? ` : ${m[1].trim()}` : "."}` },
+];
+// Glossaire des règles de validation EN 16931 / Factur-X / profil français :
+// phrase d'action en français. Règles rencontrées ou prévisibles ; à compléter.
+export const PDP_RULE_GLOSSARY = {
+  "BR-01": "Le fichier doit indiquer la version de la norme (identifiant de spécification).",
+  "BR-02": "Numéro de facture manquant.",
+  "BR-03": "Date d'émission manquante.",
+  "BR-04": "Type de pièce manquant (facture, avoir, acompte).",
+  "BR-05": "Devise manquante.",
+  "BR-06": "Nom de l'émetteur manquant (Mon entreprise).",
+  "BR-07": "Nom du client manquant.",
+  "BR-08": "Adresse de l'émetteur manquante.",
+  "BR-09": "Pays de l'émetteur manquant (Mon entreprise).",
+  "BR-10": "Adresse du client manquante.",
+  "BR-11": "Pays du client manquant (fiche client).",
+  "BR-16": "La pièce doit contenir au moins une ligne.",
+  "BR-21": "Chaque ligne doit avoir un identifiant.",
+  "BR-22": "Chaque ligne doit avoir une quantité.",
+  "BR-23": "Chaque ligne doit avoir une unité.",
+  "BR-24": "Chaque ligne doit avoir un montant HT.",
+  "BR-25": "Chaque ligne doit avoir une désignation.",
+  "BR-26": "Chaque ligne doit avoir un prix unitaire.",
+  "BR-27": "Le prix unitaire d'une ligne ne peut pas être négatif.",
+  "BR-28": "Le prix brut d'une ligne ne peut pas être négatif.",
+  "BR-29": "La date de fin de période doit suivre la date de début.",
+  "BR-53": "La devise de la TVA doit être indiquée quand elle diffère de celle de la facture.",
+  "BR-CO-03": "Une date de TVA exigible est requise pour la catégorie de TVA utilisée.",
+  "BR-CO-04": "Chaque ligne doit porter une catégorie de TVA.",
+  "BR-CO-09": "Le numéro de TVA de l'émetteur ou du client doit commencer par le code pays sur deux lettres (ex. FR12345678901) : à corriger dans Mon entreprise ou sur la fiche client.",
+  "BR-CO-10": "Le total HT des lignes doit être égal à la somme des lignes (arrondi au centime).",
+  "BR-CO-11": "Le total des remises doit être égal à la somme des remises.",
+  "BR-CO-12": "Le total des majorations doit être égal à la somme des majorations.",
+  "BR-CO-13": "Le total HT doit être égal au total des lignes moins les remises plus les majorations.",
+  "BR-CO-14": "Le total de TVA doit être égal à la somme des TVA par taux.",
+  "BR-CO-15": "Le total TTC doit être égal au total HT plus la TVA.",
+  "BR-CO-16": "Le net à payer doit être égal au total TTC moins le montant déjà payé (acompte).",
+  "BR-CO-17": "Le montant de TVA d'un taux doit être égal à la base multipliée par le taux.",
+  "BR-CO-18": "Chaque taux de TVA utilisé doit avoir sa ligne de ventilation.",
+  "BR-CO-19": "Une période de facturation doit avoir une date de début ou de fin.",
+  "BR-CO-25": "Une facture avec un montant à payer doit indiquer une date d'échéance ou des conditions de paiement.",
+  "BR-CO-26": "L'émetteur doit avoir un identifiant : SIRET ou SIREN dans Mon entreprise.",
+  "BR-S-01": "Une ligne au taux normal exige la ventilation de TVA correspondante.",
+  "BR-S-02": "Une ligne au taux normal exige le numéro de TVA de l'émetteur (Mon entreprise).",
+  "BR-S-05": "Une ligne au taux normal doit avoir un taux supérieur à zéro.",
+  "BR-S-08": "La base de chaque taux de TVA doit être la somme des lignes à ce taux.",
+  "BR-S-09": "Le montant de TVA d'un taux doit être égal à la base multipliée par le taux.",
+  "BR-E-02": "Une ligne exonérée exige le numéro de TVA de l'émetteur.",
+  "BR-E-10": "Une ligne exonérée exige un motif d'exonération (bloc « Facturation électronique »).",
+  "BR-AE-02": "L'autoliquidation exige les numéros de TVA de l'émetteur et du client.",
+  "BR-AE-10": "L'autoliquidation exige le motif « Autoliquidation ».",
+  "BR-IC-02": "Une livraison intracommunautaire exige les numéros de TVA de l'émetteur et du client.",
+  "BR-G-02": "Une exportation exige le numéro de TVA de l'émetteur.",
+  "BR-Z-01": "Une ligne à 0 % exige la ventilation de TVA correspondante.",
+  "BR-DEC-12": "Les montants HT doivent avoir au plus deux décimales.",
+  "BR-DEC-13": "Le total HT doit avoir au plus deux décimales.",
+  "BR-DEC-14": "Le total TTC doit avoir au plus deux décimales.",
+  "BR-DEC-18": "Le net à payer doit avoir au plus deux décimales.",
+  "BR-CL-01": "Le type de pièce doit être un code reconnu (380 facture, 381 avoir, 386 acompte).",
+  "BR-CL-03": "La devise doit être un code ISO reconnu (EUR).",
+  "BR-CL-10": "L'identifiant de l'émetteur doit utiliser un schéma reconnu (SIREN 0002, SIRET 0009).",
+  "BR-CL-14": "Le pays de l'émetteur doit être un code ISO à deux lettres.",
+  "BR-CL-15": "Le pays du client doit être un code ISO à deux lettres.",
+  "BR-CL-23": "Le code d'unité d'une ligne doit être un code reconnu.",
+  "BR-CL-25": "L'adresse électronique de l'émetteur doit utiliser un schéma reconnu (0225 pour la France).",
+  "BR-CL-26": "L'adresse électronique du client doit utiliser un schéma reconnu (0225 pour la France).",
+  "BR-FR-01": "Le SIREN de l'émetteur est obligatoire pour une entreprise française (Mon entreprise).",
+  "BR-FR-02": "Le SIREN du client est obligatoire pour un client professionnel français (fiche client).",
+  "BR-FR-03": "L'adresse électronique de l'émetteur est obligatoire pour la France.",
+  "BR-FR-04": "L'adresse électronique du client est obligatoire pour la France.",
+  "BR-FR-10": "La catégorie d'opération (biens, services, mixte) est obligatoire : bloc « Facturation électronique ».",
+  "BR-FR-20": "Une facture d'acompte doit référencer le devis ou la commande.",
+  "BR-FR-21": "Un avoir doit référencer la facture d'origine (numéro et date).",
+};
+// Identifiant de règle dans un message de validation : « [BR-CO-09] … » ou « BR-CO-09 … ».
+export function pdpRuleOf(text) {
+  const m = /\[?\b(BR-[A-Z]{0,3}-?\d{1,3}|BR-[A-Z]+-\d{1,3})\b\]?/.exec(String(text ?? ""));
+  return m ? m[1] : null;
+}
+// Un échec de validation → phrase française du glossaire (identifiant de la
+// règle conservé entre crochets), ou repli explicite quand la règle est inconnue.
+export function explainValidationFailure(text) {
+  const raw = String(text ?? "").trim();
+  const rule = pdpRuleOf(raw);
+  if (!rule) return raw;
+  const known = PDP_RULE_GLOSSARY[rule];
+  if (known) return `[${rule}] ${known}`;
+  const rest = raw.replace(new RegExp("^\\[?" + rule + "\\]?\\s*:?\\s*"), "").trim();
+  return `[${rule}] Règle non respectée${rest ? ` : ${rest}` : ""}`;
+}
+// Message de Super PDP (API, événement, autorisation) → phrase française
+// connue, sinon règles de validation expliquées, sinon texte d'origine préfixé.
+export function translatePdpMessage(raw, status = null) {
+  const text = String(raw ?? "").trim();
+  for (const t of PDP_MESSAGE_TRANSLATIONS) { const m = t.test.exec(text); if (m) return typeof t.fr === "function" ? t.fr(m) : t.fr; }
+  if (status === 429) return "Trop de demandes en peu de temps chez Super PDP : réessaie dans un instant.";
+  if (status !== null && status >= 500) return `Panne temporaire chez Super PDP (réponse ${status}) : réessaie dans quelques minutes.`;
+  if (status === 401 || status === 403) return "Session Super PDP expirée ou révoquée : reconnecte le compte depuis Mon entreprise.";
+  if (!text) return status ? `Super PDP a répondu ${status} sans détail.` : "Super PDP n'a pas donné de détail.";
+  if (pdpRuleOf(text)) return text.split(/\s*;\s*/).map((part) => explainValidationFailure(part)).join(" ; ");
+  if (/^(?:Super PDP|Le |La |Les |L'|Un |Une |Bac à sable|Entreprise|Client|Émetteur|Session|Trop|Panne|Fichier)/.test(text)) return text; // déjà en français
+  return `Super PDP indique : ${text}`;
 }

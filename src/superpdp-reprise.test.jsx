@@ -13,8 +13,8 @@ import * as server from "../supabase/functions/_shared/superpdp-rules.ts";
 
 describe("règles partagées", () => {
   it("résumé d'un échec : titre par statut, motif (message d'envoi ou raison de l'événement), tentative ; rien pour un statut normal", () => {
-    expect(site.pdpFailureSummary({ status: "api:invalid", error: "Le fichier Factur-X est refusé : [BR-CO-09] …", attempt: 1 })).toEqual({ status: "api:invalid", title: "Fichier refusé par la validation", reason: "Le fichier Factur-X est refusé : [BR-CO-09] …", attempt: 1 });
-    expect(site.pdpFailureSummary({ invoiceId: 5, status: "fr:210", reason: "Refused by buyer: wrong amount", attempt: 2 })).toEqual({ status: "fr:210", title: "Refusée par le client", reason: "Refused by buyer: wrong amount", attempt: 2 });
+    expect(site.pdpFailureSummary({ status: "api:invalid", error: "Le fichier Factur-X est refusé : [BR-CO-09] …", attempt: 1 })).toEqual({ status: "api:invalid", title: "Fichier refusé par la validation", reason: expect.stringContaining("[BR-CO-09] Le numéro de TVA"), attempt: 1 }); // motif traduit (chantier 3)
+    expect(site.pdpFailureSummary({ invoiceId: 5, status: "fr:210", reason: "Refused by buyer: wrong amount", attempt: 2 })).toEqual({ status: "fr:210", title: "Refusée par le client", reason: "Refusée par le client : wrong amount", attempt: 2 });
     expect(site.pdpFailureSummary({ invoiceId: 5, status: "fr:213" })).toEqual({ status: "fr:213", title: "Rejetée", reason: null, attempt: 1 });
     expect(site.pdpFailureSummary({ invoiceId: 5, status: "api:rejected" }).title).toBe("Rejetée par la plateforme du client");
     expect(site.pdpFailureSummary({ invoiceId: 5, status: "fr:501" }).title).toBe("Irrecevable");
@@ -107,7 +107,7 @@ describe("éditeurs", () => {
     const { container, unmount } = await mount(<SituationEditor {...situationProps} doc={doc} pdpStatus={connected} onSendPdp={onSendPdp} />);
     const banner = container.querySelector('[data-testid="pdp-reject-banner"]');
     expect(banner.textContent).toContain("Refusée par le client");
-    expect(banner.textContent).toContain("Refused by buyer: wrong period");
+    expect(banner.textContent).toContain("Refusée par le client : wrong period");
     window.confirm = () => true;
     await click(container.querySelector('[data-testid="pdp-resend"]'));
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });

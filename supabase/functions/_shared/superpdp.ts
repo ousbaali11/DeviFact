@@ -18,7 +18,7 @@
 // vaut pas "true", une connexion à une entreprise dont Super PDP indique
 // env = production est refusée (bac à sable seulement).
 
-import { sandboxIdentifierOf } from "./superpdp-rules.ts";
+import { sandboxIdentifierOf, translatePdpMessage } from "./superpdp-rules.ts";
 
 const env = (k: string): string => {
   const d = (globalThis as { Deno?: { env?: { get(k: string): string | undefined } } }).Deno;
@@ -211,5 +211,9 @@ export async function superpdpFetch(dbAdmin: any, organizationId: string, path: 
 export async function apiErrorMessage(resp: Response): Promise<string> {
   const body = await resp.json().catch(() => null);
   const detail = body?.error?.message || body?.message || body?.error || body?.detail || "";
-  return `Super PDP a répondu ${resp.status}${detail ? ` : ${typeof detail === "string" ? detail : JSON.stringify(detail).slice(0, 300)}` : ""}`;
+  // Phrase française pour les cas connus (voir superpdp-rules.ts) ; le texte
+  // d'origine reste dans les logs et le journal.
+  const raw = typeof detail === "string" ? detail : detail ? JSON.stringify(detail).slice(0, 300) : "";
+  console.warn(`Super PDP ${resp.status} :`, raw);
+  return translatePdpMessage(raw, resp.status);
 }

@@ -24,7 +24,7 @@ import { SUPERPDP_ENABLED } from "../_shared/pdp-flags.ts";
 import { updateKvValue } from "../_shared/kv.ts";
 import { journal } from "../_shared/pdp-journal.ts";
 import { superpdpConfigured, superpdpAllowProduction, superpdpApiBase, readConnection, superpdpFetch, apiErrorMessage, sandboxSellerFromDirectory } from "../_shared/superpdp.ts";
-import { pdpEligibility, pdpCanResend, sandboxIdentifierOf, sirenOfSiret, pdpExternalId, PDP_STATUS_LABELS } from "../_shared/superpdp-rules.ts";
+import { pdpEligibility, pdpCanResend, sandboxIdentifierOf, sirenOfSiret, pdpExternalId, explainValidationFailure, PDP_STATUS_LABELS } from "../_shared/superpdp-rules.ts";
 
 const dbAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
@@ -155,7 +155,9 @@ serve(async (req) => {
       const failures: string[] = [];
       for (const sub of report.subreports || []) for (const f of sub.failures || []) failures.push(String(f?.message || f?.text || f?.description || JSON.stringify(f)).slice(0, 300));
       if (report.error) failures.push(String(report.error));
-      throw new SendError(`Le fichier Factur-X est refusé par la validation Super PDP : ${failures.slice(0, 5).join(" ; ") || "erreur non détaillée"}.`, 400, { failures });
+      // Phrases du glossaire (règle entre crochets) ; la liste brute part au journal.
+      const explained = failures.map((f) => explainValidationFailure(f));
+      throw new SendError(`Le fichier Factur-X est refusé par la validation Super PDP : ${explained.slice(0, 5).join(" ; ") || "erreur non détaillée"}${explained.length > 5 ? ` (et ${explained.length - 5} autre(s), voir le journal)` : ""}.`, 400, { failures });
     }
 
     // 5. Le client peut-il recevoir ? (annuaire ; bloquant hors bac à sable)
@@ -194,7 +196,7 @@ serve(async (req) => {
       const failed = Array.isArray(e?.extra?.failures);
       await dbAdmin.from("pdp_invoices").update({ status_code: failed ? "api:invalid" : "error", status_text: failed ? "Fichier refusé" : "Envoi en échec", last_error: message.slice(0, 1000) }).eq("organization_id", organizationId).eq("document_id", documentId).eq("status_code", "api:sending");
       await writeDocPdp(organizationId, documentId, { invoiceId: null, externalId: pdpExternalId(documentId, attempt), env: "", status: failed ? "api:invalid" : "error", statusText: failed ? "Fichier refusé" : "Envoi en échec", sentAt: null, updatedAt: Date.now(), error: message.slice(0, 500), attempt, reason: null });
-      await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: null, source: "erreur", statusCode: Array.isArray(e?.extra?.failures) ? "api:invalid" : "error", statusText: Array.isArray(e?.extra?.failures) ? "Fichier refusé" : "Envoi en échec", detail: `${attempt > 1 ? `Tentative n° ${attempt} : ` : ""}${message}`, actor: actorId });
+      await journal(dbAdmin, { organizationId, documentId, docNumber, pdpInvoiceId: null, source: "erreur", statusCode: Array.isArray(e?.extra?.failures) ? "api:invalid" : "error", statusText: Array.isArray(e?.extra?.failures) ? "Fichier refusé" : "Envoi en échec", detail: `${attempt > 1 ? `Tentative n° ${attempt} : ` : ""}${message}${Array.isArray(e?.extra?.failures) && e.extra.failures.length ? ` — règles brutes : ${(e.extra.failures as string[]).join(" | ")}` : ""}`, actor: actorId });
     }
     return json({ error: message, ...(e?.extra || {}) }, e?.status && e.status >= 400 ? e.status : 500);
   }

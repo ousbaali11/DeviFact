@@ -5,7 +5,7 @@ import jsPDF from "jspdf";
 import QRCode from "qrcode";
 import { computeSalesKpis, FISCAL_MONTHS, fiscalYearStart } from "./kpis.js";
 import { buildSalesEntries, buildStockEntries, valuedStockMovements, accountsOverview, filterEntries, entriesTotals, entriesToCsv, accountingDefaults, isSalesDocument, buildPurchaseEntries, factureRecueTotals, csvCell } from "./accounting.js";
-import { pdpEligibility, pdpLocksContent, pdpStatusLabel, pdpBlockedKeys, shouldSendPaidEvent, pdpFailureSummary } from "./pdp-rules.js";
+import { pdpEligibility, pdpLocksContent, pdpStatusLabel, pdpBlockedKeys, shouldSendPaidEvent, pdpFailureSummary, translatePdpMessage } from "./pdp-rules.js";
 import { priceWarnings, priceWarningMessage } from "./pricing.js";
 import { db } from "./client.js";
 import { clearStorageCache, setActiveOrganization, getActiveOrganization } from "./storage-adapter.js";
@@ -15129,7 +15129,7 @@ function SuperPdpCard({ account, profile = null, onRedirect = (url) => { window.
     (async () => {
       try {
         if (returned) {
-          if (returned.error) throw new Error(returned.error === "access_denied" ? "Connexion annulée chez Super PDP." : `Super PDP a refusé l'autorisation (${returned.description || returned.error}).`);
+          if (returned.error) throw new Error(returned.error === "access_denied" ? "Connexion annulée chez Super PDP." : `Super PDP a refusé l'autorisation. ${translatePdpMessage(returned.description || returned.error)}`);
           setBusy(true);
           const res = await callSuperPdp(organizationId, "callback", { code: returned.code, state: returned.state });
           if (cancelled) return;

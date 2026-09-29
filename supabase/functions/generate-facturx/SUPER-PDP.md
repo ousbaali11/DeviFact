@@ -298,3 +298,24 @@ quand l'annuaire le connaît) : identifiant légal = numéro de test, adresse
 - Verrou « envoi en cours » resté plus de 10 minutes (`STALE_LOCK_MS`) :
   libéré, nouvelle tentative acceptée, ligne de journal « Verrou libéré ».
 - Aucun script SQL. Tests : `src/superpdp-reprise.test.jsx`.
+
+## 16. Étape 4, chantier 3 (30/09/2026) : messages en français et glossaire
+
+- Règles partagées (`src/pdp-rules.js` = `_shared/superpdp-rules.ts`, parité
+  testée) : `translatePdpMessage(raw, status)` — messages connus de l'API,
+  des événements et de la page d'autorisation (environnement, vendeur ≠
+  session, entreprise non vérifiée, jeton révoqué, destinataire hors
+  annuaire, identifiant externe en double, fichier illisible, refus du
+  client avec son détail) → phrase française avec la marche à suivre ;
+  codes 429 / 401-403 / 5xx sans message → phrase selon le code ; message
+  inconnu conservé, préfixé « Super PDP indique : » ; message déjà en
+  français inchangé.
+- Glossaire `PDP_RULE_GLOSSARY` (≈ 70 règles EN 16931, BR-CO, BR-S/E/AE/IC/G/Z,
+  BR-DEC, BR-CL, profil français) ; `explainValidationFailure(texte)` garde
+  l'identifiant de la règle entre crochets, repli « Règle non respectée : … »
+  pour une règle inconnue. Appliqué au message d'échec de l'envoi
+  (`superpdp-send-invoice`), au motif du bandeau de rejet (`pdpFailureSummary`,
+  y compris pour les messages déjà enregistrés en anglais) et à l'erreur de la
+  page d'autorisation (carte Super PDP). `apiErrorMessage` traduit et garde le
+  texte brut dans les logs ; le journal reçoit la liste brute des règles.
+- Tests : `src/superpdp-messages.test.jsx`.
