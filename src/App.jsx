@@ -4015,14 +4015,25 @@ function DeviFactAppInner() {
       // précédent), si la personne en est toujours membre ; sinon loadProfile
       // retombe sur son propre espace et la mémorisation est effacée.
       const preferredOrgId = lsGet(lastOrganizationKey(user.id)) || null;
-      const profile = await loadProfile(user.id, user.email, preferredOrgId);
+      let profile = await loadProfile(user.id, user.email, preferredOrgId);
+      // Juste après l'inscription, la ligne de profil peut ne pas être encore
+      // visible à la première lecture : relue quelques instants plus tard
+      // (bug du 30/09/2026 : il fallait actualiser la page pour se connecter).
+      for (let attempt = 0; !profile && attempt < 4; attempt++) {
+        await new Promise((r) => setTimeout(r, 400));
+        profile = await loadProfile(user.id, user.email, preferredOrgId);
+      }
       if (preferredOrgId && profile?.organizationId !== preferredOrgId) lsRemove(lastOrganizationKey(user.id));
       setActiveOrganization(profile?.organizationId || null);
       await loadUserData();
-      currentUserIdRef.current = user.id;
+      // Sans compte affiché (profil illisible), la personne n'est pas
+      // « chargée » : une connexion suivante (formulaire ou événement) doit
+      // pouvoir recharger au lieu d'être ignorée comme « même personne ».
+      currentUserIdRef.current = profile ? user.id : null;
       setSessionError(null);
       setAccount(profile);
       syncOnlinePayments();
+      return profile;
     })();
     const entry = { userId: user.id, promise };
     sessionLoadRef.current = entry;
@@ -4037,7 +4048,10 @@ function DeviFactAppInner() {
     setLoading(true);
     try {
       if (currentUserIdRef.current) clearUserData();
-      await establishSession(user);
+      const profile = await establishSession(user);
+      // Compte créé mais espace pas encore lisible : le formulaire est
+      // libéré avec une explication, au lieu de rester « en attente ».
+      if (!profile) setSessionError("Ton compte est créé, mais ton espace n'est pas encore prêt. Réessaie de te connecter dans quelques secondes.");
     } catch (err) {
       console.error("Erreur lors du chargement du compte après connexion :", err);
       currentUserIdRef.current = null;
@@ -6933,7 +6947,9 @@ function AuthScreen({ initialMode = "signup", onBack, siteSettings, onLegal, onS
   // Connexion réussie mais compte impossible à charger : message affiché
   // ici et formulaire de nouveau utilisable.
   useEffect(() => {
-    if (sessionError) { setError(sessionError); setBusy(false); }
+    // Compte non chargé après le formulaire (espace pas encore prêt, réseau) :
+    // le formulaire est libéré en mode connexion avec l'explication.
+    if (sessionError) { setError(sessionError); setBusy(false); setMode("login"); }
   }, [sessionError]);
 
   async function handleForgotPassword() {
