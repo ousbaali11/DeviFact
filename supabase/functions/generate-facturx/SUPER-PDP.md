@@ -211,3 +211,16 @@ Base : `https://api.superpdp.tech/v1.beta/`, en-tête `Authorization: Bearer <ac
 - Tests : Deno `exemple/types-de-pieces.test.ts` (XML et PDF des trois
   pièces, refus), Vitest `src/superpdp-types.test.jsx`.
 - Aucun script SQL : `pdp_invoices` et le champ `pdp` servent tels quels.
+
+## 10. Correctif du 29/09/2026 : refus « Application environment do not match company environment »
+
+L'adresse d'autorisation transmettait toujours `superpdp_company_number`
+(SIREN de Mon entreprise) + `superpdp_company_number_scheme=fr_siren`.
+Super PDP résout ce numéro vers l'entreprise réelle, en production, alors
+que l'application Chantiflow (01a0d90e…) est en bac à sable : refus immédiat,
+sans page de choix. Schémas acceptés d'après la spécification 1.34.0.beta :
+`sandbox`, `fr_siren`, `be_numero_entreprise` ; il n'existe aucun paramètre
+d'environnement, c'est le numéro d'entreprise qui détermine l'entreprise
+reliée. Désormais le SIREN n'est transmis que si `SUPERPDP_ALLOW_PRODUCTION`
+vaut `true` ; en bac à sable, la page d'autorisation laisse choisir
+l'entreprise de test (Burger Queen).

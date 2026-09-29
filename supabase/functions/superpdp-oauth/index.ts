@@ -66,7 +66,13 @@ serve(async (req) => {
       const { data: profileRow } = await dbAdmin.from("kv_store").select("value").eq("organization_id", organizationId).eq("key", "company-profile").eq("shared", false).maybeSingle();
       const profile: any = profileRow?.value && typeof profileRow.value === "object" ? profileRow.value : {};
       const loginHint = String(profile.email || user.email || "").trim();
-      const siren = sirenOf(profile.siret);
+      // SIREN de Mon entreprise transmis seulement quand la production est
+      // autorisée : Super PDP résout ce numéro vers l'entreprise réelle (env
+      // production) et, l'application étant en bac à sable, refuse aussitôt
+      // (« Application environment do not match company environment »), sans
+      // même afficher la page de choix. Sans indication, la personne choisit
+      // son entreprise de test sur la page d'autorisation.
+      const siren = superpdpAllowProduction() ? sirenOf(profile.siret) : null;
       const { verifier, challenge } = await pkcePair();
       const state = randomToken(24);
       // Un seul état en attente par organisation et par personne.
