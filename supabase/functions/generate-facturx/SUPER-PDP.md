@@ -239,3 +239,15 @@ le client ; le client garde son adresse de test dans le champ SIRET de sa
 fiche. Le 29/09, la connexion enregistrée était Tricatel (choisie sur la page
 d'autorisation) : se déconnecter puis se reconnecter en choisissant Burger
 Queen.
+
+## 12. Correctif du 29/09/2026 : refus BR-CO-09 (numéro de TVA sans préfixe pays)
+
+Chaque document embarque une copie de l'émetteur prise à sa création, non
+modifiable depuis la facture ; le générateur préférait cette copie à Mon
+entreprise. Un numéro de TVA corrigé dans Mon entreprise (`FR…`) restait
+donc exporté sans préfixe depuis la copie périmée. Désormais, pour
+l'émetteur, SIRET et numéro de TVA viennent de Mon entreprise quand elle les
+renseigne (copie en secours, avertissement en cas d'écart) ; nom et adresse
+gardent la copie. Un numéro de TVA sans préfixe pays sur deux lettres est
+bloquant avant tout envoi, émetteur comme client, avec l'endroit où corriger.
+Aucun représentant fiscal (BT-63) n'est jamais produit.

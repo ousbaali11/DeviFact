@@ -159,15 +159,28 @@ const frDate = (iso: string) => { const [y, m, d] = iso.split("-"); return `${d}
 // ---------------------------------------------------------------------------
 
 // deno-lint-ignore no-explicit-any
-function buildParty(raw: any, fallback: any, label: string, missing: string[], warnings: string[], requireIds: boolean): FxParty {
+function buildParty(raw: any, fallback: any, label: string, missing: string[], warnings: string[], requireIds: boolean, fixWhere: string): FxParty {
   const pick = (k: string) => clean(raw?.[k] || fallback?.[k] || "");
-  const siret = digits(pick("siret"));
+  // Identifiants légaux (SIRET, numéro de TVA) : la fiche à jour (Mon
+  // entreprise, passée en « fallback ») d'abord, la copie du document en
+  // secours. Cette copie est prise à la création du document et n'est pas
+  // modifiable depuis la facture : le 29/09/2026, un numéro de TVA corrigé
+  // dans Mon entreprise restait exporté sans préfixe FR depuis la copie
+  // (refus BR-CO-09 chez Super PDP). Nom et adresse gardent la copie : ce
+  // sont des mentions du document.
+  const pickId = (k: string, what: string) => {
+    const fresh = clean(fallback?.[k] || ""), copy = clean(raw?.[k] || "");
+    const norm = (v: string) => v.replace(/\s+/g, "").toUpperCase();
+    if (fresh && copy && norm(fresh) !== norm(copy)) warnings.push(`${label} : ${what} de la fiche à jour retenu (${fresh}) à la place de celui copié sur le document (${copy})`);
+    return fresh || copy;
+  };
+  const siret = digits(pickId("siret", "SIRET"));
   const name = pick("name");
   const street = pick("address");
   const postalCode = pick("postalCode");
   const city = pick("city");
   const countryCode = countryCodeOf(pick("country")) || (postalCode ? "FR" : "");
-  const vatId = pick("tva").replace(/\s+/g, "").toUpperCase() || null;
+  const vatId = pickId("tva", "numéro de TVA").replace(/\s+/g, "").toUpperCase() || null;
 
   if (!name) missing.push(`${label} : nom`);
   if (!city) missing.push(`${label} : ville (champ "Ville", séparé de l'adresse)`);
@@ -181,7 +194,10 @@ function buildParty(raw: any, fallback: any, label: string, missing: string[], w
   }
   const validSiret = siret.length === 14 ? siret : null;
   const siren = siret.length === 14 ? siret.slice(0, 9) : siret.length === 9 ? siret : null;
-  if (vatId && !/^[A-Z]{2}[A-Z0-9]{2,13}$/.test(vatId)) warnings.push(`${label} : numéro de TVA au format inattendu (${vatId})`);
+  // Règle BR-CO-09 : préfixe pays sur deux lettres obligatoire (FR…). Bloquant
+  // ici, avec l'endroit où corriger, plutôt qu'un refus opaque de la plateforme.
+  if (vatId && !/^[A-Z]{2}/.test(vatId)) missing.push(`${label} : numéro de TVA sans préfixe pays sur deux lettres (${vatId}), ex. FR12345678901 — ${fixWhere}`);
+  else if (vatId && !/^[A-Z]{2}[A-Z0-9]{2,13}$/.test(vatId)) warnings.push(`${label} : numéro de TVA au format inattendu (${vatId})`);
 
   return { name, siren, siret: validSiret, vatId, street, postalCode, city, countryCode, email: pick("email") || null, phone: pick("phone") || null };
 }
@@ -251,9 +267,9 @@ export function buildInvoiceModel(doc: any, companyProfile: any, siteName = "Cha
       }).filter((l: any) => l.unitPrice !== 0)
     : [];
 
-  const seller = buildParty(doc.company, companyProfile, "Émetteur", missing, warnings, true);
+  const seller = buildParty(doc.company, companyProfile, "Émetteur", missing, warnings, true, "à corriger dans Mon entreprise");
   const buyerIsBusiness = (doc.client?.type || "entreprise") !== "particulier";
-  const buyer = buildParty(doc.client, null, "Client", missing, warnings, false);
+  const buyer = buildParty(doc.client, null, "Client", missing, warnings, false, "à corriger dans le champ TVA du client sur cette facture (et sur sa fiche)");
   if (options.sandboxIds) { applySandboxId(seller, options.sandboxIds.seller, missing, "Émetteur"); applySandboxId(buyer, options.sandboxIds.buyer, missing, "Client"); }
   // Le SIREN du client n'est exigé que pour un professionnel établi en
   // France (cadre B2B de la réforme). Un client étranger relève du cadre
